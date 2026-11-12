@@ -1,53 +1,53 @@
 """
 solver.py
 =========
-Stage 3b — Clarabel-backed σ-weighted QP solver.
+Stage 4 — the σ-weighted QP orchestrator (ADR 0042).
 
-Loads a persisted :class:`pysuto.constraints.ConstraintRun`, transforms it
-to Clarabel's standard form, runs a feasibility pre-check on the hard rows,
-then solves the QP per timestep using ``solver.update(b=...)`` between
-timesteps to retain the KKT factorisation (the practical warm-start
-mechanism for this problem since only ``c`` varies across time). Under
-``prior_mode='cold'`` with ``n_workers > 1`` the timesteps are instead solved
-concurrently (**parallel solve**, #70), each on its own Clarabel instance.
+:class:`Solver` loads a persisted :class:`pysuto.constraints.ConstraintRun`, conditions
+the prior, and per period builds one neutral standard-form QP
+(:class:`pysuto.qp.QPProblem`) over ``x = [a; ε]``. It owns the model: the σ weights in
+``P`` and ``q``, the warm or cold prior, and the slack ``ε`` that realises every soft row
+(``G a − ε = c``). An injected **QP backend** (:class:`pysuto.qp.QPBackend`, in practice
+:class:`pysuto.clarabel_backend.ClarabelBackend`) solves it and reports a neutral
+status; the orchestrator accepts ``solved`` and ``solved_inaccurate`` and raises on
+``failed``, quoting the backend's raw status. This module imports no numerical solver.
 
-Row layout (solver-neutral, :func:`row_layout`) and its Clarabel cones
-(:func:`clarabel_cones`; correcting README §665-667). ``row_meta`` carries only
-``sense`` and ``is_hard``; the cone vocabulary exists in this module alone:
+A feasibility probe precedes the solves: per period, a zero-objective QP over that
+period's hard rows and its edges' bounds ``l ≤ a ≤ u``, solved through the same
+backend. Cold runs probe and solve their periods on a thread pool of ``n_workers``
+(**parallel solve**, #70), each period in its own backend call; warm runs are a chain
+and run serially, with the backend asked to reuse its factorisation across periods.
 
-* ``ZeroConeT(n_slack)`` — soft equality residuals ``Gx - ε = c`` (slack
-  ε is a free decision variable inside ``x``; the residual itself is
-  exact equality).
-* ``ZeroConeT(n_eq)`` — hard equalities (mass balance).
-* ``NonnegativeConeT(n_le)`` — hard ratio bounds and flow lower bounds
-  (ADR 0039; upper bounds and the zero pin reach only the feasibility pre-check).
+Row layout (solver-neutral, :func:`row_layout`): ``row_meta`` carries only ``sense`` and
+``is_hard``, and a period's QP rows are, in this order,
+
+* soft equalities ``G a − ε = c`` — one slack ``ε`` each, a free decision variable;
+* hard equalities (mass balance);
+* hard ``≤`` rows (ratio bounds and flow lower bounds, ADR 0039; the upper bounds and
+  the zero pin reach only the feasibility probe).
 
 Public API
 ----------
 - :class:`OptimResult` — per-timestep solution + diagnostics
-- :func:`row_layout`, :func:`clarabel_cones` — ``(sense, is_hard)`` → row
-  permutation / slack count / cone list
-- :class:`ClarabelSolver` — load, feasibility-check, solve_all, persist
+- :func:`row_layout` — ``(sense, is_hard)`` → row permutation / slack count / group sizes
+- :class:`Solver` — load, solve_all, persist
 """
 from __future__ import annotations
 
-import os
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from dataclasses import dataclass, asdict
-from typing import Optional
+from dataclasses import dataclass
+from typing import Callable, Optional
 
 import numpy as np
-import pandas as pd
 import scipy.sparse as sp
-
-import clarabel
 
 from ._conditioning import condition_prior, condition_sigma_c
 from .acc import EDGE_UNIVERSE_ROLE_KEYS, AccountingStructure, check_built_acc
 from .constraints import ConstraintRun
 from .constraints.naming import SENSE_EQ, SENSE_LE
 from .input_registry import InputRegistry
+from .qp import FAILED, QPBackend, QPProblem
 from .registry import ConstraintRunRegistry, OptimRunRegistry
 from .logging import get_logger
 
@@ -57,9 +57,8 @@ logger = get_logger("pysuto.solver")
 # ============================================================================
 # Row realisation: (sense, is_hard) → how the QP carries the row
 # ============================================================================
-# Solver-neutral half: which of the three row groups a row belongs to. Groups
-# are laid out in this order in the standard-form ``A``; a soft equality
-# carries one slack column (``Gx - ε = c``).
+# Which of the three row groups a row belongs to. Groups are laid out in this order
+# in the QP; a soft equality carries one slack column (``Gx - ε = c``).
 GROUP_SOFT_EQ = 0
 GROUP_HARD_EQ = 1
 GROUP_LE      = 2
@@ -76,10 +75,10 @@ _ROW_GROUP = {
 
 @dataclass(frozen=True)
 class RowLayout:
-    """Solver-neutral layout of one set of rows: ``perm`` maps the standard-form
-    row order ``[soft eq; hard eq; le]`` to original row positions; ``n_slack``
-    (= soft equalities), ``n_eq`` (hard equalities) and ``n_le`` (``≤`` rows)
-    are the group sizes."""
+    """Solver-neutral layout of one set of rows: ``perm`` maps the QP row order
+    ``[soft eq; hard eq; le]`` to original row positions; ``n_slack`` (= soft
+    equalities), ``n_eq`` (hard equalities) and ``n_le`` (``≤`` rows) are the group
+    sizes."""
     perm:    np.ndarray
     n_slack: int
     n_eq:    int
@@ -119,35 +118,9 @@ def row_layout(sense, is_hard) -> RowLayout:
     )
 
 
-def clarabel_cones(layout: RowLayout) -> list:
-    """The Clarabel cone list for ``layout`` — the only place the cone
-    vocabulary is bound: equalities (soft rows after slack insertion, hard
-    rows) → ``ZeroConeT``, ``≤`` rows → ``NonnegativeConeT``."""
-    cones: list = []
-    if layout.n_slack > 0: cones.append(clarabel.ZeroConeT(layout.n_slack))
-    if layout.n_eq    > 0: cones.append(clarabel.ZeroConeT(layout.n_eq))
-    if layout.n_le    > 0: cones.append(clarabel.NonnegativeConeT(layout.n_le))
-    return cones
-
-
 # =============================================================================
 # OptimResult
 # =============================================================================
-
-# Structured dtype for per-iteration convergence trace.
-# Columns mirror Clarabel's verbose console output.
-ITER_DTYPE = np.dtype([
-    ("iter",        np.int32),
-    ("cost_primal", np.float64),
-    ("cost_dual",   np.float64),
-    ("gap_abs",     np.float64),
-    ("res_primal",  np.float64),
-    ("res_dual",    np.float64),
-    ("ktratio",     np.float64),
-    ("mu",          np.float64),
-    ("step_length", np.float64),
-])
-
 
 @dataclass
 class OptimResult:
@@ -161,38 +134,38 @@ class OptimResult:
                                    # either qp_variables (#33)
     iterations:    int
     solve_time_s:  float
-    solver_status: str             # str(clarabel SolverStatus enum)
-    convergence:   dict            # final get_info() snapshot (JSON-safe scalars)
-    iter_history:  Optional[np.ndarray] = None  # structured array of ITER_DTYPE
-    # Block path only: F_opt/residuals/c_star are the year-local slices over
-    # these global indices. None for the legacy full-vector path.
+    solver_status: str             # neutral: solved | solved_inaccurate (ADR 0042)
+    convergence:   dict            # the backend's final info snapshot (JSON-safe scalars)
+    # The backend's per-iteration history, a structured array whose dtype the backend
+    # owns (ClarabelBackend: pysuto.clarabel_backend.ITER_DTYPE). None when it keeps none.
+    iter_history:  Optional[np.ndarray] = None
+    # F_opt/residuals/c_star are the year-local slices over these global indices. None
+    # on runs persisted before the year-local fix (full-vector results).
     cols_t:        Optional[np.ndarray] = None  # global edge cols for this t
     rows_t:        Optional[np.ndarray] = None  # global constraint rows for this t
-    # The per-period prior mean actually used in the objective q-vector.
-    # Block path: year-local (cols_t order); warm = a_post(t-1), cold = f_agg(t).
-    # Legacy path: full-length (E,). None for runs predating the warm-start fix.
+    # The per-period prior mean actually used in the objective q-vector (cols_t order):
+    # warm = a_post(t-1), cold = f_agg(t). None for runs predating the warm-start fix.
     a_prior:       Optional[np.ndarray] = None
+    # Which backend solved it and its own status string (ADR 0042). "" when not
+    # recorded; the registry fills "clarabel" and the raw status on runs written
+    # before the split.
+    backend:        str = ""
+    backend_status: str = ""
 
 
 # =============================================================================
-# ClarabelSolver
+# Solver
 # =============================================================================
 
-_OK_STATUSES = {"Solved", "AlmostSolved"}
-
-# Which timesteps the feasibility pre-check probes (solve_all, #104).
-FEASIBILITY_CHECKS = ("first", "all", "none")
-
-# Linear-solver threads per period QP: one. Measured on
-# const_20261012_113828_12c562c7 against opt_20261012_122124_40b1b370 (#70): the
-# 1995 period solved in 48.0 s on all cores and 34.9 s on one, bit-identical
-# objective; the cores go to the parallel solve instead.
-_PERIOD_MAX_THREADS = 1
+# Which periods the feasibility probe covers before the solves (solve_all, #104): every
+# requested period ("all") or none ("none", a sweep point). The first-period-only
+# probe is gone: a per-period probe is ≈ 1/30 of the full-G one (ADR 0042).
+FEASIBILITY_CHECKS = ("all", "none")
 
 
-class ClarabelSolver:
+class Solver:
     """
-    σ-weighted QP solver wrapping Clarabel for Stage 3b.
+    σ-weighted QP orchestrator for Stage 4; the numerics are the injected ``backend``'s.
 
     Modelling decisions (locked in design grilling):
 
@@ -216,13 +189,14 @@ class ClarabelSolver:
       into the same (disjoint) year-t columns it had just read, so the
       carry-forward was a silent no-op and every year fell back to the
       time-replicated f_agg. The template-aligned chain below fixes that.
-    - Cross-timestep speedup (``reuse_factorization``) uses
-      ``solver.update(q=..., b=...)`` to retain the KKT factorisation — a
-      *numerical* warm-start, distinct from the *prior* warm-start above.
-      ``P`` and ``A`` are time-invariant.
+    - Cross-timestep speedup is the backend's: a serial run asks it to ``reuse`` its
+      factorisation, which only the backend can honour (``P`` and ``A`` are
+      time-invariant when no builder emits year-specific coefficients) — a
+      *numerical* warm-start, distinct from the *prior* warm-start above. A parallel
+      solve gives every period its own call and no reuse.
     - Hard rows (equalities and ``≤`` rows) are enforced exactly. The
-      feasibility pre-check rules out impossible problems before the
-      main solve and halts on any infeasibility.
+      feasibility probe rules out impossible problems before the main solve and
+      halts on any infeasibility.
 
     Σ_a conditioning
     ----------------
@@ -232,24 +206,24 @@ class ClarabelSolver:
         floor   = max(σ_a_floor_abs,  σ_a_floor_rel · |a_0|)
         ceiling = σ_a_ceiling_factor · max(finite σ_a)
 
-    Defaults give ~12 orders of magnitude condition number — fine for
-    Clarabel with default static + dynamic regularisation.
+    Defaults give ~12 orders of magnitude condition number.
 
     QP variables (#33)
     ------------------
     ``qp_variables='flows'`` (the default) solves for ``a``: ``q = −2·Σ_a^{-1}·a_prior``
-    and Clarabel's cost is J − Σ(a_prior/σ_a)². ``'defects'`` solves the same QP for
+    and the backend's cost is J − Σ(a_prior/σ_a)². ``'defects'`` solves the same QP for
     the defect ``d = a − a_prior`` (same P and A, ``q = 0``, ``b = c − G·a_prior``), so
     its cost is J itself. ``F_opt`` comes back as ``a_prior + d`` and ``objective`` in
     the flows convention (J − Σ(a_prior/σ_a)²) either way; ``convergence`` and
-    ``iter_history`` keep Clarabel's own cost. gap_rel's denominator is that cost, so
+    ``iter_history`` keep the backend's own cost. gap_rel's denominator is that cost, so
     the same ``tol_gap_rel`` is ~10× tighter in absolute terms under ``'defects'``
-    (J ≈ 1e5 against |J − Σ(a_prior/σ_a)²| ≈ 1e6 on copper). Block path only (serial
-    and parallel); the feasibility probe has no σ-weighted cost.
+    (J ≈ 1e5 against |J − Σ(a_prior/σ_a)²| ≈ 1e6 on copper). The feasibility probe has
+    no σ-weighted cost.
     """
 
     def __init__(
         self,
+        backend:   QPBackend,
         const_dir: str = "data/proc/const",
         opt_dir:   str = "data/proc/opt",
         acc_dir:   str = "data/proc/acc",
@@ -258,18 +232,9 @@ class ClarabelSolver:
         sigma_a_floor_rel:      float = 1e-5,
         sigma_a_ceiling_factor: float = 1e5,
         sigma_c_floor:          float = 1e-9,
-        tol_feas:               float = 1e-8,
-        tol_gap_abs:            float = 1e-8,
-        tol_gap_rel:            float = 1e-8,
-        reduced_tol_feas:       float | None = None,
-        reduced_tol_gap_abs:    float | None = None,
-        reduced_tol_gap_rel:    float | None = None,
-        max_iter:               int   = 200,
         verbose_first_solve:    bool  = True,
-        capture_iter_history:   bool  = True,
         prior_mode:             str   = "warm",
         n_workers:              int   = 1,
-        direct_solve_method:    str   = "faer",
         qp_variables:           str   = "flows",
     ) -> None:
         if prior_mode not in ("warm", "cold"):
@@ -287,30 +252,22 @@ class ClarabelSolver:
                 f"n_workers={n_workers} needs prior_mode='cold': a warm run is a "
                 f"chain (a_prior(t) = a*(t-1)) and is solved in period order"
             )
+        self.backend                = backend
         self.const_dir              = const_dir
         self.opt_dir                = opt_dir
         self.acc_dir                = acc_dir
         self.input_dir              = input_dir
         self.prior_mode             = prior_mode
         self.n_workers              = n_workers
-        self.direct_solve_method    = direct_solve_method
         self.qp_variables           = qp_variables
         self.sigma_a_floor_abs      = sigma_a_floor_abs
         self.sigma_a_floor_rel      = sigma_a_floor_rel
         self.sigma_a_ceiling_factor = sigma_a_ceiling_factor
         self.sigma_c_floor          = sigma_c_floor
-        self.tol_feas               = tol_feas
-        self.tol_gap_abs            = tol_gap_abs
-        self.tol_gap_rel            = tol_gap_rel
-        self.reduced_tol_feas       = reduced_tol_feas
-        self.reduced_tol_gap_abs    = reduced_tol_gap_abs
-        self.reduced_tol_gap_rel    = reduced_tol_gap_rel
-        self.max_iter               = max_iter
         self.verbose_first_solve    = verbose_first_solve
-        self.capture_iter_history   = capture_iter_history
-        # How the last solve_all ran (worker threads, linear solver, wall-clock) and
-        # the inputs it read (the acc of a warm run); persist() writes them into the
-        # sidecar.
+        # How the last solve_all ran (worker threads, backend and its settings,
+        # wall-clock) and the inputs it read (the acc of a warm run); persist() writes
+        # them into the sidecar.
         self._solve_config:  dict = {}
         self._solve_summary: dict = {}
         self._solve_inputs:  dict = {}
@@ -331,39 +288,6 @@ class ClarabelSolver:
         )
         return cr
 
-    # ------------------------------------------------------------------
-    # Internal: build settings + transform
-    # ------------------------------------------------------------------
-
-    def _settings(self, verbose: bool) -> clarabel.DefaultSettings:
-        s = clarabel.DefaultSettings()
-        s.verbose         = verbose
-        s.max_iter        = self.max_iter
-        s.tol_feas        = self.tol_feas
-        s.tol_gap_abs     = self.tol_gap_abs
-        s.tol_gap_rel     = self.tol_gap_rel
-        # Reduced-accuracy acceptance: when the iterate hits the numerical
-        # floor (InsufficientProgress), accept it as AlmostSolved if it meets
-        # these secondary tolerances. None ⇒ Clarabel defaults.
-        if self.reduced_tol_feas is not None:
-            s.reduced_tol_feas = self.reduced_tol_feas
-        if self.reduced_tol_gap_abs is not None:
-            s.reduced_tol_gap_abs = self.reduced_tol_gap_abs
-        if self.reduced_tol_gap_rel is not None:
-            s.reduced_tol_gap_rel = self.reduced_tol_gap_rel
-        # Default static + dynamic regularisation kept on (Clarabel defaults).
-        return s
-
-    def _period_settings(self, verbose: bool) -> clarabel.DefaultSettings:
-        """Settings for one period's QP: the linear solver pinned to
-        ``_PERIOD_MAX_THREADS``. The full-G feasibility probe keeps the default,
-        where the threads help (1995 probe of const_20261012_113828_12c562c7:
-        432 s on all cores vs 471 s on one, #70)."""
-        s = self._settings(verbose)
-        s.direct_solve_method = self.direct_solve_method
-        s.max_threads         = _PERIOD_MAX_THREADS
-        return s
-
     def _condition_prior(
         self,
         a_0:     np.ndarray,
@@ -382,111 +306,94 @@ class ClarabelSolver:
             ceiling_factor = self.sigma_a_ceiling_factor,
         )
 
-    @staticmethod
-    def _info_to_dict(info) -> dict:
-        """Flatten Clarabel's ``DefaultInfo`` into JSON-safe scalars."""
-        ls = getattr(info, "linsolver", None)
-        return {
-            "cost_primal":     float(info.cost_primal),
-            "cost_dual":       float(info.cost_dual),
-            "gap_abs":         float(info.gap_abs),
-            "gap_rel":         float(info.gap_rel),
-            "res_primal":      float(info.res_primal),
-            "res_dual":        float(info.res_dual),
-            "res_primal_inf":  float(info.res_primal_inf),
-            "res_dual_inf":    float(info.res_dual_inf),
-            "ktratio":         float(info.ktratio),
-            "mu":              float(info.mu),
-            "sigma":            float(info.sigma),
-            "step_length":     float(info.step_length),
-            "iterations":      int(info.iterations),
-            "solve_time":      float(info.solve_time),
-            "status":          str(info.status),
-            "linsolver_name":  str(getattr(ls, "name",   "")) if ls is not None else "",
-            "linsolver_nnzA":  int(getattr(ls, "nnzA",   0))  if ls is not None else 0,
-            "linsolver_nnzL":  int(getattr(ls, "nnzL",   0))  if ls is not None else 0,
-        }
+    # ------------------------------------------------------------------
+    # Per-period parallel map
+    # ------------------------------------------------------------------
+
+    def _map_periods(self, labels: list, fn: Callable, what: str) -> dict:
+        """``{t: fn(t)}`` over ``labels``. One worker: a plain loop, the first
+        exception propagates. Several (cold only): a thread pool of ``min(n_workers,
+        periods)`` threads — the backends release the GIL in ``solve()`` (8 periods of
+        const_20261012_113828_12c562c7 took 63.3 s on 8 threads vs 549 s serially,
+        bit-identical, #70). The first failed period cancels the periods not yet
+        started; the RuntimeError names every period that failed, and nothing is
+        returned."""
+        if self.n_workers == 1:
+            return {t: fn(t) for t in labels}
+        n_threads = min(self.n_workers, len(labels))
+        logger.info("%s: %d periods on %d threads", what, len(labels), n_threads)
+        with ThreadPoolExecutor(max_workers=n_threads) as pool:
+            fut_by_t = {t: pool.submit(fn, t) for t in labels}
+            for fut in as_completed(fut_by_t.values()):
+                if fut.exception() is not None:
+                    pool.shutdown(wait=False, cancel_futures=True)
+                    break
+        # Leaving the with-block waited for the periods already running.
+        failed = {t: f.exception() for t, f in fut_by_t.items()
+                  if not f.cancelled() and f.exception() is not None}
+        if failed:
+            raise RuntimeError(
+                f"{what} failed in {len(failed)} period(s) "
+                f"{sorted(failed)}; periods not yet started were cancelled — "
+                + " | ".join(str(e) for e in failed.values())
+            ) from next(iter(failed.values()))
+        return {t: fut_by_t[t].result() for t in labels}
 
     # ------------------------------------------------------------------
-    # Feasibility pre-check
+    # Feasibility probe
     # ------------------------------------------------------------------
 
     def feasibility_check(self, run: ConstraintRun, t_label: str) -> None:
         """
-        Halt if the hard rows alone (equalities + ``≤`` rows) plus flow bounds
-        are infeasible at this timestep. Solves a feasibility-only QP
-        ``min ½ ‖a‖²`` (P=εI, q=0) on the hard subsystem.
+        Halt if the hard rows of period ``t_label`` (equalities + ``≤`` rows) plus its
+        edges' flow bounds are infeasible. Solves a feasibility-only QP
+        ``min ½ ‖a‖²`` (P=εI, q=0) on the period's hard subsystem through the backend.
 
-        ``ε`` (a tiny diagonal) keeps Clarabel happy with a strictly PSD P;
-        the choice does not affect feasibility detection.
+        ``ε`` (a tiny diagonal) keeps the backend happy with a strictly PSD P;
+        the choice does not affect feasibility detection. Flow bounds enter as
+        ``a ≤ u`` and ``−a ≤ −l`` on every edge of the period; the probe-only bounds
+        (the zero pin, the prior box) are part of ``u`` and ``l``.
         """
-        G        = run.G
-        row_meta = run.row_meta
-        u, l     = run.u, run.l
-        c_t      = np.asarray(run.timestep_data[t_label]["c"], dtype=float)
+        cols_t  = run.edge_cols_by_t[t_label]
+        rows_t  = np.where(run.row_meta["time"].astype(str).to_numpy() == t_label)[0]
+        rm_t    = run.row_meta.iloc[rows_t]
+        G_t     = run.G_blocks[t_label].tocsr()
+        c_t     = np.asarray(run.timestep_data[t_label]["c"], dtype=float)[rows_t]
+        layout  = row_layout(rm_t["sense"].to_numpy(), rm_t["is_hard"].to_numpy())
+        n_a     = G_t.shape[1]
+        idx_eq  = layout.perm[layout.n_slack:layout.n_slack + layout.n_eq]
+        idx_le  = layout.perm[layout.n_slack + layout.n_eq:]
 
-        layout = row_layout(row_meta["sense"].to_numpy(), row_meta["is_hard"].to_numpy())
-        n_eq, n_le = layout.n_eq, layout.n_le
-        idx_zero   = layout.perm[layout.n_slack:layout.n_slack + n_eq]
-        idx_nonneg = layout.perm[layout.n_slack + n_eq:]
-        n_a = G.shape[1]
+        I = sp.eye(n_a, format="csr")
+        problem = QPProblem(
+            P     = sp.diags(np.full(n_a, 1e-10), format="csc"),
+            q     = np.zeros(n_a),
+            A_eq  = G_t[idx_eq],
+            b_eq  = c_t[idx_eq],
+            A_le  = sp.vstack([G_t[idx_le], I, -I], format="csr"),
+            b_le  = np.concatenate([c_t[idx_le], run.u[cols_t], -run.l[cols_t]]),
+            n_a   = n_a,
+            n_eps = 0,
+            feasibility_only = True,
+        )
+        res = self.backend.solve(problem)
+        if res.status == FAILED:
+            self._raise_infeasible(t_label, rm_t, G_t, c_t, res)
 
-        # Hard rows from G
-        G_zero   = G.tocsr()[idx_zero]   if n_eq else sp.csr_matrix((0, n_a))
-        G_nonneg = G.tocsr()[idx_nonneg] if n_le else sp.csr_matrix((0, n_a))
-
-        # Add flow bounds as inequalities  a ≤ u  and  -a ≤ -l
-        #   Only edges with non-default bounds (finite, distinct from sentinel)
-        #   really matter, but adding all edges is simpler and Clarabel handles
-        #   trivial bounds fine. To keep the pre-check small, restrict to
-        #   edges where l > -∞ or u < +∞ effectively differs from extremes:
-        n_edges = n_a
-        I = sp.eye(n_edges, format="csr")
-        # Append all flow-bound rows
-        Aub = sp.vstack([G_nonneg, I, -I], format="csr")
-        bub = np.concatenate([c_t[idx_nonneg], u, -l])
-
-        A = sp.vstack([G_zero, Aub], format="csc")
-        b = np.concatenate([c_t[idx_zero], bub])
-
-        cones_fc: list = []
-        if n_eq              > 0: cones_fc.append(clarabel.ZeroConeT(n_eq))
-        if Aub.shape[0]      > 0: cones_fc.append(clarabel.NonnegativeConeT(Aub.shape[0]))
-
-        # Tiny PSD P + zero q for a pure feasibility solve
-        P_fc = sp.diags(np.full(n_a, 1e-10), format="csc")
-        q_fc = np.zeros(n_a)
-
-        settings = self._settings(verbose=False)
-        # Slightly looser tolerance on the feasibility probe — we just want a
-        # yes/no answer, not a polished optimum.
-        settings.tol_feas    = 1e-7
-        settings.tol_gap_abs = 1e-7
-        settings.tol_gap_rel = 1e-7
-
-        solver = clarabel.DefaultSolver(P_fc, q_fc, A, b, cones_fc, settings)
-        sol    = solver.solve()
-        status = str(sol.status)
-
-        if status not in _OK_STATUSES:
-            self._raise_infeasible(run, t_label, status, sol)
-
-    def _raise_infeasible(self, run, t_label, status, sol):
-        # Best-effort diagnostic: which hard rows have the largest residual
-        # at the (infeasible) point Clarabel returned. Even when the problem
-        # is primal-infeasible Clarabel returns an x; the residual on hard
-        # rows tells the user where to widen bounds.
+    def _raise_infeasible(self, t_label, rm_t, G_t, c_t, res):
+        # Best-effort diagnostic: which hard rows have the largest residual at the
+        # (infeasible) point the backend returned; the residual on hard rows tells the
+        # user where to widen bounds.
         try:
-            x = np.asarray(sol.x)
-            if x.size >= run.G.shape[1]:
-                a = x[: run.G.shape[1]]
-                resid = run.G @ a - np.asarray(run.timestep_data[t_label]["c"])
-                row_meta = run.row_meta
-                hard = row_meta["is_hard"].to_numpy()
+            x = np.asarray(res.x)
+            n_a = G_t.shape[1]
+            if x.size >= n_a:
+                resid = G_t @ x[:n_a] - c_t
+                hard = rm_t["is_hard"].to_numpy().astype(bool)
                 hard_resid = np.where(hard, np.abs(resid), 0.0)
                 worst = np.argsort(-hard_resid)[:5]
                 worst_msg = "; ".join(
-                    f"row={int(i)} cid={row_meta.iloc[int(i)]['constraint_id']!r} "
+                    f"row={int(i)} cid={rm_t.iloc[int(i)]['constraint_id']!r} "
                     f"|residual|={hard_resid[i]:.3e}"
                     for i in worst
                 )
@@ -497,7 +404,7 @@ class ClarabelSolver:
 
         raise RuntimeError(
             f"Feasibility check FAILED at timestep {t_label!r}: "
-            f"Clarabel status={status}. "
+            f"{self.backend.name} status={res.raw_status}. "
             f"Top hard-row offenders (largest |G·a - c|): {worst_msg}. "
             f"Widen the offending ratio bounds in the params CSV "
             f"(e.g. toward [0, 1]) and rebuild the ConstraintRun, "
@@ -512,30 +419,26 @@ class ClarabelSolver:
         self,
         run_id:    str,
         timesteps: Optional[list] = None,
-        feasibility_check: str = "first",
-        feasibility_check_first_only: Optional[bool] = None,
+        feasibility_check: str = "all",
     ) -> dict[str, OptimResult]:
         """
-        Solve every requested timestep. Performs the feasibility pre-check
-        before solving; halts if any checked timestep is infeasible.
+        Solve every requested timestep. Performs the feasibility probe first;
+        halts if any probed timestep is infeasible.
 
         Parameters
         ----------
         feasibility_check:
-            Which timesteps the pre-check probes before any solve: ``"first"``
-            (default, fast), ``"all"`` (localises a mid-series infeasibility at
-            ≈ 7 min a year on copper) or ``"none"`` (a sweep point, #104). Without
-            the probe an infeasible period still raises in its own solve — any
-            status outside Solved/AlmostSolved does — only not localised by it.
-        feasibility_check_first_only:
-            The former bool, kept for callers that pass it: True ≡ ``"first"``,
-            False ≡ ``"all"``. When given it overrides ``feasibility_check``.
+            Which timesteps the probe covers before any solve: ``"all"`` (default; one
+            zero-objective QP per requested period, on the same thread pool as the
+            solves) or ``"none"`` (a sweep point, #104). Without the probe an
+            infeasible period still raises in its own solve — any ``failed`` status
+            does — only not localised by it.
         """
-        if feasibility_check_first_only is not None:
-            feasibility_check = "first" if feasibility_check_first_only else "all"
         if feasibility_check not in FEASIBILITY_CHECKS:
-            raise ValueError(f"feasibility_check={feasibility_check!r}; expected one of "
-                             f"{FEASIBILITY_CHECKS}")
+            raise ValueError(
+                f"feasibility_check={feasibility_check!r}; expected one of "
+                f"{FEASIBILITY_CHECKS} (the first-period-only probe is gone: the probe "
+                f"is per period, ADR 0042)")
         run = self.load_run(run_id)
 
         if timesteps is None:
@@ -546,8 +449,7 @@ class ClarabelSolver:
             if missing:
                 raise KeyError(f"timesteps not in run: {sorted(missing)}")
 
-        check_labels = {"first": ts_labels[:1], "all": ts_labels,
-                        "none": []}[feasibility_check]
+        check_labels = ts_labels if feasibility_check == "all" else []
 
         # A failed call must not leave the previous call's facts for persist().
         self._solve_config, self._solve_summary, self._solve_inputs = {}, {}, {}
@@ -559,47 +461,20 @@ class ClarabelSolver:
             )
         t0 = time.perf_counter()
         results = self._solve_all_via_blocks(run, ts_labels, check_labels)
+        settings = dict(self.backend.settings)
         self._solve_config = {
-            "n_workers":           min(self.n_workers, len(ts_labels)),
-            "max_threads":         _PERIOD_MAX_THREADS,
-            "direct_solve_method": self.direct_solve_method,
-            "qp_variables":        self.qp_variables,
+            "n_workers":        min(self.n_workers, len(ts_labels)),
+            "qp_variables":     self.qp_variables,
+            "backend":          self.backend.name,
+            "backend_settings": settings,
         }
+        # Persisted before the backend split under these names (#70); kept.
+        for k in ("max_threads", "direct_solve_method"):
+            if k in settings:
+                self._solve_config[k] = settings[k]
         # Wall-clock after loading: feasibility probe + period solves.
         self._solve_summary = {"solve_wall_s": time.perf_counter() - t0}
         return results
-
-    @staticmethod
-    def _per_t_problem_identical(run: ConstraintRun, ts_labels: list[str]) -> bool:
-        """True when A_t = [G_t | S_t] is identical across every t in ``ts_labels``.
-
-        Requires: same G_blocks (shape, indptr, indices, data) AND same
-        sense / is_hard ordering within each per-t row block (so the column-permuted
-        slack block S_t and cones list match too). Holds in the typical case
-        where all builders are time-invariant (e.g. ratios with a_time="*");
-        breaks when a builder emits year-specific coefficients (e.g. ore_grade
-        with explicit per-year value_nominal)."""
-        if len(ts_labels) <= 1:
-            return False
-        row_time = run.row_meta["time"].astype(str).to_numpy()
-        first_t  = ts_labels[0]
-        first_G  = run.G_blocks[first_t].tocsr()
-        first_ct = run.row_meta.iloc[
-            np.where(row_time == first_t)[0]
-        ][["sense", "is_hard"]].to_numpy()
-        for t in ts_labels[1:]:
-            G_t = run.G_blocks[t].tocsr()
-            if G_t.shape != first_G.shape or G_t.nnz != first_G.nnz:
-                return False
-            if not np.array_equal(G_t.indptr,  first_G.indptr):  return False
-            if not np.array_equal(G_t.indices, first_G.indices): return False
-            if not np.array_equal(G_t.data,    first_G.data):    return False
-            ct_t = run.row_meta.iloc[
-                np.where(row_time == t)[0]
-            ][["sense", "is_hard"]].to_numpy()
-            if not np.array_equal(ct_t, first_ct):
-                return False
-        return True
 
     def _solve_all_via_blocks(
         self,
@@ -607,23 +482,33 @@ class ClarabelSolver:
         ts_labels: list[str],
         check_labels: list[str],
     ) -> dict[str, OptimResult]:
-        """Per-t solve path using run.G_blocks. Each per-t QP is ~30× smaller
-        than the legacy full-G QP. When every per-t A_t matches (typical case
-        with no time-varying ratios), one Clarabel instance is built and
-        reused via solver.update(P, q, b) — keeping the KKT factorisation
-        across the whole timestep loop."""
-        logger.info("Feasibility pre-check on %d/%d timesteps…",
-                    len(check_labels), len(ts_labels))
-        for t in check_labels:
-            self.feasibility_check(run, t)
+        """Per-t solve path using run.G_blocks: each per-t QP is ~30× smaller than a
+        full-G one. Cold runs with ``n_workers > 1`` probe and solve their periods
+        concurrently, one backend call each. Otherwise the periods run in order and
+        the backend is asked to ``reuse`` its factorisation (it does so only for
+        structurally identical consecutive periods)."""
         if check_labels:
-            logger.info("Feasibility pre-check passed.")
+            logger.info("Feasibility pre-check on %d/%d timesteps…",
+                        len(check_labels), len(ts_labels))
+            t0 = time.perf_counter()
+            self._map_periods(check_labels,
+                              lambda t: self.feasibility_check(run, t),
+                              "Parallel feasibility check")
+            logger.info("Feasibility pre-check passed (%.1f s).", time.perf_counter() - t0)
 
         a_0_global, sigma_a_global = self._condition_prior(
             run.a_prior_global, run.sigma_a,
         )
         inv_sa_global = 1.0 / (sigma_a_global ** 2)
         row_time = run.row_meta["time"].astype(str).to_numpy()
+
+        if self.n_workers > 1:
+            def _solve_one_period(t: str) -> OptimResult:
+                cols_t = run.edge_cols_by_t[t]
+                return self._solve_period(
+                    run, t, a_0_global[cols_t].copy(), inv_sa_global[cols_t], row_time,
+                )
+            return self._map_periods(ts_labels, _solve_one_period, "Parallel solve")
 
         # Edge-template map for the warm-start carry-forward: a_prior(t)=a_post(t-1)
         # aligned by (from_id,to_id,valuation), since cols_t are disjoint per year.
@@ -632,14 +517,7 @@ class ClarabelSolver:
             acc_ws = self._warm_prior_acc(run)
             self._solve_inputs = {"acc": dict(run.acc_ref)}    # the input it read
 
-        if self.n_workers > 1:
-            return self._solve_periods_parallel(
-                run, ts_labels, a_0_global, inv_sa_global, row_time,
-            )
-
-        reuse_factorization = self._per_t_problem_identical(run, ts_labels)
         results: dict[str, OptimResult] = {}
-        solver_t: Optional[clarabel.DefaultSolver] = None
         prev_cols: Optional[np.ndarray] = None
         prev_F:    Optional[np.ndarray] = None
 
@@ -654,15 +532,15 @@ class ClarabelSolver:
                 hit = g >= 0
                 a_prior_t[hit] = prev_F[g[hit]]
 
-            results[t], solver_t = self._solve_period(
+            results[t] = self._solve_period(
                 run, t, a_prior_t, inv_sa_global[cols_t], row_time,
-                solver_t = solver_t if reuse_factorization else None,
-                verbose  = self.verbose_first_solve and k == 0,
+                reuse   = k > 0,         # the first period starts from a fresh instance
+                verbose = self.verbose_first_solve and k == 0,
             )
 
             # Carry this period's posterior forward as next year's warm prior,
             # aligned to t+1's edges by template (warm_start_gather above). The
-            # old in-place a_0_t_global[cols_t]=F_opt_t write was a no-op (cols_t
+            # old in-place a_0_t_global[cols_t]=F_opt write was a no-op (cols_t
             # are disjoint per year, so a later year never read it).
             prev_cols, prev_F = cols_t, results[t].F_opt
 
@@ -694,48 +572,64 @@ class ClarabelSolver:
                 f"previous year's posterior by edge template"
             ) from exc
 
-    def _solve_periods_parallel(
+    def _period_problem(
         self,
-        run:           ConstraintRun,
-        ts_labels:     list[str],
-        a_0_global:    np.ndarray,
-        inv_sa_global: np.ndarray,
-        row_time:      np.ndarray,
-    ) -> dict[str, OptimResult]:
-        """Parallel solve (cold only): every period is its own QP against its
-        cold seed, so the periods run concurrently on a thread pool, each with a
-        fresh Clarabel instance. Clarabel releases the GIL in ``solve()``: 8
-        periods of const_20261012_113828_12c562c7 took 63.3 s on 8 threads vs
-        549 s serially in opt_20261012_122124_40b1b370, bit-identical (#70).
+        run:       ConstraintRun,
+        t:         str,
+        rows_t:    np.ndarray,
+        a_prior_t: np.ndarray,
+        inv_sa_t:  np.ndarray,
+    ):
+        """Period ``t``'s neutral QP and what is needed to read its answer back:
+        ``(problem, perm, a_shift, const)``. ``perm`` orders the period's rows as the QP
+        does (soft, hard equalities, ``≤``); ``a_shift`` is what the backend's variables
+        are measured from; ``const`` moves the backend's cost back to the flows
+        convention."""
+        G_t     = run.G_blocks[t]
+        rm_t    = run.row_meta.iloc[rows_t]
+        c_t     = np.asarray(run.timestep_data[t]["c"])[rows_t]
+        sc_t    = np.asarray(run.timestep_data[t]["sigma_c"])[rows_t]
 
-        The first failed period cancels the periods not yet started; the
-        RuntimeError names every period that failed, and nothing is returned."""
-        n_threads = min(self.n_workers, len(ts_labels))
-        logger.info("Parallel solve: %d periods on %d threads", len(ts_labels), n_threads)
+        layout   = row_layout(rm_t["sense"].to_numpy(), rm_t["is_hard"].to_numpy())
+        perm     = layout.perm
+        n_slack, n_eq, n_le = layout.n_slack, layout.n_eq, layout.n_le
+        n_a      = G_t.shape[1]
+        m_t      = G_t.shape[0]
 
-        def _solve_one_period(t: str) -> OptimResult:
-            cols_t = run.edge_cols_by_t[t]
-            res, _ = self._solve_period(
-                run, t, a_0_global[cols_t].copy(), inv_sa_global[cols_t], row_time,
-            )
-            return res
+        G_p = G_t.tocsr()[perm]
+        S_top = -sp.eye(n_slack, format="csr") if n_slack else sp.csr_matrix((0, 0))
+        S_bot = sp.csr_matrix((n_eq + n_le, n_slack))
+        S     = sp.vstack([S_top, S_bot], format="csr") if n_slack else \
+                sp.csr_matrix((m_t, 0))
+        A     = sp.hstack([G_p, S], format="csr")
+        b     = c_t[perm]
 
-        with ThreadPoolExecutor(max_workers=n_threads) as pool:
-            fut_by_t = {t: pool.submit(_solve_one_period, t) for t in ts_labels}
-            for fut in as_completed(fut_by_t.values()):
-                if fut.exception() is not None:
-                    pool.shutdown(wait=False, cancel_futures=True)
-                    break
-        # Leaving the with-block waited for the periods already running.
-        failed = {t: f.exception() for t, f in fut_by_t.items()
-                  if not f.cancelled() and f.exception() is not None}
-        if failed:
-            raise RuntimeError(
-                f"Parallel solve failed in {len(failed)} period(s) "
-                f"{sorted(failed)}; periods not yet started were cancelled — "
-                + " | ".join(str(e) for e in failed.values())
-            ) from next(iter(failed.values()))
-        return {t: fut_by_t[t].result() for t in ts_labels}
+        if n_slack:
+            sc_arr   = np.where(np.isnan(sc_t), self.sigma_c_floor, sc_t)
+            sc_arr   = np.maximum(sc_arr, self.sigma_c_floor)
+            inv_scf  = 1.0 / (sc_arr[perm[:n_slack]] ** 2)
+        else:
+            inv_scf = np.zeros(0)
+        P = sp.diags(2.0 * np.concatenate([inv_sa_t, inv_scf]), format="csc")
+        # Prior offset (#33): the backend solves for x = a − a_shift. "flows": a_shift = 0;
+        # "defects": a_shift = a_prior, so q = 0 and the backend's cost is J itself rather
+        # than J − Σ(a_prior/σ_a)² (2015 of const_20261019_170151_13460e94: 1,288,065
+        # against an optimal J of 117,282). const moves the reported objective back
+        # to the flows convention.
+        a_shift = a_prior_t if self.qp_variables == "defects" else np.zeros(n_a)
+        q       = np.concatenate([-2.0 * inv_sa_t * (a_prior_t - a_shift),
+                                  np.zeros(n_slack)])
+        b       = b - G_p @ a_shift
+        const   = float(inv_sa_t @ (a_shift * (2.0 * a_prior_t - a_shift)))
+
+        n_top = n_slack + n_eq
+        problem = QPProblem(
+            P = P, q = q,
+            A_eq = A[:n_top], b_eq = b[:n_top],
+            A_le = A[n_top:], b_le = b[n_top:],
+            n_a = n_a, n_eps = n_slack,
+        )
+        return problem, perm, a_shift, const
 
     def _solve_period(
         self,
@@ -744,128 +638,35 @@ class ClarabelSolver:
         a_prior_t: np.ndarray,
         inv_sa_t:  np.ndarray,
         row_time:  np.ndarray,
-        solver_t:  Optional[clarabel.DefaultSolver] = None,
+        reuse:     bool = False,
         verbose:   bool = False,
-    ) -> tuple[OptimResult, clarabel.DefaultSolver]:
-        """Build period ``t``'s QP, solve it and return its OptimResult with the
-        Clarabel instance used. Passing the previous period's ``solver_t``
-        keeps its KKT factorisation via ``update()`` (serial path, identical
-        per-t problems only); otherwise a fresh instance is built."""
+    ) -> OptimResult:
+        """Build period ``t``'s QP, solve it through the backend and return its
+        OptimResult. ``reuse`` asks the backend to keep its factorisation from the
+        previous period (serial path only); a ``failed`` status raises."""
         cols_t  = run.edge_cols_by_t[t]
         rows_t  = np.where(row_time == t)[0]
         G_t     = run.G_blocks[t]
-        rm_t    = run.row_meta.iloc[rows_t]
-        c_t_full     = np.asarray(run.timestep_data[t]["c"])
-        sc_t_full    = np.asarray(run.timestep_data[t]["sigma_c"])
-        c_t          = c_t_full[rows_t]
-        sc_t         = sc_t_full[rows_t]
+        c_t     = np.asarray(run.timestep_data[t]["c"])[rows_t]
+        problem, perm, a_shift, const = self._period_problem(
+            run, t, rows_t, a_prior_t, inv_sa_t)
+        n_a, n_slack, m_t = problem.n_a, problem.n_eps, G_t.shape[0]
 
-        layout_t = row_layout(rm_t["sense"].to_numpy(), rm_t["is_hard"].to_numpy())
-        perm_t   = layout_t.perm
-        n_slack_t, n_eq_t, n_le_t = layout_t.n_slack, layout_t.n_eq, layout_t.n_le
-        n_a_t    = G_t.shape[1]
-        m_t      = G_t.shape[0]
-
-        G_p_t = G_t.tocsr()[perm_t]
-        S_top = -sp.eye(n_slack_t, format="csr") if n_slack_t else sp.csr_matrix((0, 0))
-        S_bot = sp.csr_matrix((n_eq_t + n_le_t, n_slack_t))
-        S_t   = sp.vstack([S_top, S_bot], format="csr") if n_slack_t else \
-                sp.csr_matrix((m_t, 0))
-        A_t   = sp.hstack([G_p_t, S_t], format="csc")
-        b_t   = c_t[perm_t]
-
-        if n_slack_t:
-            sc_arr   = np.where(np.isnan(sc_t), self.sigma_c_floor, sc_t)
-            sc_arr   = np.maximum(sc_arr, self.sigma_c_floor)
-            inv_scf  = 1.0 / (sc_arr[perm_t[:n_slack_t]] ** 2)
-        else:
-            inv_scf = np.zeros(0)
-        P_diag_t = 2.0 * np.concatenate([inv_sa_t, inv_scf])
-        P_t      = sp.diags(P_diag_t, format="csc")
-        # Prior offset (#33): Clarabel solves for x = a − a_shift. "flows": a_shift = 0;
-        # "defects": a_shift = a_prior, so q = 0 and Clarabel's cost is J itself rather
-        # than J − Σ(a_prior/σ_a)² (2015 of const_20261019_170151_13460e94: 1,288,065
-        # against an optimal J of 117,282). const_t moves the reported objective back
-        # to the flows convention.
-        a_shift  = a_prior_t if self.qp_variables == "defects" else np.zeros(n_a_t)
-        q_t      = np.concatenate([-2.0 * inv_sa_t * (a_prior_t - a_shift),
-                                   np.zeros(n_slack_t)])
-        b_t      = b_t - G_p_t @ a_shift
-        const_t  = float(inv_sa_t @ (a_shift * (2.0 * a_prior_t - a_shift)))
-
-        cones_t = clarabel_cones(layout_t)
-
-        t0 = time.perf_counter()
-        reused = solver_t is not None
-        if reused:
-            solver_t.update(P=P_t, q=q_t, b=b_t)
-        else:
-            settings = self._period_settings(verbose=verbose)
-            solver_t = clarabel.DefaultSolver(
-                P_t, q_t, A_t, b_t, cones_t, settings,
-            )
-
-        hist: list[tuple] = []
-        if self.capture_iter_history:
-            def _cb(info, _hist=hist):
-                _hist.append((
-                    int(info.iterations),
-                    float(info.cost_primal), float(info.cost_dual),
-                    float(info.gap_abs),
-                    float(info.res_primal), float(info.res_dual),
-                    float(info.ktratio),    float(info.mu),
-                    float(info.step_length),
-                ))
-                return False
-            solver_t.set_termination_callback(_cb)
-
-        sol     = solver_t.solve()
-        elapsed = time.perf_counter() - t0
-        status  = str(sol.status)
-
-        if self.capture_iter_history:
-            solver_t.unset_termination_callback()
-
-        if status not in _OK_STATUSES and reused:
-            # The reused instance keeps the equilibration computed for the
-            # first timestep (update() does not re-equilibrate); per-t
-            # σ_c now varies with f_agg, so a later year can stall on
-            # stale scaling. Cold restart with fresh equilibration.
-            logger.warning(
-                "t=%s  status=%s on reused solver — cold-restart retry",
-                t, status,
-            )
-            settings = self._period_settings(verbose=False)
-            solver_t = clarabel.DefaultSolver(
-                P_t, q_t, A_t, b_t, cones_t, settings,
-            )
-            hist.clear()
-            if self.capture_iter_history:
-                solver_t.set_termination_callback(_cb)
-            sol     = solver_t.solve()
-            elapsed = time.perf_counter() - t0
-            status  = str(sol.status)
-            if self.capture_iter_history:
-                solver_t.unset_termination_callback()
-
-        convergence  = self._info_to_dict(solver_t.get_info())
-        iter_history = np.array(hist, dtype=ITER_DTYPE) if hist else None
-
-        if status not in _OK_STATUSES:
+        res = self.backend.solve(problem, reuse=reuse, verbose=verbose)
+        if res.status == FAILED:
             raise RuntimeError(
-                f"Timestep {t!r}: Clarabel status={status}; halting"
-                f"{' (cold restart already tried)' if reused else ''}. "
-                f"iterations={sol.iterations}"
+                f"Timestep {t!r}: {self.backend.name} status={res.raw_status}; halting "
+                f"(no fallback). iterations={res.iterations}"
             )
 
-        x         = np.asarray(sol.x)
-        F_opt_t   = a_shift + x[:n_a_t]
-        eps_opt_t = x[n_a_t:] if n_slack_t else np.zeros(0)
+        x         = res.x
+        F_opt_t   = a_shift + x[:n_a]
+        eps_opt_t = x[n_a:] if n_slack else np.zeros(0)
 
         # ε back into row-order on the per-t row block
         eps_full_t = np.zeros(m_t)
-        if n_slack_t:
-            eps_full_t[perm_t[:n_slack_t]] = eps_opt_t
+        if n_slack:
+            eps_full_t[perm[:n_slack]] = eps_opt_t
 
         # Year-local persistence (REP §8.2): store only this period's
         # solved values. F_opt over cols_t, residuals/c_star over rows_t —
@@ -875,30 +676,30 @@ class ClarabelSolver:
         c_star_t    = c_t + eps_full_t
 
         result = OptimResult(
-            timestep      = t,
-            F_opt         = F_opt_t,
-            eps_opt       = eps_opt_t,
-            c_star        = c_star_t,
-            residuals     = residuals_t,
-            objective     = float(sol.obj_val) - const_t,
-            iterations    = int(sol.iterations),
-            solve_time_s  = elapsed,
-            solver_status = status,
-            convergence   = convergence,
-            iter_history  = iter_history,
-            cols_t        = cols_t,
-            rows_t        = rows_t,
-            a_prior       = a_prior_t,
+            timestep       = t,
+            F_opt          = F_opt_t,
+            eps_opt        = eps_opt_t,
+            c_star         = c_star_t,
+            residuals      = residuals_t,
+            objective      = float(res.objective) - const,
+            iterations     = int(res.iterations),
+            solve_time_s   = res.solve_time_s,
+            solver_status  = res.status,
+            convergence    = dict(res.info) if res.info else {},
+            iter_history   = res.iter_history,
+            cols_t         = cols_t,
+            rows_t         = rows_t,
+            a_prior        = a_prior_t,
+            backend        = self.backend.name,
+            backend_status = res.raw_status,
         )
 
         logger.info(
-            "t=%s  status=%s  iters=%d  obj=%.4e  gap=%.2e  dres=%.2e  step=%.2f  time=%.2fs  (per-t: %d cols × %d rows)",
-            t, status, sol.iterations, result.objective,
-            convergence["gap_abs"], convergence["res_dual"],
-            convergence["step_length"], elapsed,
-            n_a_t, m_t,
+            "t=%s  status=%s (%s)  iters=%d  obj=%.4e  time=%.2fs  (per-t: %d cols × %d rows)",
+            t, res.status, res.raw_status, res.iterations, result.objective,
+            res.solve_time_s, n_a, m_t,
         )
-        return result, solver_t
+        return result
 
     def objective_at(
         self,
@@ -963,7 +764,7 @@ class ClarabelSolver:
         """Convenience: solve a single timestep (no warm-start)."""
         return self.solve_all(run_id, timesteps=[t_label])[t_label]
 
-    # --------------------1----------------------------------------------
+    # ------------------------------------------------------------------
     # Persistence
     # ------------------------------------------------------------------
 
@@ -989,7 +790,8 @@ class ClarabelSolver:
         omits it cannot be compared to another on that axis (Round P, G5); it
         defaults to this solver's own ``prior_mode`` when the caller passes
         nothing. How the last ``solve_all`` ran — ``n_workers`` (threads
-        used), ``max_threads``, ``direct_solve_method`` and ``qp_variables`` — is
+        used), ``qp_variables``, the ``backend`` and its ``backend_settings`` (and, from
+        a backend that has them, ``max_threads`` and ``direct_solve_method``) — is
         added to it, and its wall-clock lands in ``stage_summary.solve_wall_s``.
         """
         stage_config = ({"prior_mode": self.prior_mode}

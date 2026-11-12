@@ -4,7 +4,7 @@ _conditioning.py
 Shared numerical conditioning helpers for the Stage-3 prior (σ_a, a_0)
 and Stage-3 constraint-row uncertainty (σ_c).
 
-Extracted from :class:`pysuto.solver.ClarabelSolver` so that downstream
+Extracted from :class:`pysuto.solver.Solver` so that downstream
 consumers — currently :class:`pysuto.uncprop.KalmanUncProp` — apply the
 *same* floors and ceilings the solver applied when it produced ``a*``.
 Keeping these rules in one module rules out silent drift between the
@@ -14,7 +14,7 @@ Two helpers:
 
 * :func:`condition_prior` — floor / ceiling / NaN handling for σ_a;
   NaN handling for a_0. Identical to the historical
-  ``ClarabelSolver._condition_prior`` body.
+  ``Solver._condition_prior`` body.
 * :func:`condition_sigma_c` — soft-row σ_c flooring, with an optional
   ``hard_mask`` argument that zeroes out hard rows (used by uncprop,
   not by the solver — see ``stage5_uncprop_integration_plan.md``).

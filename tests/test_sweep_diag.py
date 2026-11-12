@@ -18,8 +18,7 @@ from pysuto.diag import SweepDiag, SweepStatsDiagnostic
 from pysuto.diag.stats.sweep import (Criterion, EveryCategory, MaxAbs, Outcome, _max_abs,
                                      sensitivity_by_year, sensitivity_table, top_axis)
 from pysuto.registry import ConstraintRunRegistry, OptimRunRegistry, SweepRunRegistry
-from pysuto.solver import ClarabelSolver
-from tests.test_solver import _make_wide_sigma_run
+from tests.test_solver import _make_wide_sigma_run, make_solver
 
 AXES = [{"keys": ["const.ANCHOR_CV"], "values": [0.01, 0.03, 0.05]}]
 EDGES = pd.DataFrame({"category":    ["A→B", "B→C", "B→C", "C→D", "C→D"] * 2,
@@ -33,8 +32,8 @@ EDGES = pd.DataFrame({"category":    ["A→B", "B→C", "B→C", "C→D", "C→D
 
 def _solve_and_persist(root, run):
     ConstraintRunRegistry(str(root / "const")).register(run)
-    s = ClarabelSolver(const_dir=str(root / "const"), opt_dir=str(root / "opt"),
-                       verbose_first_solve=False, prior_mode="cold", qp_variables="defects")
+    s = make_solver(const_dir=str(root / "const"), opt_dir=str(root / "opt"),
+                    verbose_first_solve=False, prior_mode="cold", qp_variables="defects")
     res = s.solve_all(run.run_id)
     return s.persist(run_id=run.run_id, results=res, output_dir=str(root / "opt"),
                      const_run_id=run.run_id)

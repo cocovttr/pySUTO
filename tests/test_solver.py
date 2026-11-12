@@ -1,7 +1,7 @@
 """
 test_solver.py
 ==============
-Test suite for :class:`pysuto.solver.ClarabelSolver`.
+Test suite for :class:`pysuto.solver.Solver` and its :class:`ClarabelBackend`.
 
 Toy problem (3 edges, 2 timesteps)
 ----------------------------------
@@ -30,6 +30,20 @@ import numpy as np
 import pandas as pd
 import pytest
 import scipy.sparse as sp
+
+# The keyword arguments that belong to the ClarabelBackend rather than the Solver.
+_BACKEND_KEYS = {"tol_feas", "tol_gap_abs", "tol_gap_rel", "reduced_tol_feas",
+                 "reduced_tol_gap_abs", "reduced_tol_gap_rel", "max_iter",
+                 "direct_solve_method", "max_threads", "capture_iter_history"}
+
+
+def make_solver(**kw):
+    """A :class:`~pysuto.solver.Solver` over a :class:`ClarabelBackend`; the backend's
+    settings are split off ``kw``."""
+    from pysuto.clarabel_backend import ClarabelBackend
+    from pysuto.solver import Solver
+    backend = ClarabelBackend(**{k: kw.pop(k) for k in list(kw) if k in _BACKEND_KEYS})
+    return Solver(backend, **kw)
 
 
 # ---------------------------------------------------------------------------
@@ -76,9 +90,8 @@ def toy_run():
 
 @pytest.fixture
 def toy_solver(monkeypatch, toy_run):
-    """ClarabelSolver with load_run patched to return the toy ConstraintRun."""
-    from pysuto.solver import ClarabelSolver
-    s = ClarabelSolver(const_dir="unused", verbose_first_solve=False, prior_mode="cold")
+    """Solver (ClarabelBackend) with load_run patched to return the toy ConstraintRun."""
+    s = make_solver(const_dir="unused", verbose_first_solve=False, prior_mode="cold")
     monkeypatch.setattr(s, "load_run", lambda _rid: toy_run)
     return s
 
@@ -105,7 +118,7 @@ class TestSolveAll:
     def test_status_solved(self, toy_solver):
         results = toy_solver.solve_all("toy_run")
         for t, r in results.items():
-            assert r.solver_status == "Solved", (t, r.solver_status)
+            assert r.solver_status == "solved", (t, r.solver_status)
 
     def test_F_opt_within_bounds(self, toy_solver, toy_run):
         results = toy_solver.solve_all("toy_run")
@@ -167,7 +180,7 @@ class TestConvergenceCapture:
             assert r.convergence["res_primal"] < 1e-6
 
     def test_iter_history_shape_and_dtype(self, toy_solver):
-        from pysuto.solver import ITER_DTYPE
+        from pysuto.clarabel_backend import ITER_DTYPE
         results = toy_solver.solve_all("toy_run")
         for r in results.values():
             assert r.iter_history is not None
@@ -184,8 +197,7 @@ class TestConvergenceCapture:
             assert (np.diff(iters) == 1).all()
 
     def test_iter_history_disabled(self, monkeypatch, toy_run):
-        from pysuto.solver import ClarabelSolver
-        s = ClarabelSolver(
+        s = make_solver(
             const_dir="unused",
             verbose_first_solve=False,
             capture_iter_history=False,
@@ -206,7 +218,7 @@ class TestConvergenceCapture:
 class TestPersist:
 
     def test_roundtrip(self, toy_solver, tmp_path):
-        from pysuto.solver import ITER_DTYPE
+        from pysuto.clarabel_backend import ITER_DTYPE
         results = toy_solver.solve_all("toy_run")
         out_id  = toy_solver.persist(
             run_id       = "toy_run",
@@ -234,7 +246,7 @@ class TestPersist:
         assert set(sidecar["stage_summary"]["timesteps"]) == {"2020", "2021"}
         for t in ("2020", "2021"):
             entry = sidecar["stage_summary"]["per_timestep"][t]
-            assert entry["solver_status"] == "Solved"
+            assert entry["solver_status"] == "solved"
             conv = entry["convergence"]
             assert conv["status"] == "Solved"
             assert "linsolver_name" in conv
@@ -256,7 +268,6 @@ class TestPersist:
         F_opt/residuals; the legacy run (above) carries no block index."""
         from tests.test_constraints import _make_toy_acc, _make_toy_agg_result
         from pysuto.constraints import ConstraintEngine, MassBalanceBuilder
-        from pysuto.solver import ClarabelSolver
         from pysuto.registry import OptimRunRegistry
 
         acc = _make_toy_acc()
@@ -265,7 +276,7 @@ class TestPersist:
         engine.register(MassBalanceBuilder())
         cr = engine.run(agg, timesteps=["2020", "2021"], persist=False)
 
-        solver = ClarabelSolver(
+        solver = make_solver(
             const_dir=str(tmp_path / "const"), verbose_first_solve=False,
             prior_mode="cold",
         )
@@ -286,8 +297,7 @@ class TestPersist:
             assert r.residuals.shape == r.rows_t.shape
 
     def test_no_iter_history_when_disabled(self, monkeypatch, toy_run, tmp_path):
-        from pysuto.solver import ClarabelSolver
-        s = ClarabelSolver(
+        s = make_solver(
             const_dir="unused",
             verbose_first_solve=False,
             capture_iter_history=False,
@@ -350,7 +360,6 @@ class TestLowerBoundsEnforced:
 
     def _solve(self, tmp_path, monkeypatch, enforce):
         from pysuto.constraints import ConstraintEngine, FlowBoundsBuilder, MassBalanceBuilder
-        from pysuto.solver import ClarabelSolver
         acc = _make_waste_toy_acc()
 
         class _Agg:
@@ -362,20 +371,20 @@ class TestLowerBoundsEnforced:
         engine.register(MassBalanceBuilder())
         engine.register(FlowBoundsBuilder(enforce_lower=enforce))
         cr = engine.run(_Agg(), timesteps=["2020"], persist=False)
-        s = ClarabelSolver(const_dir=storage_dir, verbose_first_solve=False,
-                           prior_mode="cold")
+        s = make_solver(const_dir=storage_dir, verbose_first_solve=False,
+                        prior_mode="cold")
         monkeypatch.setattr(s, "load_run", lambda _rid: cr)
         r = s.solve_all(cr.run_id)["2020"]
         return cr, r, dict(zip(np.asarray(r.cols_t, dtype=int), r.F_opt))
 
     def test_without_bounds_the_residual_edge_goes_negative(self, tmp_path, monkeypatch):
         _, r, F = self._solve(tmp_path, monkeypatch, enforce=False)
-        assert r.solver_status == "Solved"
+        assert r.solver_status == "solved"
         assert F[2] < -10.0                                  # w ≈ a − b ≈ −20
 
     def test_with_bounds_the_residual_edge_stops_at_zero(self, tmp_path, monkeypatch):
         cr, r, F = self._solve(tmp_path, monkeypatch, enforce=True)
-        assert r.solver_status == "Solved"
+        assert r.solver_status == "solved"
         assert F[2] >= -1e-7 and F[2] == pytest.approx(0.0, abs=1e-6)
         assert F[0] == pytest.approx(F[1], rel=1e-6)         # a = b once w is 0
         bound = (cr.row_meta["type"] == "bound").to_numpy()
@@ -405,11 +414,10 @@ class TestEngineToSolverIntegration:
 
     @staticmethod
     def _solver_with_inmem_run(storage_dir, cr, monkeypatch):
-        """Build a ClarabelSolver whose load_run returns the in-memory cr
+        """Build a Solver whose load_run returns the in-memory cr
         (G_blocks round-trip through the registry; this only skips the disk)."""
-        from pysuto.solver import ClarabelSolver
-        s = ClarabelSolver(const_dir=storage_dir, verbose_first_solve=False,
-                           prior_mode="cold")
+        s = make_solver(const_dir=storage_dir, verbose_first_solve=False,
+                        prior_mode="cold")
         monkeypatch.setattr(s, "load_run", lambda _rid: cr)
         return s
 
@@ -420,7 +428,7 @@ class TestEngineToSolverIntegration:
 
         assert set(results.keys()) == {"2020", "2021"}
         for t, r in results.items():
-            assert r.solver_status == "Solved", (t, r.solver_status)
+            assert r.solver_status == "solved", (t, r.solver_status)
             # Year-local: F_opt covers only this period's edges.
             assert r.F_opt.shape == cr.edge_cols_by_t[t].shape
 
@@ -461,7 +469,7 @@ class TestEngineToSolverIntegration:
         """When every G_blocks[t] is numerically identical (typical: no
         time-varying ratios), the per-t loop creates one DefaultSolver and
         reuses it via update(P, q, b)."""
-        import pysuto.solver as solver_mod
+        import pysuto.clarabel_backend as solver_mod
         acc, cr, storage_dir = self._build_real_run(tmp_path)
 
         # Sanity: G_blocks identical (toy_acc + MassBalance: ±1 coefficients,
@@ -480,19 +488,18 @@ class TestEngineToSolverIntegration:
         )
 
         solver = self._solver_with_inmem_run(storage_dir, cr, monkeypatch)
-        solver.solve_all(cr.run_id, feasibility_check_first_only=True)
+        solver.solve_all(cr.run_id)
 
-        # 1 feasibility-check solver + 1 solve solver (reused across 2 timesteps)
-        assert init_count[0] == 2, \
-            f"Expected 2 Clarabel inits (1 feas + 1 reused); got {init_count[0]}"
+        # 2 feasibility probes (one per period) + 1 solve instance (reused across 2 periods)
+        assert init_count[0] == 3, \
+            f"Expected 3 Clarabel inits (2 probes + 1 reused); got {init_count[0]}"
 
     def test_no_warm_start_when_G_blocks_differ(self, tmp_path, monkeypatch):
         """Time-varying ratio (different r per year) → G_blocks differ across t
         → solver falls back to fresh Clarabel instance per timestep.
         Numerical results still satisfy the per-year ratio."""
         import csv
-        import pysuto.solver as solver_mod
-        from pysuto.solver import ClarabelSolver
+        import pysuto.clarabel_backend as solver_mod
         from pysuto.constraints import (
             ConstraintEngine, MassBalanceBuilder, RatioConstraintBuilder,
         )
@@ -540,7 +547,8 @@ class TestEngineToSolverIntegration:
         cr = engine.run(agg, timesteps=["2020", "2021"], persist=False)
 
         # Sanity: blocks really do differ (different r values).
-        assert not ClarabelSolver._per_t_problem_identical(cr, ["2020", "2021"]), \
+        assert not np.array_equal(cr.G_blocks["2020"].toarray(),
+                                  cr.G_blocks["2021"].toarray()), \
             "Test premise: G_blocks must differ"
 
         init_count = [0]
@@ -549,29 +557,28 @@ class TestEngineToSolverIntegration:
             init_count[0] += 1
             return original_cls(*args, **kwargs)
         # Note: counting_factory is set up BEFORE the solver_with_inmem_run
-        # call so DefaultSolver is patched at the point feasibility_check runs.
+        # call so DefaultSolver is patched at the point the probe runs.
         monkeypatch.setattr(
             solver_mod.clarabel, "DefaultSolver", counting_factory,
         )
         solver = self._solver_with_inmem_run(storage_dir, cr, monkeypatch)
-        results = solver.solve_all(cr.run_id, feasibility_check_first_only=True)
+        results = solver.solve_all(cr.run_id)
 
-        # 1 feasibility-check init + 2 fresh per-t inits (no warm-start)
-        assert init_count[0] == 3, \
-            f"Expected 3 Clarabel inits (1 feas + 2 fresh); got {init_count[0]}"
+        # 2 probe inits + 2 fresh per-t inits (the backend finds no matching structure)
+        assert init_count[0] == 4, \
+            f"Expected 4 Clarabel inits (2 probes + 2 fresh); got {init_count[0]}"
         # All timesteps solved
         for r in results.values():
-            assert r.solver_status == "Solved"
+            assert r.solver_status == "solved"
 
     def test_block_path_warm_start_chains_posterior(self, tmp_path, monkeypatch):
         """Block-path warm start (the default) stores the per-period prior on
         each OptimResult and chains it: a_prior(t>0) == a_post(t-1)."""
         import dataclasses
-        from pysuto.solver import ClarabelSolver
         acc, cr, storage_dir = self._build_real_run(tmp_path)
         cr = dataclasses.replace(cr, acc_ref=dict(TestWarmPriorAcc.ACC_REF))
 
-        solver = ClarabelSolver(const_dir=storage_dir, verbose_first_solve=False)
+        solver = make_solver(const_dir=storage_dir, verbose_first_solve=False)
         monkeypatch.setattr(solver, "load_run", lambda _rid: cr)
         TestWarmPriorAcc._patch_acc_load(monkeypatch, acc)     # the warm prior's acc
         res = solver.solve_all(cr.run_id)
@@ -604,14 +611,13 @@ class TestWarmPriorAcc:
 
     def _solver(self, tmp_path, monkeypatch, prior_mode="warm"):
         import dataclasses
-        from pysuto.solver import ClarabelSolver
         acc, cr, storage_dir = TestEngineToSolverIntegration()._build_real_run(tmp_path)
         cr = dataclasses.replace(cr, acc_ref=dict(self.ACC_REF))
         acc_dir = str(tmp_path / "proc" / "acc")
         _toy_acc_inputs(tmp_path / "input")
-        s = ClarabelSolver(const_dir=storage_dir, opt_dir=str(tmp_path / "opt"),
-                           acc_dir=acc_dir, input_dir=str(tmp_path / "input"),
-                           verbose_first_solve=False, prior_mode=prior_mode)
+        s = make_solver(const_dir=storage_dir, opt_dir=str(tmp_path / "opt"),
+                        acc_dir=acc_dir, input_dir=str(tmp_path / "input"),
+                        verbose_first_solve=False, prior_mode=prior_mode)
         monkeypatch.setattr(s, "load_run", lambda _rid: cr)
         return s, cr, acc, acc_dir
 
@@ -680,33 +686,25 @@ class TestWarmPriorAcc:
         assert sidecar["parents"]["inputs"] == {}
 
 
-def clarabel_default_settings():
-    import clarabel
-    return clarabel.DefaultSettings()
-
-
 class TestParallelSolve:
     """Parallel solve (#70): cold periods solved concurrently, one Clarabel
     instance per period, the linear solver pinned to one thread."""
 
     def test_warm_prior_with_several_workers_raises(self):
-        from pysuto.solver import ClarabelSolver
         with pytest.raises(ValueError, match="warm"):
-            ClarabelSolver(prior_mode="warm", n_workers=2)
+            make_solver(prior_mode="warm", n_workers=2)
 
     def test_fewer_than_one_worker_raises(self):
-        from pysuto.solver import ClarabelSolver
         with pytest.raises(ValueError, match="n_workers"):
-            ClarabelSolver(prior_mode="cold", n_workers=0)
+            make_solver(prior_mode="cold", n_workers=0)
 
     @staticmethod
     def _cold_solver(tmp_path, monkeypatch, **kw):
         """Engine-built toy (2 periods, identical G_blocks) + a cold solver
         serving it in memory."""
-        from pysuto.solver import ClarabelSolver
         _, cr, storage_dir = TestEngineToSolverIntegration()._build_real_run(tmp_path)
-        s = ClarabelSolver(const_dir=storage_dir, verbose_first_solve=False,
-                           prior_mode="cold", **kw)
+        s = make_solver(const_dir=storage_dir, verbose_first_solve=False,
+                        prior_mode="cold", **kw)
         monkeypatch.setattr(s, "load_run", lambda _rid: cr)
         return cr, s
 
@@ -714,7 +712,7 @@ class TestParallelSolve:
     def _record_clarabel_inits(monkeypatch):
         """Wrap clarabel.DefaultSolver; return the list of settings each
         instance was built with (list.append is thread-safe)."""
-        import pysuto.solver as solver_mod
+        import pysuto.clarabel_backend as solver_mod
         built = []
         original_cls = solver_mod.clarabel.DefaultSolver
         def recording_factory(*args, **kwargs):
@@ -731,25 +729,22 @@ class TestParallelSolve:
         cr, s = self._cold_solver(tmp_path, monkeypatch, n_workers=2)
         res = s.solve_all(cr.run_id)
 
-        assert len(built) == 3, f"1 probe + 2 periods expected; got {len(built)}"
-        assert all(r.solver_status == "Solved" for r in res.values())
+        assert len(built) == 4, f"2 probes + 2 periods expected; got {len(built)}"
+        assert all(r.solver_status == "solved" for r in res.values())
 
     @pytest.mark.parametrize("n_workers", [1, 2])
     def test_period_solves_use_one_linear_solver_thread(
         self, tmp_path, monkeypatch, n_workers,
     ):
         """Multi-threaded faer is slower than one thread on a period QP and
-        gives the same answer; the probe (full G) keeps Clarabel's default."""
+        gives the same answer; the per-period probes are pinned the same way."""
         built = self._record_clarabel_inits(monkeypatch)
         cr, s = self._cold_solver(tmp_path, monkeypatch, n_workers=n_workers,
                                   direct_solve_method="qdldl")
         s.solve_all(cr.run_id)
 
-        probe, periods = built[0], built[1:]
-        assert probe.max_threads == clarabel_default_settings().max_threads
-        assert probe.direct_solve_method == clarabel_default_settings().direct_solve_method
-        assert periods, "no period solve built a Clarabel instance"
-        for st in periods:
+        assert len(built) >= 3, "2 probes and the period solves expected"
+        for st in built:
             assert st.max_threads == 1
             assert st.direct_solve_method == "qdldl"
 
@@ -817,7 +812,7 @@ class TestParallelSolve:
         load, 2021 is cancelled before it starts and only 2020 is named (#83)."""
         import threading
         import types
-        import pysuto.solver as solver_mod
+        import pysuto.clarabel_backend as solver_mod
 
         both_started = threading.Barrier(2, timeout=30)
 
@@ -839,9 +834,8 @@ class TestParallelSolve:
         opt_dir = tmp_path / "opt"
         cr, s = self._cold_solver(tmp_path, monkeypatch, n_workers=2,
                                   opt_dir=str(opt_dir))
-        monkeypatch.setattr(s, "feasibility_check", lambda run, t: None)
         with pytest.raises(RuntimeError, match="NumericalError") as exc:
-            s.solve_all(cr.run_id)
+            s.solve_all(cr.run_id, feasibility_check="none")
         assert "'2020'" in str(exc.value) and "'2021'" in str(exc.value)
         assert not list(opt_dir.glob("opt_*")), "a failed solve registered a run"
 
@@ -935,10 +929,9 @@ class TestQpVariables:
 
     @staticmethod
     def _solve(run, tmp_path, monkeypatch, qp_variables, n_workers=1):
-        from pysuto.solver import ClarabelSolver
-        s = ClarabelSolver(const_dir=str(tmp_path / "const"), opt_dir=str(tmp_path / "opt"),
-                           verbose_first_solve=False, prior_mode="cold",
-                           n_workers=n_workers, qp_variables=qp_variables)
+        s = make_solver(const_dir=str(tmp_path / "const"), opt_dir=str(tmp_path / "opt"),
+                        verbose_first_solve=False, prior_mode="cold",
+                        n_workers=n_workers, qp_variables=qp_variables)
         monkeypatch.setattr(s, "load_run", lambda _rid: run)
         return s, s.solve_all(run.run_id)
 
@@ -957,7 +950,7 @@ class TestQpVariables:
         assert list(defects) == list(flows)
         for t in flows:
             f, d = flows[t], defects[t]
-            assert f.solver_status == d.solver_status == "Solved", t
+            assert f.solver_status == d.solver_status == "solved", t
             for k in ("F_opt", "eps_opt", "residuals", "c_star"):
                 assert np.allclose(getattr(d, k), getattr(f, k), rtol=1e-7, atol=1e-7), \
                     (t, k, np.max(np.abs(getattr(d, k) - getattr(f, k))))
@@ -984,9 +977,7 @@ class TestQpVariables:
     ):
         """n_workers=1 reuses one Clarabel instance across the two identical periods
         (update(P, q, b)); n_workers=2 solves them concurrently."""
-        from pysuto.solver import ClarabelSolver
         run = _make_wide_sigma_run(periods=("2020", "2021"))
-        assert ClarabelSolver._per_t_problem_identical(run, ["2020", "2021"])
         _, flows   = self._solve(run, tmp_path, monkeypatch, "flows",   n_workers)
         _, defects = self._solve(run, tmp_path, monkeypatch, "defects", n_workers)
         self._assert_same_optimum(run, flows, defects)
@@ -1010,9 +1001,8 @@ class TestQpVariables:
     def test_flows_is_the_default_and_the_sidecar_records_the_choice(
         self, tmp_path, monkeypatch,
     ):
-        from pysuto.solver import ClarabelSolver
-        assert ClarabelSolver(const_dir=str(tmp_path / "c"),
-                              opt_dir=str(tmp_path / "o")).qp_variables == "flows"
+        assert make_solver(const_dir=str(tmp_path / "c"),
+                           opt_dir=str(tmp_path / "o")).qp_variables == "flows"
         run = _make_wide_sigma_run()
         s, results = self._solve(run, tmp_path, monkeypatch, "defects")
         out_id = s.persist(run_id=run.run_id, results=results,
@@ -1021,10 +1011,9 @@ class TestQpVariables:
             assert json.load(fh)["stage_config"]["qp_variables"] == "defects"
 
     def test_unknown_qp_variables_raises(self, tmp_path):
-        from pysuto.solver import ClarabelSolver
         with pytest.raises(ValueError, match="qp_variables"):
-            ClarabelSolver(const_dir=str(tmp_path / "c"), opt_dir=str(tmp_path / "o"),
-                           qp_variables="whitened")
+            make_solver(const_dir=str(tmp_path / "c"), opt_dir=str(tmp_path / "o"),
+                        qp_variables="whitened")
 
 
 class TestObjectiveAt:
@@ -1082,9 +1071,8 @@ class TestObjectiveAt:
         """Prior (100, 40, 80, −20, 0.002) at σ (5, 1e5, 2, 2, 1e-3); F = prior except
         e0 = 105: edges (5/5)² = 1. Rows: e0 = 110 at σ 5 → ((105 − 110)/5)² = 1;
         e1 + e2 = 105 at σ 3 → ((120 − 105)/3)² = 25. Total 27."""
-        from pysuto.solver import ClarabelSolver
         run = _make_wide_sigma_run()
-        s = ClarabelSolver(const_dir=str(tmp_path / "c"), opt_dir=str(tmp_path / "o"))
+        s = make_solver(const_dir=str(tmp_path / "c"), opt_dir=str(tmp_path / "o"))
         F = np.array([105.0, 40.0, 80.0, -20.0, 0.002])
         got = s.objective_at(run, "2020", F)
         assert got["edges"] == pytest.approx(1.0, rel=1e-12)
@@ -1095,9 +1083,8 @@ class TestObjectiveAt:
         assert got["max_hard_violation"] == pytest.approx(22.25, rel=1e-12)
 
     def test_a_posterior_of_the_wrong_length_is_refused(self, tmp_path):
-        from pysuto.solver import ClarabelSolver
         run = _make_wide_sigma_run()
-        s = ClarabelSolver(const_dir=str(tmp_path / "c"), opt_dir=str(tmp_path / "o"))
+        s = make_solver(const_dir=str(tmp_path / "c"), opt_dir=str(tmp_path / "o"))
         with pytest.raises(ValueError, match="2020"):
             s.objective_at(run, "2020", np.zeros(4))
 
@@ -1176,28 +1163,41 @@ def _make_second_year_infeasible_run(bad=("2021",)):
 
 
 class TestFeasibilityCheckMode:
-    """#104: FEASIBILITY_CHECK = "first" | "all" | "none" — a sweep point skips the
-    probe; a period that cannot be solved still raises, only not localised by it."""
+    """#104, ADR 0042: FEASIBILITY_CHECK = "all" | "none" — a sweep point skips the
+    probe; a period that cannot be solved still raises, only not localised by it.
+    The probe runs per period, so a bad later year is found before any solve."""
 
     @staticmethod
-    def _solver(run, monkeypatch):
-        from pysuto.solver import ClarabelSolver
-        s = ClarabelSolver(const_dir="unused", verbose_first_solve=False,
-                           prior_mode="cold")
+    def _solver(run, monkeypatch, **kw):
+        s = make_solver(const_dir="unused", verbose_first_solve=False,
+                        prior_mode="cold", **kw)
         monkeypatch.setattr(s, "load_run", lambda _rid: run)
         return s
-
-    def test_first_probes_only_the_first_year(self, monkeypatch):
-        s = self._solver(_make_second_year_infeasible_run(), monkeypatch)
-        with pytest.raises(RuntimeError) as exc:
-            s.solve_all("half_bad", feasibility_check="first")
-        assert "Feasibility check FAILED" not in str(exc.value)
-        assert "'2021'" in str(exc.value)
 
     def test_all_probes_every_year_before_solving(self, monkeypatch):
         s = self._solver(_make_second_year_infeasible_run(), monkeypatch)
         with pytest.raises(RuntimeError, match="Feasibility check FAILED at timestep '2021'"):
             s.solve_all("half_bad", feasibility_check="all")
+
+    def test_the_probe_is_the_default(self, monkeypatch):
+        s = self._solver(_make_second_year_infeasible_run(), monkeypatch)
+        with pytest.raises(RuntimeError, match="Feasibility check FAILED"):
+            s.solve_all("half_bad")
+
+    def test_the_probe_names_the_offending_rows(self, monkeypatch):
+        s = self._solver(_make_second_year_infeasible_run(), monkeypatch)
+        with pytest.raises(RuntimeError) as exc:
+            s.solve_all("half_bad", feasibility_check="all")
+        msg = str(exc.value)
+        assert "Top hard-row offenders" in msg and "cid='r0_2021'" in msg
+        assert "r0_2020" not in msg                     # the feasible year is not blamed
+
+    def test_the_probe_runs_through_the_period_pool(self, monkeypatch):
+        s = self._solver(_make_second_year_infeasible_run(), monkeypatch, n_workers=2)
+        with pytest.raises(RuntimeError,
+                           match="Feasibility check FAILED at timestep '2021'") as exc:
+            s.solve_all("half_bad")
+        assert "Parallel feasibility check failed in 1 period(s) ['2021']" in str(exc.value)
 
     def test_none_skips_the_probe_and_the_period_solve_still_raises(self, monkeypatch):
         s = self._solver(_make_second_year_infeasible_run(bad=("2020",)), monkeypatch)
@@ -1211,10 +1211,12 @@ class TestFeasibilityCheckMode:
         res = s.solve_all("half_bad", feasibility_check="none")
         assert [r.F_opt[0] for r in res.values()] == pytest.approx([5.0, 5.0], rel=1e-7)
 
-    def test_the_legacy_bool_maps_onto_the_mode(self, monkeypatch):
-        s = self._solver(_make_second_year_infeasible_run(), monkeypatch)
-        with pytest.raises(RuntimeError, match="Feasibility check FAILED at timestep '2021'"):
-            s.solve_all("half_bad", feasibility_check_first_only=False)
+    def test_the_first_period_only_probe_is_gone(self, monkeypatch):
+        s = self._solver(_make_second_year_infeasible_run(bad=()), monkeypatch)
+        with pytest.raises(ValueError, match="feasibility_check='first'"):
+            s.solve_all("half_bad", feasibility_check="first")
+        with pytest.raises(TypeError):
+            s.solve_all("half_bad", feasibility_check_first_only=True)
 
     def test_an_unknown_mode_is_refused(self, monkeypatch):
         s = self._solver(_make_second_year_infeasible_run(bad=()), monkeypatch)
@@ -1225,33 +1227,302 @@ class TestFeasibilityCheckMode:
 class TestFeasibilityCheck:
 
     def test_infeasible_raises(self, monkeypatch):
-        from pysuto.solver import ClarabelSolver
         run = _make_infeasible_run()
-        s   = ClarabelSolver(const_dir="unused", verbose_first_solve=False,
-                           prior_mode="cold")
+        s   = make_solver(const_dir="unused", verbose_first_solve=False,
+                          prior_mode="cold")
         monkeypatch.setattr(s, "load_run", lambda _rid: run)
         with pytest.raises(RuntimeError, match="Feasibility check FAILED"):
             s.solve_all("bad_run")
 
-    def test_first_only_is_default(self, toy_solver):
-        """Default feasibility_check_first_only=True still solves every ts."""
+    def test_the_probe_is_the_default_and_passes_on_the_toy(self, toy_solver):
+        """Default feasibility_check="all" probes every period and still solves them."""
         results = toy_solver.solve_all("toy_run")
         assert set(results.keys()) == {"2020", "2021"}
 
-    def test_check_all_timesteps(self, toy_solver):
-        """feasibility_check_first_only=False also passes on the toy run."""
-        results = toy_solver.solve_all(
-            "toy_run", feasibility_check_first_only=False,
-        )
-        assert set(results.keys()) == {"2020", "2021"}
+
+# ---------------------------------------------------------------------------
+# The QP backend contract (ADR 0042)
+# ---------------------------------------------------------------------------
+
+def _parity_run():
+    """Three edges, two periods: a hard balance ``a0 + a1 − a2 = 0``, two soft
+    observations (``a0 = 6``, ``a1 = 2``) and the hard band ``a0 − a1 ≤ 0.5``, which
+    binds (the prior alone has a0 − a1 = 1). Well conditioned, so a generic NLP solver
+    reaches Clarabel's optimum."""
+    G_t = sp.csr_matrix(np.array([[1.0, 1.0, -1.0], [1.0, 0.0, 0.0],
+                                  [0.0, 1.0, 0.0], [1.0, -1.0, 0.0]]))
+    data = {t: (np.array([0.0, 6.0 + k, 2.0, 0.5]), np.array([0.0, 0.5, 0.5, 0.0]),
+                np.array([4.0, 3.0, 6.0]), np.ones(3))
+            for k, t in enumerate(("2020", "2021"))}
+    return _block_run(G_t, ["zero", "free", "free", "nonneg"], data, run_id="parity")
+
+
+class _SlsqpBackend:
+    """A tests-only QP backend on ``scipy.optimize.minimize(method="SLSQP")``."""
+    name = "slsqp"
+
+    def __init__(self, status="solved"):
+        self._status = status
+
+    @property
+    def settings(self) -> dict:
+        return {"method": "SLSQP", "ftol": 1e-14}
+
+    def solve(self, problem, reuse=False, verbose=False):
+        from scipy.optimize import minimize
+        from pysuto.qp import QPResult
+        P, q = problem.P.toarray(), problem.q
+        A_eq, A_le = problem.A_eq.toarray(), problem.A_le.toarray()
+        cons = []
+        if A_eq.shape[0]:
+            cons.append({"type": "eq", "fun": lambda x: A_eq @ x - problem.b_eq,
+                         "jac": lambda x: A_eq})
+        if A_le.shape[0]:
+            cons.append({"type": "ineq", "fun": lambda x: problem.b_le - A_le @ x,
+                         "jac": lambda x: -A_le})
+        res = minimize(lambda x: 0.5 * x @ P @ x + q @ x, np.zeros(problem.n),
+                       jac=lambda x: P @ x + q, constraints=cons, method="SLSQP",
+                       options={"ftol": 1e-14, "maxiter": 500})
+        return QPResult(x=res.x, status=self._status if res.success else "failed",
+                        raw_status=str(res.message), iterations=int(res.nit),
+                        solve_time_s=0.0, objective=float(res.fun))
+
+
+class _StubBackend:
+    """Returns a fixed status without solving."""
+    name = "stub"
+    settings = {}
+
+    def __init__(self, status, raw_status):
+        self._status, self._raw = status, raw_status
+
+    def solve(self, problem, reuse=False, verbose=False):
+        from pysuto.qp import QPResult
+        return QPResult(x=np.zeros(problem.n), status=self._status,
+                        raw_status=self._raw, iterations=3, solve_time_s=0.0,
+                        objective=0.0)
+
+
+class TestQPBackendContract:
+
+    @staticmethod
+    def _solve(backend, run, **kw):
+        from pysuto.solver import Solver
+        s = Solver(backend, const_dir="unused", verbose_first_solve=False,
+                   prior_mode="cold", **kw)
+        s.load_run = lambda _rid: run
+        return s, s.solve_all(run.run_id, feasibility_check="none")
+
+    @pytest.mark.parametrize("qp_variables", ["flows", "defects"])
+    def test_a_slsqp_backend_matches_clarabel(self, qp_variables):
+        """Soft rows, a hard equality and a binding ``≤`` row: the orchestrator's QP
+        has the same optimum whichever backend solves it."""
+        run = _parity_run()
+        _, ref = self._solve(make_solver().backend, run, qp_variables=qp_variables)
+        _, alt = self._solve(_SlsqpBackend(), run, qp_variables=qp_variables)
+        for t in ref:
+            assert np.allclose(alt[t].F_opt, ref[t].F_opt, rtol=1e-6, atol=1e-6), t
+            assert np.allclose(alt[t].eps_opt, ref[t].eps_opt, rtol=1e-6, atol=1e-6), t
+            assert alt[t].objective == pytest.approx(ref[t].objective, rel=1e-6)
+            assert alt[t].backend == "slsqp" and ref[t].backend == "clarabel"
+            F = ref[t].F_opt
+            assert F[0] - F[1] == pytest.approx(0.5, abs=1e-6)       # the band binds
+            assert F[0] + F[1] - F[2] == pytest.approx(0.0, abs=1e-6)
+
+    def test_a_failed_status_raises_naming_the_raw_status(self):
+        with pytest.raises(RuntimeError, match=r"stub status=MaxIterations.*no fallback"):
+            self._solve(_StubBackend("failed", "MaxIterations"), _parity_run())
+
+    def test_solved_inaccurate_is_accepted(self):
+        _, res = self._solve(_SlsqpBackend(status="solved_inaccurate"), _parity_run())
+        assert {r.solver_status for r in res.values()} == {"solved_inaccurate"}
+
+    def test_the_backend_status_is_kept_beside_the_neutral_one(self):
+        _, res = self._solve(make_solver().backend, _parity_run())
+        r = res["2020"]
+        assert (r.solver_status, r.backend, r.backend_status) == ("solved", "clarabel",
+                                                                  "Solved")
+        assert r.convergence["status"] == "Solved"
+
+    def test_the_orchestrator_and_the_neutral_modules_import_no_solver(self):
+        import ast
+        import pysuto.qp
+        import pysuto.solver
+        import pysuto.registry.optim
+        for mod in (pysuto.qp, pysuto.solver, pysuto.registry.optim):
+            tree = ast.parse(open(mod.__file__).read())
+            imported = []
+            for node in ast.walk(tree):
+                if isinstance(node, ast.Import):
+                    imported += [a.name for a in node.names]
+                elif isinstance(node, ast.ImportFrom):
+                    imported.append(node.module or "")
+            assert not any(m.split(".")[0] == "clarabel" for m in imported), mod
+
+    def test_a_persisted_run_loads_with_clarabel_unimportable(self, tmp_path, monkeypatch):
+        """Reading an opt run needs no numerical solver: with ``clarabel`` blocked and the
+        pysuto modules freshly imported, the registry still loads it."""
+        import sys
+        s, res = self._solve(make_solver().backend, _parity_run())
+        out_id = s.persist(run_id="parity", results=res, output_dir=str(tmp_path / "opt"),
+                           const_run_id="c")
+        for name in [m for m in sys.modules if m == "pysuto" or m.startswith("pysuto.")]:
+            monkeypatch.delitem(sys.modules, name)
+        monkeypatch.setitem(sys.modules, "clarabel", None)
+        from pysuto.registry import OptimRunRegistry
+        loaded = OptimRunRegistry(str(tmp_path / "opt")).load(out_id)
+        assert set(loaded) == {"2020", "2021"}
+        assert loaded["2020"].solver_status == "solved"
+        assert "pysuto.clarabel_backend" not in sys.modules
+
+    def test_a_run_written_before_the_split_loads_with_neutral_statuses(self, tmp_path):
+        """The pre-change format: Clarabel's status in ``solver_status``, no backend
+        fields."""
+        from pysuto.registry import OptimRunRegistry
+        s, res = self._solve(make_solver().backend, _parity_run())
+        out_id = s.persist(run_id="parity", results=res, output_dir=str(tmp_path),
+                           const_run_id="c")
+        path = tmp_path / out_id / "metadata.json"
+        sidecar = json.loads(path.read_text())
+        for entry in sidecar["stage_summary"]["per_timestep"].values():
+            del entry["backend"], entry["backend_status"]
+            entry["solver_status"] = "AlmostSolved"
+        sidecar["stage_summary"]["per_timestep"]["2021"]["solver_status"] = "Solved"
+        path.write_text(json.dumps(sidecar))
+
+        loaded = OptimRunRegistry(str(tmp_path)).load(out_id)
+        assert loaded["2020"].solver_status == "solved_inaccurate"
+        assert loaded["2021"].solver_status == "solved"
+        assert {r.backend for r in loaded.values()} == {"clarabel"}
+        assert loaded["2020"].backend_status == "AlmostSolved"
+
+    def test_the_sidecar_records_the_backend_and_its_settings(self, tmp_path):
+        s, res = self._solve(make_solver(tol_gap_rel=1e-7, max_iter=321).backend,
+                             _parity_run())
+        out_id = s.persist(run_id="parity", results=res, output_dir=str(tmp_path),
+                           const_run_id="c")
+        sidecar = json.loads((tmp_path / out_id / "metadata.json").read_text())
+        cfg = sidecar["stage_config"]
+        assert cfg["backend"] == "clarabel"
+        assert cfg["backend_settings"]["tol_gap_rel"] == 1e-7
+        assert cfg["backend_settings"]["max_iter"] == 321
+        assert cfg["backend_settings"]["direct_solve_method"] == "faer"
+        assert cfg["max_threads"] == 1 and cfg["direct_solve_method"] == "faer"
+        for entry in sidecar["stage_summary"]["per_timestep"].values():
+            assert (entry["solver_status"], entry["backend"], entry["backend_status"]) \
+                == ("solved", "clarabel", "Solved")
+
+
+class TestClarabelBackend:
+    """What the backend owns: the cones, the status map, factorisation reuse and the
+    cold retry that reuse makes necessary."""
+
+    @staticmethod
+    def _problem(shift=0.0, n=3):
+        """min ½‖x − t‖² s.t. x0 + x1 = 1, x2 ≤ 2 (a two-row, ``n``-variable QP)."""
+        from pysuto.qp import QPProblem
+        target = np.arange(n, dtype=float) + shift
+        return QPProblem(P=sp.eye(n, format="csc"), q=-target,
+                         A_eq=sp.csr_matrix(([1.0, 1.0], ([0, 0], [0, 1])), shape=(1, n)),
+                         b_eq=np.array([1.0]),
+                         A_le=sp.csr_matrix(([1.0], ([0], [2])), shape=(1, n)),
+                         b_le=np.array([2.0]), n_a=n, n_eps=0)
+
+    @staticmethod
+    def _count_inits(monkeypatch):
+        """Wrap clarabel.DefaultSolver; return the list of ``(instance, settings)``.
+        An instance's ``stall`` flag makes its next ``solve()`` report NumericalError."""
+        import types
+        import pysuto.clarabel_backend as mod
+        built = []
+        original = mod.clarabel.DefaultSolver
+
+        class _Instance:
+            stall = False
+            def __init__(self, inner):
+                self._inner = inner
+            def solve(self):
+                if self.stall:
+                    return types.SimpleNamespace(status="NumericalError", x=None,
+                                                 iterations=0, obj_val=float("nan"))
+                return self._inner.solve()
+            def __getattr__(self, name):
+                return getattr(self._inner, name)
+
+        def factory(*args, **kwargs):
+            built.append((_Instance(original(*args, **kwargs)), args[5]))
+            return built[-1][0]
+        monkeypatch.setattr(mod.clarabel, "DefaultSolver", factory)
+        return built
+
+    def test_equalities_are_zero_cones_and_le_rows_nonneg(self):
+        from pysuto.clarabel_backend import ClarabelBackend
+        res = ClarabelBackend().solve(self._problem(shift=1.0))
+        assert (res.status, res.raw_status) == ("solved", "Solved")
+        assert res.x[2] == pytest.approx(2.0, abs=1e-7)              # 3 clipped to ≤ 2
+        assert res.x[0] + res.x[1] == pytest.approx(1.0, abs=1e-7)
+        assert res.info["status"] == "Solved"
+        assert res.iter_history is not None
+        assert res.iter_history.shape[0] == res.iterations + 1
+
+    def test_a_failed_solve_maps_to_failed_with_the_raw_status(self):
+        from pysuto.clarabel_backend import ClarabelBackend
+        res = ClarabelBackend(max_iter=1).solve(self._problem(shift=1.0))
+        assert res.status == "failed" and res.raw_status == "MaxIterations"
+
+    def test_history_is_optional(self):
+        from pysuto.clarabel_backend import ClarabelBackend
+        res = ClarabelBackend(capture_iter_history=False).solve(self._problem())
+        assert res.iter_history is None and res.info is not None
+
+    def test_reuse_keeps_the_instance_for_the_same_structure_only(self, monkeypatch):
+        from pysuto.clarabel_backend import ClarabelBackend
+        built = self._count_inits(monkeypatch)
+        be = ClarabelBackend()
+        be.solve(self._problem())
+        be.solve(self._problem(shift=0.5), reuse=True)               # same A: update()
+        assert len(built) == 1
+        be.solve(self._problem(shift=0.7), reuse=False)              # asked afresh
+        assert len(built) == 2
+        be.solve(self._problem(n=4), reuse=True)                     # other structure
+        assert len(built) == 3
+
+    def test_a_stalled_reused_solve_is_retried_cold(self, monkeypatch):
+        from pysuto.clarabel_backend import ClarabelBackend
+        built = self._count_inits(monkeypatch)
+        be = ClarabelBackend()
+        be.solve(self._problem())
+        built[0][0].stall = True
+        res = be.solve(self._problem(shift=0.5), reuse=True)
+        assert len(built) == 2 and res.status == "solved"            # the fresh one won
+
+    def test_a_failure_on_a_fresh_instance_is_not_retried(self, monkeypatch):
+        from pysuto.clarabel_backend import ClarabelBackend
+        built = self._count_inits(monkeypatch)
+        res = ClarabelBackend(max_iter=1).solve(self._problem(shift=1.0), reuse=True)
+        assert res.status == "failed" and len(built) == 1
+
+    def test_the_probe_uses_looser_tolerances_and_the_period_settings(self, monkeypatch):
+        from pysuto.clarabel_backend import ClarabelBackend
+        built = self._count_inits(monkeypatch)
+        be = ClarabelBackend(tol_gap_rel=1e-9, direct_solve_method="qdldl")
+        probe = self._problem()
+        probe.feasibility_only = True
+        be.solve(probe)
+        be.solve(self._problem())
+        st_probe, st_period = built[0][1], built[1][1]
+        assert (st_probe.tol_feas, st_probe.tol_gap_rel) == (1e-7, 1e-7)
+        assert (st_period.tol_feas, st_period.tol_gap_rel) == (1e-8, 1e-9)
+        assert st_probe.direct_solve_method == st_period.direct_solve_method == "qdldl"
+        assert st_probe.max_threads == st_period.max_threads == 1
 
 
 # ---------------------------------------------------------------------------
-# Row realisation (#11): (sense, is_hard) → layout → Clarabel cones
+# Row realisation (#11): (sense, is_hard) → layout
 # ---------------------------------------------------------------------------
 
 class TestRowLayout:
-    """One test per cell of the {sense} × {is_hard} table, plus the cone binding."""
+    """One test per cell of the {sense} × {is_hard} table."""
 
     def test_soft_eq_is_a_slack_row_first(self):
         from pysuto.solver import row_layout
@@ -1285,12 +1556,3 @@ class TestRowLayout:
         lay = row_layout(sense, is_hard)
         np.testing.assert_array_equal(lay.perm, [2, 4, 1, 5, 0, 3])
         assert (lay.n_slack, lay.n_eq, lay.n_le) == (2, 2, 2)
-
-    def test_cones_are_zero_zero_nonneg_and_empty_groups_are_skipped(self):
-        import clarabel
-        from pysuto.solver import clarabel_cones, row_layout
-        cones = clarabel_cones(row_layout(["eq", "eq", "le"], [False, True, True]))
-        assert [type(c) for c in cones] == [clarabel.ZeroConeT, clarabel.ZeroConeT,
-                                            clarabel.NonnegativeConeT]
-        only_le = clarabel_cones(row_layout(["le", "le"], [True, True]))
-        assert [type(c) for c in only_le] == [clarabel.NonnegativeConeT]

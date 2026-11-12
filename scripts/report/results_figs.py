@@ -151,9 +151,9 @@ PROV_LABEL = {"feed": "from a feed (ICSG)", "network": "network", "trade": "trad
               "conc": "concentration", "ore_grade": "ore grade", "eff": "efficiency",
               "time_interp": "time interpolation", "net_stock_share": "net-stock share",
               "flat_prior": "flat prior"}
-CONE_COLOR = {"zero": INK, "nonneg": INK2, "free": GREY}
-CONE_LABEL = {"zero": "hard equality (zero cone)", "nonneg": "hard inequality (nonneg cone)",
-              "free": "soft (free cone)"}
+CONE_COLOR = {"eq": INK, "le": INK2, "soft": GREY}
+CONE_LABEL = {"eq": "hard equality (zero cone)", "le": "hard inequality (nonneg cone)",
+              "soft": "soft (free cone)"}
 ACTIVE_COLOR = PALETTE[6]                   # binding on flow, in (d) and the ticks of (e)
 SLICE_LABEL = {"mass balance": "mass balances", "conc band": "conc bands", "eff band": "eff",
                "scrap-share band": "scrap share", "lower bound": "lower bounds",
@@ -633,14 +633,14 @@ def fig3(P, out: Path) -> Path:
     # (c) rows per family ------------------------------------------------------------
     ac = fig.add_subplot(g2[0, 0])
     yf = np.arange(len(fam))[::-1]
-    ac.barh(yf, fam["rows"], color=[CONE_COLOR[c] for c in fam["cone"]], height=0.62)
+    ac.barh(yf, fam["rows"], color=[CONE_COLOR[c] for c in fam["group"]], height=0.62)
     for yi, n in zip(yf, fam["rows"]):
         ac.text(n * 1.2, yi, f"{n:,}", va="center", fontsize=6, color=INK2)
     ac.set_xscale("log"); ac.set_xlim(10, 4e5)
     ac.set_yticks(yf); ac.set_yticklabels(fam.index, fontsize=6.5)
     ac.set_xlabel(f"rows, {year} (log)")
-    ac.legend([Patch(color=CONE_COLOR[c]) for c in ("zero", "nonneg", "free")],
-              [CONE_LABEL[c] for c in ("zero", "nonneg", "free")],
+    ac.legend([Patch(color=CONE_COLOR[c]) for c in ("eq", "le", "soft")],
+              [CONE_LABEL[c] for c in ("eq", "le", "soft")],
               frameon=False, fontsize=5.8, loc="upper left", bbox_to_anchor=(0.0, -0.2), ncol=2)
     _style(ac, grid_axis="x")
     _tag(ac, "c", "Constraint rows by family and cone", y=1.04)
@@ -660,8 +660,8 @@ def fig3(P, out: Path) -> Path:
         for yi, s in zip(yy[ok], share[ok]):
             txt = "0" if s == 0 else (f"{s:.1f} %" if s < 10 else f"{s:.0f} %")
             ad.text(s + 0.8, yi, txt, va="center", fontsize=5.2, color=INK2)
-    for yi, cone in zip(yf, fam["cone"]):
-        if cone == "free":
+    for yi, cone in zip(yf, fam["group"]):
+        if cone == "soft":
             ad.text(0.8, yi, "soft rows: their pull is z², Fig. 4a", va="center", fontsize=5.8, color=INK2)
     ad.set_xlim(0, 10 * np.ceil(smax / 10) + 8); ad.tick_params(labelleft=False)
     ad.set_xlabel("% of the family's rows")
@@ -686,7 +686,7 @@ def fig3(P, out: Path) -> Path:
             ae.axvline(a + legs[0] - 0.5, color=GREY, lw=0.4, ls="--")
     ae.set_xticks([(a + b - 1) / 2 for a, b, _ in groups]); ae.set_xticklabels([g[2] for g in groups])
     ae.xaxis.tick_top(); ae.tick_params(axis="x", length=0, labelsize=6.5)
-    cone_edges = np.flatnonzero(np.r_[True, sl.cone[1:] != sl.cone[:-1]])
+    cone_edges = np.flatnonzero(np.r_[True, sl.group[1:] != sl.group[:-1]])
     fam_edges = np.flatnonzero(np.r_[False, sl.family[1:] != sl.family[:-1]])
     for i in fam_edges:
         ae.axhline(i - 0.5, color=GRID, lw=0.5)
@@ -701,7 +701,7 @@ def fig3(P, out: Path) -> Path:
         ae.plot([-0.012, -0.03, -0.03, -0.012], [a - 0.2, a - 0.2, b - 0.8, b - 0.8],
                 transform=bracket, color=INK2, lw=0.6, clip_on=False)
     for a, b in zip(cone_edges, np.r_[cone_edges[1:], n_r]):
-        ae.annotate({"free": "soft", "zero": "hard =", "nonneg": "hard ≤"}[sl.cone[a]],
+        ae.annotate({"soft": "soft", "eq": "hard =", "le": "hard ≤"}[sl.group[a]],
                     xy=(0, (a + b - 1) / 2), xycoords=("axes fraction", "data"),
                     xytext=(-90, 0), textcoords="offset points", rotation=90,
                     ha="center", va="center", fontsize=6.3, color=INK)
@@ -720,29 +720,30 @@ def fig3(P, out: Path) -> Path:
     _tag(ae, "e", f"{PROBLEM_REGION}'s slice of the {year} QP in standard form", y=1.06)
 
     # the full block as a to-scale schematic (the zero cone drawn at a minimum height)
-    rc, ne, ns = blk["rows_by_cone"], blk["edges"], blk["rows_by_cone"]["free"]
+    rc, ne, ns = blk["rows_by_group"], blk["edges"], blk["rows_by_group"]["soft"]
     wE = ne / (ne + ns)
-    hts = {c: max(rc[c] / blk["rows"], 0.05) for c in ("free", "zero", "nonneg")}
+    hts = {c: max(rc[c] / blk["rows"], 0.05) for c in ("soft", "eq", "le")}
     scale = 0.86 / sum(hts.values())
     top, x0 = 0.92, 0.04
     ax.text(x0 + wE * 0.86 / 2, top + 0.015, f"{ne:,} edges a", ha="center", va="bottom", fontsize=6, color=INK2)
     ax.text(x0 + (wE + (1 - wE) / 2) * 0.86, top + 0.015, f"{ns:,} slack ε", ha="center", va="bottom",
             fontsize=6, color=INK2)
-    text = {"free": f"G_free\n{rc['free']:,} soft rows", "zero": f"G_zero  {rc['zero']:,} rows",
-            "nonneg": f"G_nonneg\n{rc['nonneg']:,} rows"}
-    for cone in ("free", "zero", "nonneg"):
+    text = {"soft": f"G_free\n{rc['soft']:,} soft rows", "eq": f"G_zero  {rc['eq']:,} rows",
+            "le": f"G_nonneg\n{rc['le']:,} rows"}
+    for cone in ("soft", "eq", "le"):
         hh = hts[cone] * scale
         ax.add_patch(Rectangle((x0, top - hh), wE * 0.86, hh, facecolor=GRID, edgecolor=INK2, lw=0.6))
         ax.text(x0 + wE * 0.43, top - hh / 2, text[cone], ha="center", va="center", fontsize=6, color=INK)
         ax.add_patch(Rectangle((x0 + wE * 0.86, top - hh), (1 - wE) * 0.86, hh, facecolor=SURFACE,
                                edgecolor=INK2, lw=0.6))
         xs = x0 + wE * 0.86
-        if cone == "free":
+        if cone == "soft":
             ax.plot([xs, xs + (1 - wE) * 0.86], [top, top - hh], color=INK2, lw=0.8)
             ax.text(xs + (1 - wE) * 0.62, top - hh * 0.3, "−I", fontsize=6.5, color=INK)
         else:
             ax.text(xs + (1 - wE) * 0.43, top - hh / 2, "0", ha="center", va="center", fontsize=6.5, color=INK)
-        ax.text(x0 + 0.88 + 0.01, top - hh / 2, cone, ha="left", va="center", fontsize=5.8,
+        ax.text(x0 + 0.88 + 0.01, top - hh / 2, {"soft": "free", "eq": "zero", "le": "nonneg"}[cone],
+                ha="left", va="center", fontsize=5.8,
                 color=INK2)
         top -= hh
     ax.text(x0, top - 0.04, f"the full {year} block: {blk['rows']:,} rows × {ne:,} edges, "
@@ -769,7 +770,7 @@ def problem_numbers(P) -> dict:
         "feed_cc_edges_per_year": {"min": int(feed.min()), "max": int(feed.max())},
         "chain_profile_cc_kt": {b: {c: round(float(v), 1) for c, v in r.drop("kind").items()
                                     if round(float(v), 1)} for b, r in cp.iterrows()},
-        "families": {f: {"cone": r.cone, "rows": int(r.rows), "prior_breach": na(r.prior_breach),
+        "families": {f: {"group": r.group, "rows": int(r.rows), "prior_breach": na(r.prior_breach),
                          "binding": na(r.binding), "binding_on_flow": na(r.binding_on_flow),
                          "binding_on_zero_flows": na(r.binding_on_zero_flows)} for f, r in fam.iterrows()},
         "block": P.block_sizes(),

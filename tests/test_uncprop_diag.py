@@ -23,6 +23,7 @@ matplotlib.use("Agg")  # headless backend before any pyplot import
 
 import numpy as np
 import pytest
+from test_solver import make_solver  # type: ignore
 
 
 STEMS = ["ud_r_01_contraction_shift", "ud_r_02_prior_posterior_bands",
@@ -40,7 +41,6 @@ def _block_run(tmp_path, monkeypatch, agg_id=""):
     import scipy.sparse as sp
     from test_constraints import _make_toy_acc, _make_toy_agg_result  # type: ignore
     from pysuto.constraints import ConstraintEngine, MassBalanceBuilder
-    from pysuto.solver import ClarabelSolver
 
     acc = _make_toy_acc()
     engine = ConstraintEngine(acc, storage_dir=str(tmp_path / "const"))
@@ -72,8 +72,8 @@ def _block_run(tmp_path, monkeypatch, agg_id=""):
         G_blocks={t: G[np.flatnonzero(row_time == t)][:, cols].tocsr()
                   for t, cols in cr.edge_cols_by_t.items()},
     )
-    s = ClarabelSolver(const_dir=str(tmp_path / "const"), verbose_first_solve=False,
-                       prior_mode="cold")
+    s = make_solver(const_dir=str(tmp_path / "const"), verbose_first_solve=False,
+                    prior_mode="cold")
     monkeypatch.setattr(s, "load_run", lambda _rid: cr)
     return s.solve_all(cr.run_id), cr, acc
 
@@ -218,14 +218,13 @@ class TestFromUncpropId:
     def test_roundtrip_renders_under_the_run_dir(self, tmp_path, monkeypatch):
         from pysuto.diag import UncPropDiag
         from pysuto.registry import ConstraintRunRegistry
-        from pysuto.solver import ClarabelSolver
         from pysuto.uncprop import KalmanUncProp
 
         results, cr, acc = _block_run(tmp_path, monkeypatch)
         dirs = {k: str(tmp_path / k) for k in ("const", "opt", "uncprop", "imp")}
         ConstraintRunRegistry(dirs["const"]).register(cr)
         const_run_id = cr.run_id
-        s = ClarabelSolver(const_dir=dirs["const"], verbose_first_solve=False)
+        s = make_solver(const_dir=dirs["const"], verbose_first_solve=False)
         opt_run_id = s.persist(run_id=const_run_id, results=results,
                                output_dir=dirs["opt"], const_run_id=const_run_id)
 
@@ -252,7 +251,6 @@ class TestFromUncpropId:
         from pysuto.diag import UncPropDiag
         from pysuto.impute import ImputationLog
         from pysuto.registry import ConstraintRunRegistry, ImputationRunRegistry
-        from pysuto.solver import ClarabelSolver
         from pysuto.uncprop import KalmanUncProp
 
         dirs = {k: str(tmp_path / k) for k in ("const", "opt", "uncprop", "imp")}
@@ -270,7 +268,7 @@ class TestFromUncpropId:
 
         results, cr, acc = _block_run(tmp_path, monkeypatch, agg_id=imp_id)
         ConstraintRunRegistry(dirs["const"]).register(cr)
-        opt_run_id = ClarabelSolver(const_dir=dirs["const"], verbose_first_solve=False) \
+        opt_run_id = make_solver(const_dir=dirs["const"], verbose_first_solve=False) \
             .persist(run_id=cr.run_id, results=results, output_dir=dirs["opt"],
                      const_run_id=cr.run_id)
         prop = KalmanUncProp(opt_dir=dirs["opt"], const_dir=dirs["const"],

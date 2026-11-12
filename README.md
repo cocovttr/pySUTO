@@ -91,7 +91,7 @@ The package is organised into **six sequential stages**: datafeed assembly (per 
        ▼                                                                    │  run ·     │
 ┌────────────────────────────────────────────────────────────────────────┐  │  manifest  │
 │  STAGE 4 — Solver   ·   scripts/run_solver.py                          │◄─┤ → sweep_   │
-│  ClarabelSolver.solve_all()  (one QP per timestep; warm or cold prior) │  │   diag.py  │
+│  Solver.solve_all()  (one QP per timestep; warm or cold prior)         │  │   diag.py  │
 │  in  : ConstraintRun                                                   │  │            │
 │  out : OptimResult per t (F_opt · ε · residuals · telemetry)           │  │            │
 └──────┬─────────────────────────────────────────────────────────────────┘  └────────────┘
@@ -645,10 +645,10 @@ A `ConstDiagnostic` plot suite (in [diag/](src/pysuto/diag/)) can be triggered v
 
 ### Stage 4 — Solver
 
-**What this stage does.** Loads a persisted `ConstraintRun`, runs a feasibility pre-check on the hard rows, and solves a σ-weighted QP per timestep using Clarabel. The per-year prior is the conditioned `f_agg` slice (`prior_mode="cold"`, what `run_solver.py` runs by default) or the previous year's solution `a_0(t) = F_opt(t-1)` (`prior_mode="warm"`, the `ClarabelSolver` class default). Clarabel's solver state is reused via `solver.update(P=…, q=…, b=…)` only when every year's `G_blocks[t]` and cone ordering equal the first year's (`_per_t_problem_identical`, decided once per run; `A` is time-invariant then, `P` is rebuilt each year because σ_c on free rows can vary); otherwise each year builds its own solver.
+**What this stage does.** Loads a persisted `ConstraintRun`, runs a per-period feasibility probe on the hard rows, and solves a σ-weighted QP per timestep. The work is split in two ([ADR 0042](docs/adr/0042-stage-4-owns-the-model-a-qp-backend-solves-a-standard-form-qp.md)): the orchestrator `Solver` owns the model — it conditions σ, chooses the prior, and builds one neutral standard-form QP per period (`pysuto.qp.QPProblem`: `P`, `q`, equality rows, `≤` rows over `x = [a; ε]`, with every soft row realised as `G a − ε = c` there) — and an injected **QP backend** (`ClarabelBackend` in [clarabel_backend.py](src/pysuto/clarabel_backend.py), the only module that imports `clarabel`) solves it and reports a neutral status, `solved`, `solved_inaccurate` or `failed`, beside its raw one. The orchestrator raises `RuntimeError` on `failed`, quoting the raw status; there is no fallback. The per-year prior is the conditioned `f_agg` slice (`prior_mode="cold"`, what `run_solver.py` runs by default) or the previous year's solution `a_0(t) = F_opt(t-1)` (`prior_mode="warm"`, the `Solver` class default). A serial run asks the backend to `reuse` its factorisation: `ClarabelBackend` then calls `solver.update(P=…, q=…, b=…)` on the previous period's instance when that period's `A` and the sparsity of `P` are identical (`P` itself is rebuilt each year because σ_c on free rows can vary), and otherwise builds a fresh one; a stalled solve on a reused instance is retried cold inside the backend.
 
 **Inputs:** `ConstraintRun` run ID (loaded from `data/proc/const/`).
-**Outputs per timestep:** `OptimResult` plus solver telemetry (`objective`, `iterations`, `solve_time_s`, `solver_status`, full `convergence` dict, optional `iter_history`). The array shapes depend on the solve path — the **block path** (the default for partitioned runs) stores **year-local** slices, the **legacy** full-G path stores full-length vectors; see [Per-t block solve & year-local persistence](#per-t-block-solve--year-local-persistence).
+**Outputs per timestep:** `OptimResult` plus solver telemetry (`objective`, `iterations`, `solve_time_s`, `solver_status` — the neutral status — with `backend` and `backend_status`, and the backend's `convergence` dict and optional `iter_history`, whose columns the backend owns). The arrays are **year-local** slices; see [Per-t block solve & year-local persistence](#per-t-block-solve--year-local-persistence). Opt runs written before the split load with `solver_status` mapped (`Solved` → `solved`, `AlmostSolved` → `solved_inaccurate`) and `backend = "clarabel"`.
 
 #### Math
 
@@ -669,9 +669,9 @@ $$\text{s.t.} \quad \mathbf{G}\,\mathbf{a} - \boldsymbol{\varepsilon} = \mathbf{
 | $\mathbf{c}(t)$ | Per-timestep RHS from `timestep_data[t]["c"]` |
 | $\mathcal{L}$ | Edges whose structural lower bound `acc.bounds.l` is 0 — all but the signed stock edges; enforced as Type-5 rows of $\mathbf{G}$ ([ADR 0039](docs/adr/0039-flow-lower-bounds-are-enforced-in-the-qp.md)). The upper bounds $\mathbf{u}$ and the zero pin reach only the feasibility pre-check |
 
-##### Clarabel standard form
+##### Standard form
 
-Clarabel solves $\min_x \tfrac12 x^\top P x + q^\top x$ s.t. $A x + s = b$, $s \in \mathcal{K}$. Stack the decision variable $x = [\mathbf{a};\, \boldsymbol{\varepsilon}]$. The transform:
+The orchestrator hands the backend $\min_x \tfrac12 x^\top P x + q^\top x$ s.t. $A_{eq}\,x = b_{eq}$, $A_{le}\,x \le b_{le}$ over $x = [\mathbf{a};\, \boldsymbol{\varepsilon}]$; `ClarabelBackend` maps the equality rows to `ZeroConeT` and the `≤` rows to `NonnegativeConeT` ($A x + s = b$, $s \in \mathcal{K}$). The transform:
 
 $$P(t) = 2\begin{bmatrix} \Sigma_a^{-1} & 0 \\ 0 & \Sigma_c(t)^{-1} \end{bmatrix} \quad \text{(upper triangle only, CSC format)}$$
 
@@ -683,7 +683,7 @@ Cone order: `ZeroConeT(n_free)` for the soft-equality residual rows (ε is a fre
 
 ##### Σ_a conditioning
 
-To bound the condition number of $\Sigma_a^{-1}$, `ClarabelSolver._condition_prior` floors and ceilings σ_a:
+To bound the condition number of $\Sigma_a^{-1}$, `Solver._condition_prior` floors and ceilings σ_a:
 
 $$\text{floor} = \max(\sigma_a^\mathrm{floor,abs},\ \sigma_a^\mathrm{floor,rel} \cdot |a_0|), \qquad \text{ceiling} = \sigma_a^\mathrm{ceiling\_factor} \cdot \max_\mathrm{finite}\sigma_a$$
 
@@ -691,22 +691,24 @@ Defaults give ~12 orders of magnitude — fine for Clarabel with default static 
 
 ##### Feasibility pre-check
 
-Before solving, the hard subsystem (zero + nonneg cones + flow bounds) is solved as a pure feasibility QP (`P = εI`, `q = 0`). If Clarabel returns a non-OK status, `ClarabelSolver` raises with a diagnostic that lists the top hard-row offenders by residual.
+Before solving, every requested period's hard subsystem (its hard equalities and `≤` rows plus its edges' bounds $l \le a \le u$) is solved as a pure feasibility QP (`P = εI`, `q = 0`) through the same backend, on the same thread pool as the solves. If the backend reports `failed`, `Solver` raises with a diagnostic that lists the top hard-row offenders of that period by residual. `FEASIBILITY_CHECK = "none"` skips the probe (a sweep point, #104; a failed period still raises in its own solve). The earlier first-year-only probe over the full multi-year `G` (≈ 7 min on copper whatever the linear solver or thread count) is gone.
 
 ##### Per-t block solve & year-local persistence
 
 When the `ConstraintRun` carries a per-t partition (`G_blocks`, `edge_cols_by_t` — built in Stage 3 whenever constraints have no cross-time coupling), `solve_all` dispatches to `_solve_all_via_blocks`: each year is solved as an independent QP over only that year's edges (`cols_t`) and rows (`rows_t`), ~30× smaller than the global QP. Because the edge set partitions **disjointly by time**, every edge is solved exactly once — in its own year — and the complete `a*` is the disjoint union of the per-period slices. Under `prior_mode="warm"` the previous year's `F_opt` is carried into the next year's prior by edge template (`AccountingStructure.warm_start_gather`; positional fallback without an acc); under `"cold"` every year starts from its own `f_agg` slice.
 
-Each per-t `OptimResult` therefore persists **only that period's solved values**: `F_opt` over `cols_t` `[E_t]`, `residuals` / `c_star` over `rows_t` `[M_t]`, plus the `cols_t` / `rows_t` global-index arrays — with **no cross-year prior placeholders**. (Earlier block runs stored the full `[E]` vector with non-`t` edges frozen at the prior `a_0`; this surfaced the prior mass-balance infeasibility on every *other* year's rows and a spurious bimodal `a` distribution — see [`docs/rep/analysis_opt_20260527_095157_40846da4_20260528_block-solver-massbal-artifact.md`](docs/rep/analysis_opt_20260527_095157_40846da4_20260528_block-solver-massbal-artifact.md).) The legacy full-G path (empty `G_blocks`) keeps full-length `[E]` / `[M]` vectors with `cols_t = rows_t = None`; the npz `cols_t` key is the schema discriminator on load. `SolverDiag` reassembles the disjoint per-period slices into one complete `a*` / `residuals` at load time, so every figure (and the mass-balance residual) reads the true, placeholder-free solution. Loading a pre-fix block run (const has `G_blocks` but the opt npz lacks `cols_t`) emits a `warn_if_prefix_block_run` warning.
+Each per-t `OptimResult` therefore persists **only that period's solved values**: `F_opt` over `cols_t` `[E_t]`, `residuals` / `c_star` over `rows_t` `[M_t]`, plus the `cols_t` / `rows_t` global-index arrays — with **no cross-year prior placeholders**. (Earlier block runs stored the full `[E]` vector with non-`t` edges frozen at the prior `a_0`; this surfaced the prior mass-balance infeasibility on every *other* year's rows and a spurious bimodal `a` distribution — see [`docs/rep/analysis_opt_20260527_095157_40846da4_20260528_block-solver-massbal-artifact.md`](docs/rep/analysis_opt_20260527_095157_40846da4_20260528_block-solver-massbal-artifact.md).) The legacy full-G path (empty `G_blocks`) was removed with ADR 0042: a constraint run without a per-t partition raises. Opt runs it wrote keep full-length `[E]` / `[M]` vectors with `cols_t = rows_t = None`; the npz `cols_t` key is the schema discriminator on load. `SolverDiag` reassembles the disjoint per-period slices into one complete `a*` / `residuals` at load time, so every figure (and the mass-balance residual) reads the true, placeholder-free solution. Loading a pre-fix block run (const has `G_blocks` but the opt npz lacks `cols_t`) emits a `warn_if_prefix_block_run` warning.
 
 ##### Parallel solve
 
-Under `prior_mode="cold"` no period reads another period's optimum, so with `n_workers > 1` the periods are solved concurrently on a thread pool (`min(n_workers, periods)` threads), each with its own Clarabel instance; the results come back in period order and are bit-identical to solving each period on its own. A warm run is a chain, so `n_workers > 1` with `prior_mode="warm"` raises. Every period solve, serial or parallel, pins Clarabel's linear solver (`direct_solve_method`, default `"faer"`) to one thread: on the copper period QPs multi-threaded faer was slower than one thread and gave the same answer, so the cores go to the periods instead (#70). Reusing the KKT factorisation via `update()` is a serial-only feature; a parallel solve factorises each period on its own. The first failed period cancels the periods not yet started and raises naming every period that failed. The feasibility pre-check keeps Clarabel's default threading and runs before any period. The sidecar records `n_workers`, `max_threads`, `direct_solve_method` and `qp_variables` in `stage_config` and the wall-clock of the probe plus the period solves as `stage_summary.solve_wall_s`. On copper (30 periods, 8 cores) Stage 4 takes ≈ 12 min: the first-period feasibility probe ≈ 7 min, the period solves ≈ 3.3 min, and persisting the run plus rendering its diagnostics ≈ 1 min. The pre-#70 serial solve, with multi-threaded faer, spent ≈ 31 min on the period solves; with one faer thread the periods sum to ≈ 24 min, so the thread pinning and the concurrency share the gain. Every period is bit-identical to the pre-#70 solve (#71: `opt_20261014_132742_1635b787` against `opt_20261012_122124_40b1b370`).
+Under `prior_mode="cold"` no period reads another period's optimum, so with `n_workers > 1` the periods are solved concurrently on a thread pool (`min(n_workers, periods)` threads), each period in its own backend call (so its own Clarabel instance); the results come back in period order and are bit-identical to solving each period on its own. A warm run is a chain, so `n_workers > 1` with `prior_mode="warm"` raises. `ClarabelBackend` pins Clarabel's linear solver (`direct_solve_method`, default `"faer"`) to one thread for every solve, probe or period, serial or parallel: on the copper period QPs multi-threaded faer was slower than one thread and gave the same answer, so the cores go to the periods instead (#70). Reusing the KKT factorisation is a serial-only feature; a parallel solve factorises each period on its own. The first failed period cancels the periods not yet started and raises naming every period that failed. The per-period probes run before any period solve. The sidecar records `n_workers`, `qp_variables`, `backend` and `backend_settings` (and, under their earlier names, `max_threads` and `direct_solve_method`) in `stage_config` and the wall-clock of the probe plus the period solves as `stage_summary.solve_wall_s`. On copper (30 periods, 8 cores) Stage 4 took ≈ 12 min before the per-period probe: the first-period full-`G` probe ≈ 7 min, the period solves ≈ 3.3 min, and persisting the run plus rendering its diagnostics ≈ 1 min (the per-period probe has yet to be timed on copper, #56). The pre-#70 serial solve, with multi-threaded faer, spent ≈ 31 min on the period solves; with one faer thread the periods sum to ≈ 24 min, so the thread pinning and the concurrency share the gain. Every period is bit-identical to the pre-#70 solve (#71: `opt_20261014_132742_1635b787` against `opt_20261012_122124_40b1b370`).
 
 #### Classes
 
-- **`ClarabelSolver`** ([solver.py](src/pysuto/solver.py)) — `.load_run(run_id)`, `.feasibility_check(run, t_label)`, `.solve_all(run_id, timesteps=…)`, `.persist(run_id, results, output_dir, …)`.
-- **`OptimResult`** ([solver.py](src/pysuto/solver.py)) — per-timestep dataclass: `F_opt`, `eps_opt`, `c_star`, `residuals`, `objective`, `iterations`, `solve_time_s`, `solver_status`, `convergence`, optional `iter_history`, plus `cols_t` / `rows_t` (block path: the global indices the year-local `F_opt` / `residuals` slices live on; `None` on the legacy path).
+- **`Solver`** ([solver.py](src/pysuto/solver.py)) — `Solver(backend, …)`: `.load_run(run_id)`, `.feasibility_check(run, t_label)`, `.solve_all(run_id, timesteps=…)`, `.persist(run_id, results, output_dir, …)`. It imports no numerical solver.
+- **`QPProblem` / `QPResult` / `QPBackend`** ([qp.py](src/pysuto/qp.py)) — the neutral period QP, a backend's answer (`x`, neutral `status`, `raw_status`, `iterations`, `solve_time_s`, `objective`, optional `info` and `iter_history`) and the protocol `solve(problem, reuse, verbose)`, `name`, `settings`.
+- **`ClarabelBackend`** ([clarabel_backend.py](src/pysuto/clarabel_backend.py)) — Clarabel behind that protocol: tolerances, reduced tolerances, `max_iter`, `direct_solve_method`, `max_threads`, factorisation reuse, cold retry, iteration history (`ITER_DTYPE`).
+- **`OptimResult`** ([solver.py](src/pysuto/solver.py)) — per-timestep dataclass: `F_opt`, `eps_opt`, `c_star`, `residuals`, `objective`, `iterations`, `solve_time_s`, `solver_status`, `convergence`, optional `iter_history`, `backend` / `backend_status`, plus `cols_t` / `rows_t` (the global indices the year-local `F_opt` / `residuals` slices live on; `None` on runs written by the removed legacy path).
 
 Solver diagnostics live in [diag/](src/pysuto/diag/) (`SolverDiag`, 12 figures: solver health and per-iteration convergence traces, the objective decomposition Σz² per family, objective share by sector key and by identity with z-profiles, sector totals with retention, and the prior-vs-posterior rocket — the module docstring is the catalogue; `plot(regions=[…])` restricts a portfolio to one region). `plot()` also writes `ranking_<family>.csv` (identity rankings by objective share) and `provenance.md`; `SolverStatsDiagnostic` writes the per-year `edges_<year>.csv` / `constraints_<year>.csv` on demand (`scripts/solver_stats.py <opt_run_id> --years …`; the solver drivers write only the rankings) from the same all-years frames the figures read, so tables and figures agree by construction. Posterior uncertainty (`σ_a*`, confidence intervals) is produced by [Stage 5](#stage-5--posterior-uncertainty-propagation) (`KalmanUncProp` in [uncprop.py](src/pysuto/uncprop.py)).
 
@@ -714,27 +716,27 @@ Solver diagnostics live in [diag/](src/pysuto/diag/) (`SolverDiag`, 12 figures: 
 
 | Parameter | Default | Effect |
 |---|---|---|
-| `const_dir` | `"data/proc/const"` | Where `ClarabelSolver` looks up `ConstraintRun`s |
+| `backend` | required | The QP backend that solves each period (`ClarabelBackend`; the driver builds it from its knobs) |
+| `const_dir` | `"data/proc/const"` | Where `Solver` looks up `ConstraintRun`s |
 | `sigma_a_floor_abs` | `1e-8` | Absolute σ_a floor (Σ_a conditioning) |
 | `sigma_a_floor_rel` | `1e-5` | Relative σ_a floor (× $|a_0|$) |
 | `sigma_a_ceiling_factor` | `1e5` | Ceiling = factor × max finite σ_a |
 | `sigma_c_floor` | `1e-9` | σ_c floor for free rows |
-| `tol_feas` / `tol_gap_abs` / `tol_gap_rel` | `1e-8` | Clarabel tolerances |
-| `max_iter` | `200` | Clarabel iteration cap |
-| `feasibility_check` | `"first"` | Feasibility pre-check scope: `"first"` (fast), `"all"` (localises an infeasible year) or `"none"` (sweep points; a failed period still raises); the old bool `feasibility_check_first_only` maps onto it (#104) |
-| `verbose_first_solve` | `True` | Print Clarabel iteration log for `t=0` only (serial solve) |
-| `n_workers` | `1` | Periods solved concurrently (cold only); the driver sets `N_WORKERS = os.cpu_count()` |
-| `direct_solve_method` | `"faer"` | Clarabel's linear solver for the period QPs, pinned to one thread |
+| `feasibility_check` | `"all"` | Feasibility pre-check scope: `"all"` (one probe per period) or `"none"` (sweep points; a failed period still raises); `"first"` and the old bool `feasibility_check_first_only` are gone (ADR 0042) |
+| `verbose_first_solve` | `True` | Ask the backend for its own log of the first period's solve (serial solve) |
+| `n_workers` | `1` | Periods probed and solved concurrently (cold only); the driver sets `N_WORKERS = os.cpu_count()` |
 | `qp_variables` | `"flows"` | Decision variables of the period QP: the flows, or their defects `a − a_0` (same QP, `q = 0`) |
+
+`ClarabelBackend` parameters: `tol_feas` / `tol_gap_abs` / `tol_gap_rel` (`1e-8`), `reduced_tol_*` (Clarabel's defaults unless set), `max_iter` (`200`), `direct_solve_method` (`"faer"`), `max_threads` (`1`), `capture_iter_history` (`True`).
 
 #### Use case
 
 ```python
-solver = ClarabelSolver(const_dir="data/proc/const")
+solver = Solver(ClarabelBackend(), const_dir="data/proc/const")
 results = solver.solve_all(
     run_id="copper_const_v0",
     timesteps=[str(t) for t in range(2010, 2024)],
-    feasibility_check="first",
+    feasibility_check="all",
 )
 # results[t] is an OptimResult with F_opt, eps_opt, residuals, …
 optim_run_id = solver.persist(
@@ -818,7 +820,7 @@ $$\mathrm{var}(w^\top a^*) = w^\top\Sigma_a w - (G\Sigma_a w)^\top S^{-1} (G\Sig
 - **`KalmanUncProp`** ([uncprop.py](src/pysuto/uncprop.py)) — closed-form GLS concrete: a QR of the whitened system per year on the block path, sparse Cholesky on the full-G (legacy) path. Cross-stage discovery (`opt_run_id` → `const_run_id` via the opt sidecar) happens inside `.compute()`; persistence via `.persist(result, opt_run_id, label)`.
 - **`UncPropResult` / `UncPropTimestep`** ([uncprop.py](src/pysuto/uncprop.py)) — return dataclasses. `UncPropTimestep` holds `(sigma_a_star, lower, upper, diagnostics, cols_t)` per t (block path year-local over `cols_t`; legacy full-length with `cols_t = None`); `a*` is **not** stored — readers join on the upstream `opt_run_id`.
 - **`UncPropRunRegistry`** ([registry/uncprop.py](src/pysuto/registry/uncprop.py)) — Stage-5 output registry; harmonized run-id (`uncprop_<ts>_<code>`), per-t `.npz`, diagnostics in sidecar.
-- **`condition_prior` / `condition_sigma_c`** ([_conditioning.py](src/pysuto/_conditioning.py)) — shared helpers also used by `ClarabelSolver`, guaranteeing that uncprop applies the same σ_a floor / ceiling rules the solver applied.
+- **`condition_prior` / `condition_sigma_c`** ([_conditioning.py](src/pysuto/_conditioning.py)) — shared helpers also used by `Solver`, guaranteeing that uncprop applies the same σ_a floor / ceiling rules the solver applied.
 
 #### Key parameters
 
@@ -826,9 +828,9 @@ $$\mathrm{var}(w^\top a^*) = w^\top\Sigma_a w - (G\Sigma_a w)^\top S^{-1} (G\Sig
 |---|---|---|
 | `alpha` (passed to `.compute()`) | `0.05` | CI level — Gaussian quantile $z = \Phi^{-1}(1-\alpha/2)$ |
 | `block_size` | `1024` | Column-block size for the triangular solve of the full-G (legacy) path; trades memory ↔ Python-loop overhead |
-| `sigma_a_floor_abs` | `1e-8` | Same as `ClarabelSolver` (matched for prior consistency) |
-| `sigma_a_floor_rel` | `1e-5` | Same as `ClarabelSolver` |
-| `sigma_a_ceiling_factor` | `1e5` | Same as `ClarabelSolver` |
+| `sigma_a_floor_abs` | `1e-8` | Same as `Solver` (matched for prior consistency) |
+| `sigma_a_floor_rel` | `1e-5` | Same as `Solver` |
+| `sigma_a_ceiling_factor` | `1e5` | Same as `Solver` |
 | `sigma_c_floor` | `1e-9` | Floor on soft-row σ_c; hard rows are forced to exact zero regardless |
 | `bind_tol` | `1e-6` | kt — a hard inequality row binds at `a*` when `G·a* − c ≥ −bind_tol` (driver knob `BIND_TOL`) |
 | `rank_tol` | `1e-10` | Pivot tolerance of the scaled hard-block pivoted Cholesky that drops dependent hard rows (driver knob `RANK_TOL`) |
@@ -949,7 +951,9 @@ world.to_piot().sankey("2020").write_html("copper_process_network_2020.html")
 | [agg.py](src/pysuto/agg.py) | `AggregationMath`, `AggregationResult` | Build `Ω`, compute `f_agg`, `σ_agg`, coverage. |
 | [impute/](src/pysuto/impute/) | `ImputationEngine`, `BaseImputer`, `TradeImputer`, `NetworkImputer`, `ProcessRecipe`, `ParametricImputer`, `FormulaImputer`, `TimeImputer`, `ShareImputer`, `FlatPriorImputer`, `ParametricRelation`, `FormulaRelation`, `SourceTerm`, `ParamRef`, `ImputationLog`, `ImputationMetadata` | Ordered imputation pipeline; per-edge provenance logging. **Subpackage layout:** `engine.py`, `base.py`, `trade.py`, `network.py`, `parametric.py`, `formula.py`, `time.py`, `share.py`, `flat_prior.py`. |
 | [constraints/](src/pysuto/constraints/) | `ConstraintEngine`, `BaseConstraintBuilder`, `MassBalanceBuilder`, `SumConstraintBuilder`, `RatioConstraintBuilder`, `RatioBoundBuilder`, `FlowBoundsBuilder`, `ConstraintBlock`, `ConstraintRun` | Plugin constraint pipeline; persists to `data/proc/const/` via `ConstraintRunRegistry` (lives in [registry/](src/pysuto/registry/)). **Subpackage layout:** `engine.py`, `base.py`, `mass_balance.py`, `sum.py`, `ratio.py`, `flow_bound.py`, `run.py`. |
-| [solver.py](src/pysuto/solver.py) | `ClarabelSolver`, `OptimResult` | σ-weighted QP via Clarabel, one per timestep; warm or cold prior. `ClarabelSolver.objective_at` scores any year-local posterior under a const run's QP, split by family (#102). |
+| [solver.py](src/pysuto/solver.py) | `Solver`, `OptimResult` | Stage-4 orchestrator: builds the σ-weighted period QP (warm or cold prior) and hands it to an injected QP backend; imports no numerical solver. `Solver.objective_at` scores any year-local posterior under a const run's QP, split by family (#102). |
+| [qp.py](src/pysuto/qp.py) | `QPProblem`, `QPResult`, `QPBackend` | The neutral standard-form period QP and the backend protocol (ADR 0042). |
+| [clarabel_backend.py](src/pysuto/clarabel_backend.py) | `ClarabelBackend`, `ITER_DTYPE` | The production QP backend; the only module that imports `clarabel`. |
 | [uncprop.py](src/pysuto/uncprop.py) | `BaseUncProp`, `KalmanUncProp`, `UncPropResult`, `UncPropTimestep` | Stage-5 posterior uncertainty: active set and a QR of the whitened system per year (block path), sparse Cholesky (full-G path); persists to `data/proc/uncprop/` via `UncPropRunRegistry`. |
 | [psut.py](src/pysuto/psut.py) | `PSUT`, `OptimResultsLike`, `classify_blocks`, `BLOCKS` | Stage-6 tidy-canonical PSUT: `from_opt_run` / `from_results`, block views `S`/`U`/`Y`/`E`/`O`/`P`/`W`, `realized_conc`, `aggregate` (region/sector pushforward with `region_crossed`), `sankey` (thin delegate to `diag.psut`), `to_piot`, period selection (`periods`, `latest`, `at`); every valuation in one table with a `primary`; persists to `data/proc/psut/` via `PsutRunRegistry`. |
 | [piot.py](src/pysuto/piot.py) | `PIOT`, `market_share_network`, `market_shares`, `CONSTRUCTS`, `LEVELS` | Stage-6 PIOT as a construct family: the market-share process network (`Z()`, `D()`, process-network `sankey()`), levels `A`/`L` (`x`, `y`, `A`, `L`), `intensity`, `footprint`, `embodied_trade`, `ew_mfa`, `multipliers`, `sda`; `suh_product` is a stub until #20. A derived view of a PSUT, never persisted. |
@@ -978,7 +982,8 @@ from pysuto.constraints import (
     ConstraintEngine, MassBalanceBuilder, SumConstraintBuilder,
     RatioConstraintBuilder, RatioBoundBuilder, FlowBoundsBuilder,
 )
-from pysuto.solver import ClarabelSolver
+from pysuto.clarabel_backend import ClarabelBackend
+from pysuto.solver import Solver
 from pysuto.uncprop import KalmanUncProp
 from pysuto.diag import AggDiagnostic, ImpDiagnostic
 
@@ -1111,11 +1116,11 @@ constraint_run = const_engine.run(
 # const_<YYYYMMDD_HHMMSS>_<8-char-uuid>.
 
 # ── Stage 4: solve per timestep ───────────────────────────────────────────
-solver = ClarabelSolver(const_dir="data/proc/const")
+solver = Solver(ClarabelBackend(), const_dir="data/proc/const")
 results = solver.solve_all(
     run_id=constraint_run.run_id,
     timesteps=[str(t) for t in range(2010, 2024)],
-    feasibility_check="first",
+    feasibility_check="all",
 )
 optim_run_id = solver.persist(
     run_id=constraint_run.run_id,
@@ -1320,7 +1325,7 @@ data/proc/sweep/sweep_<YYYYMMDD_HHMMSS>_<8hex>/
 `scripts/sweep_diag.py <sweep_run_id>` scores every done point against the base chain
 (#107), reading only the base's const run and the points' opt runs. Every point gets the
 cross-evaluated objective `J_base_at_point`, which is each point's posterior scored under
-the base QP by `ClarabelSolver.objective_at` and split by family. On
+the base QP by `Solver.objective_at` and split by family. On
 `opt_20261019_171746_3272682b` against `opt_20261020_112726_2f451f31` it gives the 66,702
 of #33. Every point also gets the mass moved by valuation, and by category with the
 **pooled retention** by category and year. A category with a signed edge (structural
@@ -1411,7 +1416,9 @@ pysuto/
 │   ├── flow_bound.py                                                         │
 │   └── run.py                                                              ─┘
 │
-├── solver.py              ClarabelSolver · OptimResult                    ─┐ Stage 4
+├── solver.py              Solver · OptimResult                            ─┐ Stage 4
+├── qp.py                  QPProblem · QPResult · QPBackend                  │
+├── clarabel_backend.py    ClarabelBackend (the one clarabel import)         │
 │                                                                            │
 ├── uncprop.py             BaseUncProp · KalmanUncProp                     ─┐ Stage 5
 │                          UncPropResult · UncPropTimestep                   │

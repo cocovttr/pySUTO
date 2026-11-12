@@ -25,7 +25,7 @@ Synthetic stubs only. Two regions A and B; 14 edges, twelve in 2020 and two in
 
 The 2020 rows (local r = global id; row 12 is a 2021 row outside the block):
 
-    r   family            cone    entries                   c      prior resid  resid at a*
+    r   family            group   entries                   c      prior resid  resid at a*
     0   mass balance      zero    e0 − e2                   0       1 (breach)   0
     1   stripping         zero    e1 − 2·e3                 0       0            0
     2   conc band         nonneg  e2 − 0.5·e3               0    −116            0  (on flow)
@@ -281,8 +281,8 @@ class TestRowActivity:
         assert s.index.tolist() == ["mass balance", "stripping", "conc band", "eff band",
                                     "scrap-share band", "lower bound", "soft ratio",
                                     "scale total & scrap anchor"]
-        assert s["cone"].tolist() == ["zero", "zero", "nonneg", "nonneg", "nonneg",
-                                      "nonneg", "free", "free"]
+        assert s["group"].tolist() == ["eq", "eq", "le", "le", "le",
+                                      "le", "soft", "soft"]
         assert s["rows"].tolist() == [2, 1, 1, 1, 2, 3, 1, 1]
         assert s.loc["mass balance", "prior_breach"] == 1
         assert s.loc["scrap-share band", "prior_breach"] == 1
@@ -295,7 +295,7 @@ class TestRowActivity:
     def test_block_sizes_count_true_nonzeros(self):
         b = _diag().block_sizes()
         assert b["rows"] == 12 and b["edges"] == 12
-        assert b["rows_by_cone"] == {"free": 2, "zero": 3, "nonneg": 7}
+        assert b["rows_by_group"] == {"soft": 2, "eq": 3, "le": 7}
         assert b["nnz"] == 21 and b["nnz_stored"] == 23
 
     def test_columns_must_match_the_constraint_block(self):
@@ -316,10 +316,10 @@ class TestRegionSlice:
                                       False, False, False, False, True])
         assert s.n_legs_omitted == 2                               # e6, e7: flat-prior legs
 
-    def test_rows_by_cone_then_family_complete_first(self):
+    def test_rows_by_group_then_family_complete_first(self):
         s = _diag().region_slice("A")
         assert_array_equal(s.row_ids, [9, 10, 0, 8, 1, 2, 3, 4, 11, 6, 7])
-        assert s.cone.tolist() == ["free"] * 2 + ["zero"] * 3 + ["nonneg"] * 6
+        assert s.group.tolist() == ["soft"] * 2 + ["eq"] * 3 + ["le"] * 6
         assert_array_equal(s.complete, [True, False, True, True, True, True, False, True,
                                         False, True, True])
         assert_array_equal(s.binding_on_flow, [r == 2 for r in s.row_ids])

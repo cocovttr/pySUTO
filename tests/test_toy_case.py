@@ -196,7 +196,7 @@ def test_every_hard_row_closes_to_1e_10(chain):
     hard  = const.row_meta["is_hard"].to_numpy().astype(bool)
     assert hard.sum() == 180 + 15                 # mass balances + stripping rows
     for t, res in OptimRunRegistry(str(root / "proc" / "opt")).load(ids["opt"]).items():
-        assert res.solver_status == "Solved"
+        assert res.solver_status == "solved"
         assert np.abs(res.residuals[hard[res.rows_t]]).max() <= 1e-10, t
 
 

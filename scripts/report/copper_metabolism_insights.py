@@ -140,7 +140,7 @@ def lineage(opt: str) -> dict:
     return {"opt": opt, "label": om.get("label"), "const": const, "imp": imp,
             "params": versions, "feeds": feeds,
             "objective": float(sum(v["objective"] for v in per.values())),
-            "solved": sum(v["solver_status"] == "Solved" for v in per.values())}
+            "solved": sum(v["solver_status"] in ("Solved", "solved") for v in per.values())}
 
 
 # ---------------------------------------------------------------------------

@@ -154,7 +154,7 @@ def test_the_constraint_diagnostics_are_a_knob_on_by_default():
 
 def test_the_feasibility_check_knob_replaces_the_bool():
     mod = _load("opt")
-    assert mod.FEASIBILITY_CHECK == "first"
+    assert mod.FEASIBILITY_CHECK == "all"
     assert "FEASIBILITY_CHECK" in mod.KNOBS
     assert "FEASIBILITY_CHECK_FIRST_ONLY" not in mod.KNOBS
     assert not hasattr(mod, "FEASIBILITY_CHECK_FIRST_ONLY")
