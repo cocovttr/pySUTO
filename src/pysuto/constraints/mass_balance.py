@@ -44,7 +44,7 @@ class MassBalanceBuilder(BaseConstraintBuilder):
         self._mask_name = mask
 
     def build_static(self, acc_struct) -> ConstraintBlock:
-        n_edges  = acc_struct.n_edges
+        n_edges = acc_struct.n_edges
 
         if self._mask_name is not None:
             if self._mask_name not in acc_struct.masks:

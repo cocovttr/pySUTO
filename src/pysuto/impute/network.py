@@ -94,7 +94,7 @@ class _RRecipe:
     eff_sig: float
     eff_eps: float
     eff_param_id: str | None
-    relation: Relation                 # Σ products − eff·Σ inputs = 0 (the pooled-eff row)
+    relation: Relation                 # Σ products − eff·Σ inputs = 0 (pooled eff)
 
 
 @dataclass(frozen=True)
@@ -531,7 +531,8 @@ class NetworkImputer(BaseImputer):
         # Production stays the recipe's; only a lone missing USE may be closed here.
         # Once every stock leg among the uses is reported, the use total is observed
         # and the supply closes from it as for any node (#38).
-        if fill.edge_coefficient > 0 and (self._stock_target[out] & np.isnan(f[out])).any():
+        if fill.edge_coefficient > 0 and (
+                self._stock_target[out] & np.isnan(f[out])).any():
             return
         s_e = lp_combine([sigma[x] for x in fill.sources], self.p)
         # the logged coefficients are the magnitudes: a balance's ±1 are one shared weight
