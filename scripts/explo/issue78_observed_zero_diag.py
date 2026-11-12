@@ -38,7 +38,11 @@ import pandas as pd
 sys.path.insert(0, "src")
 sys.path.insert(0, "scripts")
 sys.path.insert(0, "scripts/explo")
-import build_trade_shares as BTS                          # noqa: E402
+from pysuto.cases import copper_feed as CF                  # noqa: E402
+from pysuto.feedprep import trade_shares as T               # noqa: E402
+from pysuto.input_registry import InputRegistries           # noqa: E402
+
+INPUTS = InputRegistries.load(root="data/input")            # read-only (#93)
 import issue69_aggregate_gap_diag as P69                  # noqa: E402
 import issue75_scandinavia_split_diag as P75              # noqa: E402
 import issue79_baci490_taiwan_diag as P79                 # noqa: E402
@@ -71,7 +75,7 @@ def _observed_zero(opt: str) -> np.ndarray:
 def observed(E: dict, acc, base: str, new: str) -> None:
     """O: the observed-zero legs, the imputer's writes on them, their posterior and z."""
     oz = _observed_zero(new)
-    ei = BTS._decoded_edges(acc)
+    ei = T.decoded_edges(acc)
     legs = ei[oz[ei.edge_id.to_numpy()]]
     print(f"\n== O observed zeros on {L._chain(new)[2]['icsg']}: {len(legs)} legs; by sector "
           f"pair {legs.groupby(['root_sector_from', 'root_sector_to']).size().to_dict()}")
@@ -104,9 +108,9 @@ def first_build(acc, feed: str) -> None:
     """O: a first build's observed zeros in region-years that produce the product (raw
     ICSG production, the ADR 0024 bound's own helper)."""
     r = np.load(ROOT / "feed" / "registry" / feed / "result.npz")
-    ei = BTS._decoded_edges(acc)
+    ei = T.decoded_edges(acc)
     legs = ei[r["observed_zero"][ei.edge_id.to_numpy()]]
-    prod = BTS.icsg_raw_production(BTS.BOUND_DOMESTIC_SECTORS, legs)
+    prod = CF.icsg_raw_production(INPUTS, CF.BOUND_DOMESTIC_SECTORS, legs)
     p = prod.set_index(["root_sector_from", "root_region_to", "root_time"]).production_cc
     own = p.reindex(pd.MultiIndex.from_frame(
         legs[["root_sector_from", "root_region_to", "root_time"]].astype(str))).fillna(0.0)

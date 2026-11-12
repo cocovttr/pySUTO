@@ -44,6 +44,7 @@ sys.path.insert(0, "src")
 sys.path.insert(0, "scripts")
 sys.path.insert(0, "scripts/explo")
 import build_baci_reexport as B                           # noqa: E402
+from pysuto.cases.copper_feed import eff_nominals         # noqa: E402
 import issue65_icsg_stock_parse_diag as P65               # noqa: E402
 import issue69_aggregate_gap_diag as P69                  # noqa: E402
 import issue75_scandinavia_split_diag as P75              # noqa: E402
@@ -299,7 +300,7 @@ def row_by_country(v_icsg: int, v_gross: int) -> None:
     """G: per ICSG label folded into ROW, cathode U − (P + I − X) on gross BACI values."""
     print(f"\n== G ROW's cathode gap by country, icsg v{v_icsg} + gross baci v{v_gross} "
           "(kt CC), largest |gap|")
-    eff = B._eff_nominals()
+    eff = eff_nominals(B._input_registries())
     raw = P79._icsg_raw(v_icsg)
     r = raw[raw.root == "ROW"].assign(yr=lambda d: d.Year.astype(int))
 

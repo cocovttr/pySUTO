@@ -48,7 +48,7 @@ from pysuto.input_registry import InputRegistries               # noqa: E402
 import roundL_reexport_diag as L                                # noqa: E402
 import roundN_concentrate_grade_diag as N                       # noqa: E402
 import copper_metabolism_insights as M                          # noqa: E402
-from build_baci_reexport import _eff_nominals, production_recipes  # noqa: E402
+from pysuto.cases.copper_feed import eff_nominals, production_recipes  # noqa: E402
 
 ROOT = Path("data/proc")
 POOL = ["2020", "2021", "2022", "2023", "2024"]
@@ -111,7 +111,7 @@ def feed_gate(base: str) -> None:
               f"{ex.excess_kt.sum():,.0f} kt; top: "
               + ", ".join(f"{r} {int(s)}y {v:,.0f}" for r, (s, v) in top.head(5).iterrows()))
 
-    eff = _eff_nominals()
+    eff = eff_nominals(InputRegistries.load(root="data/input"))
     k = eff["CFR"] * eff["ER"]
     for lab, raw in (("v%d" % v_old, old), ("v%d" % v_new, new)):
         sm, sc, an = _ser(raw, "Smelting", "Scrap"), _ser(raw, "Refining", "Scrap"), _ser(raw, "Refining", "Anode")

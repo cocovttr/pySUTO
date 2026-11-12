@@ -50,10 +50,10 @@ from pysuto.acc import AccountingStructure                      # noqa: E402
 from pysuto.config import load_config                           # noqa: E402
 from pysuto.diag import SolverDiag, SolverStatsDiagnostic       # noqa: E402
 from pysuto.relation.param_relation import expand_edge_index             # noqa: E402
-from build_baci_reexport import (                               # noqa: E402
-    _conc_lookup, icsg_intake_production, load_root_trade)
 import roundL_reexport_diag as L                                # noqa: E402
 import roundN_concentrate_grade_diag as N                       # noqa: E402
+from roundN_concentrate_grade_diag import (                     # noqa: E402
+    _conc_lookup, _icsg_intake_production, load_root_trade)
 
 ROOT       = Path("data/proc")
 BACI_IN    = Path("data/input/feed/baci")
@@ -222,7 +222,7 @@ def main(specs):
     base = runs[0]
     E = {r["opt"]: _edges(r["opt"], ei) for r in runs}
     S = {r["opt"]: _sums(r["opt"], acc) for r in runs}
-    U_, P_, _ = icsg_intake_production(["Concentrate"])
+    U_, P_, _ = _icsg_intake_production(["Concentrate"])
     P = {(r, t): v for (_s, r, t), v in P_.items()}
     U = {(r, t): v for (_s, r, t), v in U_.items()}
 

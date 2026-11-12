@@ -1,15 +1,16 @@
-"""Unit tests for the feed-time re-export re-attribution (ADR 0027)."""
+"""Unit tests for the feed-time re-export re-attribution (ADR 0027), ``pysuto.feedprep.
+reexport``, and the copper ICSG readers it is fed by, ``pysuto.cases.copper_feed``."""
 import json
 import os
 import shutil
-import sys
 
 import numpy as np
 import pandas as pd
 import pytest
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "scripts"))
-from build_baci_reexport import (  # noqa: E402
+from pysuto.cases.copper_feed import HS_OF, production_recipes
+from pysuto.feedprep.reexport import (
+    rebuild_values,
     check_icsg_baci_version,
     check_region_map,
     cv_scale,
@@ -18,9 +19,9 @@ from build_baci_reexport import (  # noqa: E402
     load_root_trade,
     net_one_hub,
     net_reexports,
-    production_recipes,
     reexport_volumes,
     screened_origins,
+    waterfill,
 )
 
 T2015 = "2015"
@@ -37,7 +38,7 @@ def _trade(rows):
 
 def _vol(trade, intake=None, production=None, reported=None, aggregate_of=None):
     v = reexport_volumes(trade, intake or {}, production or {}, reported or set(),
-                         aggregate_of or {})
+                         aggregate_of or {}, {"ROW"})
     v["label"] = [label_row(r) for r in v.itertuples(index=False)]
     return v
 
@@ -346,7 +347,7 @@ class TestCvScaleBounds:
     1e48 before the cap: v_new → 0 makes the ratio explode)."""
 
     def test_scale_is_capped(self):
-        from build_baci_reexport import MAX_CV_SCALE
+        from pysuto.feedprep.reexport import MAX_CV_SCALE
         old = _trade([_leg("Cathode", "Chile", "NL", 100.0)])
         new = _trade([_leg("Cathode", "Chile", "NL", 0.001)])
         assert cv_scale(old, new)["cv_scale"].iloc[0] == pytest.approx(MAX_CV_SCALE)
@@ -359,7 +360,6 @@ class TestCvScaleBounds:
 
 # ---- ADR 0029 plumbing: born legs are sized at their ORIGIN's grade ----
 
-from build_baci_reexport import rebuild_values  # noqa: E402
 
 
 def _raw(rows):
@@ -395,7 +395,7 @@ def test_born_leg_mass_uses_the_origin_grade_not_the_hub():
     legs_new = _trade([_leg("Concentrate", "Chile", "Spain", 32.0),
                        _leg("Concentrate", "Peru", "Japan", 2.75),
                        _leg("Concentrate", "Chile", "Japan", 16.0)])   # born
-    out = rebuild_values(raw, legs_old, legs_new, conc)
+    out = rebuild_values(raw, legs_old, legs_new, conc, HS_OF)
     japan = out[np.isclose(out["Value"], 16.0 / 0.32)]
     assert len(japan) == 1, f"expected a leg at 16/0.32 = 50 kt, got:\n{out}"
     # and emphatically NOT 16/0.275 = 58.2 kt
@@ -410,9 +410,9 @@ def test_existing_leg_scaling_stays_grade_invariant():
                  "code_from": 152, "code_to": 724}])
     legs_old = _trade([_leg("Concentrate", "Chile", "Spain", 32.0)])
     legs_new = _trade([_leg("Concentrate", "Chile", "Spain", 16.0)])    # halved
-    a = rebuild_values(raw, legs_old, legs_new, {("Concentrate", "*"): 0.275})
+    a = rebuild_values(raw, legs_old, legs_new, {("Concentrate", "*"): 0.275}, HS_OF)
     b = rebuild_values(raw, legs_old, legs_new,
-                       {("Concentrate", "*"): 0.275, ("Concentrate", "Chile"): 0.32})
+                       {("Concentrate", "*"): 0.275, ("Concentrate", "Chile"): 0.32}, HS_OF)
     pd.testing.assert_frame_equal(a, b)
     assert a["Value"].iloc[0] == pytest.approx(50.0)
 
@@ -538,7 +538,8 @@ class TestIcsgAggregateMembers:
 
     def test_each_member_year_is_keyed_with_a_string_year(self, tmp_path):
         got = icsg_aggregate_members(self._csv(
-            tmp_path, "Scandinavia;Sweden;1995;1997;ICSG 2005 yearbook;\n"))
+            tmp_path, "Scandinavia;Sweden;1995;1997;ICSG 2005 yearbook;\n"),
+            "icsg_aggregates")
         assert got == {("Sweden", "1995"): "Scandinavia",
                        ("Sweden", "1996"): "Scandinavia",
                        ("Sweden", "1997"): "Scandinavia"}
@@ -546,12 +547,14 @@ class TestIcsgAggregateMembers:
     def test_a_reversed_year_range_raises(self, tmp_path):
         with pytest.raises(ValueError, match="year_from"):
             icsg_aggregate_members(self._csv(
-                tmp_path, "Scandinavia;Sweden;2003;1995;ICSG 2005 yearbook;\n"))
+                tmp_path, "Scandinavia;Sweden;2003;1995;ICSG 2005 yearbook;\n"),
+                "icsg_aggregates")
 
     def test_a_region_year_claimed_by_two_aggregates_raises(self, tmp_path):
         with pytest.raises(ValueError, match="Sweden"):
             icsg_aggregate_members(self._csv(
-                tmp_path, "Scandinavia;Sweden;1995;2003;a;\nNordic;Sweden;2003;2004;b;\n"))
+                tmp_path, "Scandinavia;Sweden;1995;2003;a;\nNordic;Sweden;2003;2004;b;\n"),
+                "icsg_aggregates")
 
 
 class TestCheckRegionMap:
@@ -632,21 +635,22 @@ def test_every_refined_copper_code_lands_on_cathode_under_the_tracked_map(tmp_pa
 
 # ---- #93: a lookup reads the registered version and registers nothing ------
 
-def test_eff_lookup_does_not_version_an_edited_current(tmp_path, monkeypatch):
+def test_eff_lookup_does_not_version_an_edited_current(tmp_path):
     """A read-only diagnostic called `_eff_nominals` seconds after a branch switch
     had edited an input's current/, and the lookup registered baci v25, a version
     no run uses (#93). A lookup reads the latest registered version."""
-    import build_baci_reexport as R
+    from pysuto.cases.copper_feed import eff_nominals
     from pysuto.input_registry import InputRegistries
 
     csv = tmp_path / "params" / "eff" / "current" / "params.csv"
     csv.parent.mkdir(parents=True)
-    csv.write_text("param_type;a_sector_to;value_nominal\nefficiency;Smelting;0.98\n")
+    csv.write_text("param_id;param_type;a_sector_to;value_nominal\n"
+                   "effsmelting;efficiency;Smelting;0.98\n")
     InputRegistries.initialize(root=tmp_path)
-    csv.write_text("param_type;a_sector_to;value_nominal\nefficiency;Smelting;0.95\n")
-    monkeypatch.setattr(R, "_INPUT_ROOT", str(tmp_path))
+    csv.write_text("param_id;param_type;a_sector_to;value_nominal\n"
+                   "effsmelting;efficiency;Smelting;0.95\n")
 
-    assert R._eff_nominals() == {"Smelting": 0.98}
+    assert eff_nominals(InputRegistries.load(root=tmp_path)) == {"Smelting": 0.98}
     assert not (tmp_path / "params" / "eff" / "v2").exists()
 
 
@@ -659,15 +663,32 @@ def _icsg_parents(d, baci):
 
 
 def test_an_icsg_input_parsed_against_the_netted_version_passes(tmp_path):
-    check_icsg_baci_version(_icsg_parents(tmp_path, 28), 28)
+    check_icsg_baci_version(_icsg_parents(tmp_path, 28), 28, "baci")
 
 
 def test_an_icsg_input_parsed_against_another_baci_version_is_refused(tmp_path):
     """Its imported-anode subtraction would carry another release's anode trade."""
     with pytest.raises(ValueError, match=r"baci v26.*nets baci v28.*--baci-version 28"):
-        check_icsg_baci_version(_icsg_parents(tmp_path, 26), 28)
+        check_icsg_baci_version(_icsg_parents(tmp_path, 26), 28, "baci")
 
 
 def test_an_icsg_input_recording_no_baci_version_is_refused(tmp_path):
     with pytest.raises(ValueError, match=r"records no baci version.*--baci-version 28"):
-        check_icsg_baci_version(tmp_path, 28)
+        check_icsg_baci_version(tmp_path, 28, "baci")
+
+
+# ---------------------------------------------------------------------------
+# waterfill (#147)
+# ---------------------------------------------------------------------------
+
+class TestWaterfill:
+
+    def test_an_allocation_within_its_caps_is_unchanged(self):
+        assert waterfill({"a": 3.0, "b": 2.0}, {"a": 5.0, "b": 5.0}) == {"a": 3.0, "b": 2.0}
+
+    def test_the_excess_over_a_cap_goes_to_the_others_in_proportion_to_their_want(self):
+        got = waterfill({"a": 8.0, "b": 1.0, "c": 3.0}, {"a": 4.0, "b": 10.0, "c": 10.0})
+        assert got["a"] == 4.0
+        assert got["b"] == pytest.approx(1.0 + 4.0 * 1.0 / 4.0)
+        assert got["c"] == pytest.approx(3.0 + 4.0 * 3.0 / 4.0)
+        assert sum(got.values()) == pytest.approx(12.0)

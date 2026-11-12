@@ -1,19 +1,30 @@
-"""Unit tests for the in-situ ore-grade params generator (ADR 0015)."""
+"""Unit tests for the in-situ ore-grade triangle, ``pysuto.feedprep.ore_grade`` (ADR 0015),
+with copper's labels bound as the case binds them."""
 import os
 import sys
+from functools import partial
+from types import SimpleNamespace
 
+import numpy as np
 import pandas as pd
 import pytest
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "scripts"))
-from build_ore_grade import (  # noqa: E402
-    build_param_rows,
-    build_tailings_rows,
+from pysuto.cases.copper_feed import ORE_GRADE_LABELS
+from pysuto.feedprep import ore_grade as OG
+from pysuto.feedprep.ore_grade import (
+    MARGIN_REL_CARRY,
+    build_production_frame,
+    carry_grades_forward,
     compute_insitu_grades,
     compute_tailings_grades,
     region_bands,
     tailings_bands,
 )
+
+build_param_rows = partial(OG.build_param_rows, labels=ORE_GRADE_LABELS,
+                           gross="Mass", content="CC")
+build_tailings_rows = partial(OG.build_tailings_rows, labels=ORE_GRADE_LABELS,
+                              gross="Mass", content="CC")
 
 EFF_MF, EFF_SXEW = 0.8, 0.725
 
@@ -169,8 +180,6 @@ def test_tailings_rows_shape_and_grammar():
 
 # ---- ADR 0023: temporal carry-forward past the crude_ore feed's last year ----
 
-from build_ore_grade import MARGIN_REL_CARRY, carry_grades_forward  # noqa: E402
-
 
 def _observed():
     return pd.DataFrame({"region": ["A", "A", "B"], "time": ["2021", "2022", "2020"],
@@ -236,6 +245,7 @@ def test_tailings_for_carried_year_use_that_years_production():
 def test_eff_lookup_does_not_version_an_edited_current(tmp_path, monkeypatch):
     """The params lookups are importable helpers; a diagnostic calling one must
     not register what current/ holds mid-edit (#93)."""
+    sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "scripts"))
     import build_ore_grade as O
     from pysuto.input_registry import InputRegistries
 
@@ -250,3 +260,26 @@ def test_eff_lookup_does_not_version_an_edited_current(tmp_path, monkeypatch):
 
     assert O._eff_nominals() == (pytest.approx(0.9), pytest.approx(0.8))
     assert not (tmp_path / "params" / "eff" / "v2").exists()
+
+
+# ---- the production frame reads the case's edges by its labels and valuation roles ----
+
+def _acc_with_production_edges():
+    """Two regions; MF→Concentrate and SXEW→CSXEW in CC, CO→Mining in Mass (edge ids 0-5)."""
+    nodes = pd.DataFrame({"sector": ["MF", "Concentrate", "SXEW", "CSXEW", "CO", "Mining"],
+                          "region": ["Chile"] * 6})
+    rows = [(0, 1, "CC", "2015"), (2, 3, "CC", "2015"), (4, 5, "Mass", "2015"),
+            (0, 1, "Mass", "2015")]
+    edges = pd.DataFrame(rows, columns=["from_id", "to_id", "valuation", "time"])
+    edges["edge_id"] = np.arange(len(edges))
+    return SimpleNamespace(edge_index=edges, node_index=nodes,
+                           valuation_roles=SimpleNamespace(content="CC", gross="Mass"))
+
+
+def test_the_production_frame_sums_each_labelled_edge_in_its_valuation():
+    acc = _acc_with_production_edges()
+    icsg  = np.array([30.0, 10.0, 0.0, 99.0])     # the Mass twin of MF→Concentrate is ignored
+    crude = np.array([0.0, 0.0, 500.0, 0.0])
+    out = build_production_frame(acc, icsg, crude, ORE_GRADE_LABELS)
+    assert out[["region", "time"]].values.tolist() == [["Chile", "2015"]]
+    assert out[["conc_cc", "sxew_cc", "ore_mass"]].values.tolist() == [[30.0, 10.0, 500.0]]

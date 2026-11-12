@@ -24,6 +24,7 @@ sys.path.insert(0, "src")
 sys.path.insert(0, "scripts")
 sys.path.insert(0, "scripts/explo")
 import build_baci_reexport as R                           # noqa: E402
+from pysuto.cases.copper_feed import icsg_intake_production   # noqa: E402
 import issue37_stock_bounds_v6_diag as P37                # noqa: E402
 import issue40_signed_stock_diag as D                     # noqa: E402
 import issue65_icsg_stock_parse_diag as P65               # noqa: E402
@@ -39,7 +40,7 @@ REGIONS = ["Austria", "Kazakhstan", "Russia"]
 
 def mine_chains(e: pd.DataFrame) -> None:
     """M: CC flows of the mine chain where ICSG reports no mine production."""
-    _, prod, _ = R.icsg_intake_production(["Concentrate"])
+    _, prod, _ = icsg_intake_production(R._input_registries(), ["Concentrate"])
     mine = {(r, t) for (_, r, t), v in prod.items() if v > 0}
     cc = e[e.valuation == "CC"]
     no_mine = ~pd.Series([k in mine for k in zip(cc.region_from, cc.time.astype(str))],

@@ -1,0 +1,8 @@
+"""feedprep: the feed-side algorithms of a case, labels as parameters (#147).
+
+``trade_shares``  BACI-trade-share weights of ICSG's producer fan (ADR 0002, 0018, 0024)
+``reexport``      the re-export netting and its waterfill (ADR 0027)
+``ore_grade``     the in-situ ore-grade triangle (ADR 0015, 0023)
+
+The case binds the labels and reads the registered inputs: ``pysuto.cases.copper_feed``.
+"""

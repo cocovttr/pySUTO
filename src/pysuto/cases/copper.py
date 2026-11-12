@@ -1067,9 +1067,9 @@ def builders(ctx) -> list:
 # =============================================================================
 # The three copper feeds as :class:`pysuto.feedpipe.FeedSpec`s, run by
 # ``feedpipe.run_feed``. The loaders and hooks moved here unchanged from
-# ``scripts/{icsg,baci,crude_ore}_feed.py``. ``ICSG_FEED`` is the part of ICSG's spec
-# that needs no script: ``scripts/icsg_feed.py`` adds the trade-share weights and the
-# observed-zero stamping, which import ``build_trade_shares`` and ``build_baci_reexport``.
+# ``scripts/{icsg,baci,crude_ore}_feed.py``. ``ICSG_FEED`` is the loaders' part of ICSG's
+# spec: ``pysuto.cases.copper_feed.ICSG_SPEC`` adds the trade-share weights and the
+# observed-zero stamping (#147).
 
 # The case's rest-of-world region, for the ROW pedigree penalty (#119), and the
 # Supply_Use column's vocabulary: each value mapped to the endpoint its rows classify.
@@ -1281,7 +1281,7 @@ ICSG_FEED = FeedSpec(
     aux_sides             = ICSG_AUX_SIDES,
     leg_filter            = icsg_leg_filter,
     # BACI-trade-share weights (ADR 0002 option D): None ⇒ uniform fan, which the fan
-    # policy then refuses to distribute (ADR 0008). Attached by scripts/icsg_feed.py,
+    # policy then refuses to distribute (ADR 0008). Attached by copper_feed.ICSG_SPEC,
     # with the observed-zero stamping (post_propagate).
     drop_unweighted_fans  = True,
 )
