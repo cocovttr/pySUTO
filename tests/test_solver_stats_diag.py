@@ -323,3 +323,14 @@ def test_write_rankings_emits_one_csv_per_family(frames_diag, tmp_path):
     assert r.iloc[0]["n_years"] == 2
     suffixed = frames_diag.write_rankings(str(tmp_path), regions=["A"], suffix="__a")
     assert all(p.endswith("__a.csv") for p in suffixed)
+
+
+def test_write_region_shares_one_csv_all_families(frames_diag, tmp_path):
+    path = frames_diag.write_region_shares(str(tmp_path))
+    assert path.endswith("objective_share_by_region.csv")
+    t = pd.read_csv(path, dtype={"year": str})
+    assert list(t.columns) == ["family", "region", "year", "zsq", "share", "n_rows"]
+    assert {"edges", "sum_rows"} <= set(t["family"])
+    for fam, g in t.groupby("family"):
+        assert g[g["year"] == "all"]["share"].sum() == pytest.approx(1.0)
+        assert g[g["year"] != "all"]["share"].sum() == pytest.approx(1.0)

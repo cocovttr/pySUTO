@@ -197,6 +197,7 @@ class TestBlockRunDiag:
         m = re.search(r"mass-balance rows:\s*([0-9.eE+-]+)", text)
         assert m, text
         assert float(m.group(1)) < 1e-6, text
+        assert "region Σz² : edges" in text
 
     def test_full_portfolio_renders_from_year_local(self, tmp_path, monkeypatch):
         """Every figure renders from year-local results; with the acc injected
@@ -206,11 +207,12 @@ class TestBlockRunDiag:
         results, cr, acc = _solve_block_run(tmp_path, monkeypatch)
         diag = SolverDiag(results, cr, label="block", acc=acc)
         paths = diag.plot(odir=str(tmp_path / "diag"))
-        assert len(paths) == N_FIGURES + 3 + 1
+        assert len(paths) == N_FIGURES + 3 + 1 + 1
         for p in paths:
             assert os.path.exists(p)
         names = {os.path.basename(p) for p in paths}
-        assert {"ranking_edges.csv", "ranking_sum_rows.csv", "ranking_soft_ratios.csv"} <= names
+        assert {"ranking_edges.csv", "ranking_sum_rows.csv", "ranking_soft_ratios.csv",
+                "objective_share_by_region.csv"} <= names
         on_disk = os.listdir(tmp_path / "diag")   # the directory, not the returned paths
         assert not [n for n in on_disk if n.startswith(("edges_", "constraints_"))], on_disk
         # the edge frame is real here: the sector figures are not placeholders

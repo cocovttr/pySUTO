@@ -393,6 +393,30 @@ class SolverStatsDiagnostic:
             paths += [p_edges, p_const]
         return paths
 
+    def region_shares(self) -> pd.DataFrame:
+        """:func:`~.objective.share_by_region` of every family whose frame exists,
+        stacked (columns ``family, region, year, zsq, share, n_rows``)."""
+        from .objective import FAMILIES, family_frame, share_by_region
+
+        ef, cf = self.edge_frame(), self.constraint_frame()
+        parts = [share_by_region(family_frame(ef, cf, fam))
+                 for fam in FAMILIES]
+        parts = [p for p in parts if p is not None]
+        return pd.concat(parts, ignore_index=True) if parts else pd.DataFrame()
+
+    def write_region_shares(self, odir: str):
+        """Write ``objective_share_by_region.csv`` — each region's share of each
+        family's ``Σz²``, overall (``year == all``) and per year. Returns the
+        path, or ``None`` when no family frame exists."""
+        shares = self.region_shares()
+        if shares.empty:
+            return None
+        os.makedirs(odir, exist_ok=True)
+        p = os.path.join(odir, "objective_share_by_region.csv")
+        shares.to_csv(p, index=False)
+        print(f"   objective share by region → {p}  ✓")
+        return p
+
     def write_rankings(self, odir: str, regions=None, suffix: str = "") -> list[str]:
         """Write ``ranking_<family>{suffix}.csv`` — the full identity ranking by
         objective share — for every family whose frame exists."""
