@@ -72,7 +72,7 @@ class _RRecipe:
     secondary: tuple[int, ...]         # SB-SEM inputs (Scrap): treated as 0 when missing
     bilateral_import: tuple[int, ...]  # cross-region Flow→Process imports: pooled when known,
                                        # treated as 0 when missing, non-blocking (ADR 0010)
-    product: int | None
+    products: tuple[int, ...]          # Flow outputs; co-products close by their sum (#130)
     wastes: tuple[int, ...]
     eff: float
     eff_sig: float
@@ -206,16 +206,16 @@ class NetworkImputer(BaseImputer):
         # attach eff to each structural recipe
         self._recipes = []
         for rec in process_recipes(acc):
-            if len(rec.products) > 1:
+            # One pooled efficiency per process: Σ products = eff · Σ inputs (#130). The
+            # eff map is keyed by product edge, so co-products must resolve to one row.
+            effs = [product_eff.get(e, (1.0, 0.0, 0.0, None)) for e in rec.products]
+            if len({e[3] for e in effs}) > 1:
                 raise ValueError(
                     f"process {rec.process!r} ({rec.region}, {rec.time}) has "
-                    f"{len(rec.products)} Flow products {rec.products}; the network "
-                    "imputer handles one (co-products, #130)"
+                    f"{len(rec.products)} Flow products {rec.products} with different "
+                    "efficiency rows; co-products close by the sum, one pooled row"
                 )
-            product = rec.products[0] if rec.products else None
-            eff, eff_sig, eff_eps, pid = product_eff.get(
-                product, (1.0, 0.0, 0.0, None)
-            )
+            eff, eff_sig, eff_eps, pid = effs[0] if effs else (1.0, 0.0, 0.0, None)
             secondary = tuple(i for i in rec.inputs if role_from.get(i) == _SECONDARY)
             non_sem = [i for i in rec.inputs if role_from.get(i) != _SECONDARY]
             # same-region non-SEM inputs block the forward gate; cross-region imports
@@ -224,7 +224,7 @@ class NetworkImputer(BaseImputer):
             bilateral_import = tuple(i for i in non_sem if reg_from.get(i) != reg_to.get(i))
             self._recipes.append(
                 _RRecipe(rec.inputs, primary, secondary, bilateral_import,
-                         product, rec.wastes,
+                         rec.products, rec.wastes,
                          float(eff), float(eff_sig), float(eff_eps), pid)
             )
 
@@ -316,12 +316,14 @@ class NetworkImputer(BaseImputer):
     def _do_recipe(self, rec, f, sigma, ledger, step,
                    relax_primaries: bool = False) -> None:
         p = self.p
-        P, W = rec.product, list(rec.wastes)
+        PS, W = list(rec.products), list(rec.wastes)
+        P = PS[0] if len(PS) == 1 else None    # the lone product; None for 0 or 2+
         PR, SE = list(rec.primary), list(rec.secondary)
         BI = list(rec.bilateral_import)
         eff, eff_sig, eps = rec.eff, rec.eff_sig, rec.eff_eps
 
         miss_PR = [i for i in PR if np.isnan(f[i])]
+        miss_P = [i for i in PS if np.isnan(f[i])]
         # missing SEM secondaries (Scrap) AND missing cross-region imports count as
         # absent → 0; neither blocks the forward gate (ADR 0010). In the relaxed
         # phase (post strict-fixpoint only, see impute()), a missing same-region
@@ -366,11 +368,15 @@ class NetworkImputer(BaseImputer):
             S = sec_sum + imp_sum
             S_src = "inputs"
             sig_S = lp_combine(sec_sig + imp_sig, p)
-        elif P is not None and not np.isnan(f[P]) and eff > _EPS:
-            S = float(f[P] / eff)
+        elif PS and not miss_P and eff > _EPS:
+            # Σ products = eff·S: with several products the sum and its lp_combine σ
+            # stand in for the lone product's value and σ (single branch exact, #130)
+            f_PS = f[P] if P is not None else float(sum(f[i] for i in PS))
+            sig_PS = sigma[P] if P is not None else lp_combine([sigma[i] for i in PS], p)
+            S = float(f_PS / eff)
             S_src = "product"
             sig_S = lp_combine(
-                [_reg_sensitivity(1.0 / eff, self.q, self.alpha_min) * sigma[P],
+                [_reg_sensitivity(1.0 / eff, self.q, self.alpha_min) * sig_PS,
                  abs(S) / eff * eff_sig], p,
             )
         elif len(W) == 1 and not np.isnan(f[W[0]]) and (1.0 - eff) > _EPS:
@@ -384,18 +390,28 @@ class NetworkImputer(BaseImputer):
             return
 
         eff_term = eff_sig * abs(S) if S_src == "inputs" else 0.0
+        src_P = PS if PS else [None]    # the products as a fill's sources
 
         # ---- product = eff·S ----
         relaxed_close = bool(relax_primaries and miss_PR and S_src == "inputs")
         tag = dict(relaxed=relaxed_close, assumed_absent=miss_PR if relaxed_close else ())
-        if P is not None and np.isnan(f[P]):
+        if len(miss_P) == 1:
+            # one unknown product is the sum's remainder; two or more stay NaN for the
+            # later fillers (#130). A lone product keeps the exact expression eff·S.
+            P_miss = miss_P[0]
+            known_P = [i for i in PS if i != P_miss]
             f_P = eff * S
-            s_P = lp_combine([eff * sig_S, eff_term, eps * abs(f_P)], p)
-            self._w(P, f_P, s_P, ledger, step,
-                    "network_forward", known_PR if S_src == "inputs" else [P], [eff],
+            s_terms = [eff * sig_S, eff_term]
+            if known_P:
+                f_P = f_P - float(sum(f[i] for i in known_P))
+                s_terms += [sigma[i] for i in known_P]
+            s_P = lp_combine(s_terms + [eps * abs(f_P)], p)
+            self._w(P_miss, f_P, s_P, ledger, step,
+                    "network_forward",
+                    known_PR + known_P if S_src == "inputs" else src_P, [eff],
                     rec.eff_param_id, **tag)
             if relaxed_close:
-                self._relaxed_fills.add(P)
+                self._relaxed_fills.add(P_miss)
 
         # ---- single missing PRIMARY input by subtraction (S from output) ----
         # (secondaries + cross-region imports are pooled when known / 0 when missing;
@@ -404,14 +420,15 @@ class NetworkImputer(BaseImputer):
         # assumed absent (that would echo the missing=0 assumption as an
         # explicit 0 — the route stays an honest NaN gap, ADR 0010).
         if S_src in ("product", "waste") and len(miss_PR) == 1 \
-                and (P if S_src == "product" else W[0]) not in self._relaxed_fills:
+                and not (any(i in self._relaxed_fills for i in PS) if S_src == "product"
+                         else W[0] in self._relaxed_fills):
             i = miss_PR[0]
             f_i = S - float(sum(f[j] for j in known_PR)) - sec_sum - imp_sum
             s_i = lp_combine(
                 [sig_S] + [sigma[j] for j in known_PR] + sec_sig + imp_sig + [eps * abs(f_i)], p,
             )
             self._w(i, f_i, s_i, ledger, step,
-                    "network_backward", [P] if S_src == "product" else list(W),
+                    "network_backward", PS if S_src == "product" else list(W),
                     [1.0 / eff if S_src == "product" else 1.0],
                     rec.eff_param_id)
 
@@ -426,7 +443,7 @@ class NetworkImputer(BaseImputer):
             if rec.eff_param_id is None and self._lower[w] < 0.0:   # eff-less stock leg
                 s_w = max(s_w, self.effless_stock_sigma)
             self._w(w, f_w, s_w, ledger, step, method,
-                    known_PR if S_src == "inputs" else [P], [1.0 - eff], rec.eff_param_id,
+                    known_PR if S_src == "inputs" else src_P, [1.0 - eff], rec.eff_param_id,
                     **tag)
             if relaxed_close:
                 self._relaxed_fills.add(w)
@@ -436,8 +453,7 @@ class NetworkImputer(BaseImputer):
 
     def _emit_twins(self, rec, f, sigma, ledger, step) -> None:
         p = self.p
-        cc_edges = list(rec.inputs) + ([rec.product] if rec.product is not None else []) \
-            + list(rec.wastes)
+        cc_edges = list(rec.inputs) + list(rec.products) + list(rec.wastes)
         for cc in cc_edges:
             if np.isnan(f[cc]):
                 continue

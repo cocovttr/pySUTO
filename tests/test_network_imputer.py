@@ -117,18 +117,20 @@ def _roles(nodes) -> dict:
 class MockAcc:
     """Minimal AccountingStructure stand-in for the synthetic chain."""
 
-    def __init__(self, times=("2020",)):
+    def __init__(self, times=("2020",), nodes=None, edges=None):
+        nodes = NODES if nodes is None else nodes     # looked up at call time: tests patch them
+        edges = EDGES if edges is None else edges
         self.node_index = pd.DataFrame(
-            [(s, e, "A", sub) for s, e, sub in NODES],
+            [(s, e, "A", sub) for s, e, sub in nodes],
             columns=["sector", "entity", "region", "entity_sub"],
         )
-        self.node_index.index = range(len(NODES))
-        self.node_to_id = {(s, e, "A"): i for i, (s, e, _) in enumerate(NODES)}
-        sec_to_id = {s: i for i, (s, _e, _sub) in enumerate(NODES)}
+        self.node_index.index = range(len(nodes))
+        self.node_to_id = {(s, e, "A"): i for i, (s, e, _) in enumerate(nodes)}
+        sec_to_id = {s: i for i, (s, _e, _sub) in enumerate(nodes)}
 
         rows = []
         eid = 0
-        for fs, ts in EDGES:
+        for fs, ts in edges:
             for t in times:
                 for val in ("Mass", "CC"):
                     rows.append((eid, sec_to_id[fs], sec_to_id[ts], t, val))
@@ -139,7 +141,7 @@ class MockAcc:
         self.n_edges = len(rows)
         self.bounds = _Bounds(self.n_edges)
         self.valuation_roles = ValuationRoles(content="CC", gross="Mass")
-        self.boundary_roles = _roles(NODES)
+        self.boundary_roles = _roles(nodes)
 
         ent = self.node_index["entity"]
         fe = self.edge_index["from_id"].map(ent).to_numpy()
@@ -803,7 +805,7 @@ def _bi_run(imp, acc, seeds):
 def test_bilateral_import_classification(bi_imputer):
     imp, acc = bi_imputer
     prod = acc.eid("Sm", "A", "Matte", "A", "CC")
-    rec = next(r for r in imp._recipes if r.product == prod)
+    rec = next(r for r in imp._recipes if r.products == (prod,))
     dom = acc.eid("Conc", "A", "Sm", "A", "CC")
     imp_leg = acc.eid("Conc", "B", "Sm", "A", "CC")
     assert dom in rec.primary and dom not in rec.bilateral_import
@@ -1083,3 +1085,61 @@ def test_log_with_list_columns_round_trips_parquet(imputer, acc, tmp_path):
     assert list(back.columns) == list(df.columns)
     assert back["relaxed"].tolist() == df["relaxed"].tolist()
     assert [list(a) for a in back["assumed_absent"]] == df["assumed_absent"].tolist()
+
+
+# =============================================================================
+# Co-products (#130): Σ products = eff · Σ inputs
+# =============================================================================
+
+def _coproduct_imputer(tmp_path):
+    """The chain with a second Flow output of Smelting, ``Dust``, and one pooled
+    efficiency row (B side: every Flow product of Smelting) at the Matte value."""
+    nodes = NODES + [("Dust", "Flow", None)]
+    edges = EDGES + [("Smelting", "Dust")]
+    acc = MockAcc(nodes=nodes, edges=edges)
+    eff, conc = tmp_path / "eff.csv", tmp_path / "conc.csv"
+    write_eff_csv(eff, stripping_ratio=None)
+    rows = [_row(
+        param_id="eff_smelting", param_type="efficiency",
+        a_sector_from="*", a_entity_from="*", a_region_from="*",
+        a_sector_to="Smelting", a_entity_to="Process", a_region_to="same",
+        a_time="*", a_valuation="CC",
+        b_sector_from="Smelting", b_entity_from="Process", b_region_from="same",
+        b_sector_to="*", b_entity_to="Flow", b_region_to="same",
+        b_time="same", b_valuation="same",
+        value_nominal=str(EFF[("Concentrate", "Smelting", "Matte")]))]
+    _write(eff, [r for r in pd.read_csv(eff, sep=";", dtype=str, keep_default_na=False
+                                        ).to_dict("records")
+                 if r["param_id"] != "eff_smelting"] + rows)
+    write_conc_csv(conc)
+    imp = NetworkImputer(str(eff), str(conc), p=1.3, cv_cap=float("inf"))
+    imp.prepare(acc)
+    return imp, acc
+
+
+def test_one_unknown_co_product_is_the_remainder_of_the_sum(tmp_path):
+    imp, acc = _coproduct_imputer(tmp_path)
+    f, sigma = _run(imp, acc, {("Concentrate", "Smelting", "CC"): 100.0,
+                               ("Scrap", "Smelting", "CC"): 10.0,
+                               ("Smelting", "Matte", "CC"): 60.0})
+    assert f[acc.eid("Smelting", "Dust", "CC")] == pytest.approx(0.965 * 110.0 - 60.0,
+                                                                 rel=1e-12)
+    assert f[acc.eid("Smelting", "Slag", "CC")] == pytest.approx(0.035 * 110.0, rel=1e-12)
+
+
+def test_two_unknown_co_products_stay_nan(tmp_path):
+    imp, acc = _coproduct_imputer(tmp_path)
+    f, _ = _run(imp, acc, {("Concentrate", "Smelting", "CC"): 100.0,
+                           ("Scrap", "Smelting", "CC"): 10.0})
+    assert np.isnan(f[acc.eid("Smelting", "Matte", "CC")])
+    assert np.isnan(f[acc.eid("Smelting", "Dust", "CC")])
+    assert f[acc.eid("Smelting", "Slag", "CC")] == pytest.approx(0.035 * 110.0, rel=1e-12)
+
+
+def test_all_co_products_known_close_a_missing_input_backward(tmp_path):
+    imp, acc = _coproduct_imputer(tmp_path)
+    f, _ = _run(imp, acc, {("Scrap", "Smelting", "CC"): 10.0,
+                           ("Smelting", "Matte", "CC"): 60.0,
+                           ("Smelting", "Dust", "CC"): 46.15})
+    assert f[acc.eid("Concentrate", "Smelting", "CC")] == pytest.approx(
+        (60.0 + 46.15) / 0.965 - 10.0, rel=1e-12)
