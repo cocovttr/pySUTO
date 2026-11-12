@@ -65,7 +65,7 @@ class ProcessRecipe:
 
 @dataclass(frozen=True)
 class NodeBalance:
-    """Content edges into (``incoming``) and out of (``outgoing``) one node in one period."""
+    """Content edges into (``incoming``) and out of (``outgoing``) one node-period."""
 
     node_id: int
     entity: str
@@ -74,7 +74,7 @@ class NodeBalance:
     outgoing: tuple[int, ...]
 
 
-def process_recipes(acc) -> list[ProcessRecipe]:
+def process_recipes(acc) -> tuple[ProcessRecipe, ...]:
     """Process recipes of ``acc``, one per ``(process, region, time)`` with a supply edge.
 
     Reads ``edge_meta``, the ``supply``/``use`` masks, the content valuation and the
@@ -82,7 +82,7 @@ def process_recipes(acc) -> list[ProcessRecipe]:
     """
     cache = _per_acc(acc)
     if "recipes" not in cache:
-        cache["recipes"] = _derive_recipes(acc)
+        cache["recipes"] = tuple(_derive_recipes(acc))
     return cache["recipes"]
 
 
@@ -119,11 +119,11 @@ def _derive_recipes(acc) -> list[ProcessRecipe]:
     return recipes
 
 
-def node_balances(acc, valuation: str) -> list[NodeBalance]:
-    """Per **(node, period)** of every Flow and Process node: incoming and outgoing edges.
+def node_balances(acc, valuation: str) -> tuple[NodeBalance, ...]:
+    """Per **(node, period)** of every Flow and Process node: incoming, outgoing edges.
 
     Only edges of ``valuation`` count, and only node-periods with both an incoming and an
-    outgoing edge appear. Keyed by ``(node_id, time)``: ``node_index`` carries no time axis,
+    outgoing edge appear. Keyed by ``(node_id, time)``: ``node_index`` has no time axis,
     so grouping on the bare node id would pool all years onto one node. Sorted by
     ``(node_id, time)`` — a set iterates in string-hash order, which changes with every
     process (#113). Cached per acc and valuation.
@@ -131,7 +131,7 @@ def node_balances(acc, valuation: str) -> list[NodeBalance]:
     cache = _per_acc(acc)
     key = ("balances", valuation)
     if key not in cache:
-        cache[key] = _derive_balances(acc, valuation)
+        cache[key] = tuple(_derive_balances(acc, valuation))
     return cache[key]
 
 

@@ -2,9 +2,9 @@
 test_relation_structure.py
 ==========================
 Recipes and node balances are derived once in ``pysuto.relation.structure`` (#129): a
-co-product process lists every Flow product, the Process and Flow nodes both get a balance,
-``acc`` imports nothing from ``impute``, and the NetworkImputer refuses a co-product recipe
-by name until the co-product ticket lands.
+co-product process lists every Flow product, Flow and Process nodes both get a balance,
+``acc`` imports nothing from ``impute``, and the NetworkImputer refuses a co-product
+recipe by name until the co-product ticket lands.
 """
 
 from __future__ import annotations
