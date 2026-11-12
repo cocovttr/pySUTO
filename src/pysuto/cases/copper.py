@@ -78,7 +78,8 @@ class CopperImp(ImpSection):
     pipeline step may override with ``--set`` (#100); ``cascade_ids`` and
     ``stock_sectors`` are not knobs."""
 
-    # Note: P_PROP must match CopperConst's P_PROP (cross-stage Lp; pysuto.pipeline TIED).
+    # Note: P_PROP must match CopperConst's P_PROP (pysuto.pipeline TIED); Stage 3
+    # raises if not (#141).
 
     # Propagation / Lp settings
     P_PROP:        float = 1.3      # Lp/power-mean exponent
@@ -509,8 +510,8 @@ class CopperConst(ConstSection):
     per-sector family list) — see :func:`builders`. ANCHOR_CV sets their tight σ_c.
     """
 
-    # Note: P_PROP must match CopperImp's P_PROP (cross-stage Lp exponent; pysuto.pipeline
-    # TIED).
+    # Note: P_PROP must match CopperImp's P_PROP (pysuto.pipeline TIED); Stage 3 raises
+    # when it differs from the p the imp run recorded (#141).
     P_PROP:            float = 1.3
     SIGMA_A_CV_MIN:    float = 0.001
     SIGMA_A_ABS_FLOOR: float = 1.0e-6
@@ -909,6 +910,7 @@ def builders(ctx) -> list:
         sigma_cv      = spec.ANCHOR_CV,
         id_prefix     = "supplytotout",
         sigma_cv_resolver = _scale_total_cv,
+        p             = spec.P_PROP,
     ))
     out.append(SumConstraintBuilder.from_mask_anchor(
         acc,
@@ -918,6 +920,7 @@ def builders(ctx) -> list:
         sigma_cv      = spec.ANCHOR_CV,
         id_prefix     = "usetotout",
         sigma_cv_resolver = _scale_total_cv,
+        p             = spec.P_PROP,
     ))
 
     # 2b. Soft sum — ICSG SCRAP LEVEL anchors (Round P, ADR 0031).
@@ -987,6 +990,7 @@ def builders(ctx) -> list:
                 sigma_cv      = spec.ANCHOR_CV,
                 id_prefix     = _prefix,
                 sigma_cv_resolver = _scale_total_cv,
+                p             = spec.P_PROP,
             ))
     else:
         _log.info("SCRAP_LEVEL_ANCHOR off — scrap levels unstated (Round O config)")

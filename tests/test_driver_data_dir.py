@@ -374,7 +374,8 @@ def _register_imp_run(case) -> str:
     agg.imputation_log = ImputationLog()
     return ImputationRunRegistry(storage_dir=str(case["data"] / "proc" / "imp")).register(
         agg, label="case", parents={"inputs": {"acc": case["entry"], "params": []},
-                                    "upstream": {"feed_run_ids": []}})
+                                    "upstream": {"feed_run_ids": []}},
+        stage_config={"p": 1.3})
 
 
 class _NoDiag:

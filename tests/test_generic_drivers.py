@@ -218,3 +218,15 @@ def test_the_opt_sidecar_records_the_case_s_driver_knobs(chain):
     sidecar = OptimRunRegistry(str(chain["root"] / "proc" / "opt")).load_sidecar(
         chain["ids"]["opt"])
     assert sidecar["stage_config"]["case_knobs"] == {"QP_VARIABLES": "flows"}
+
+
+def test_stage_3_refuses_a_p_prop_that_differs_from_the_one_its_imp_run_recorded(chain):
+    """#141: ``--set P_PROP=1.5`` over a p = 1.3 imp run raises, naming both values."""
+    proc = subprocess.run(
+        [sys.executable, str(REPO / "scripts" / "constraints.py"), "--case", "toy",
+         "--data-dir", str(chain["root"]), "--imp-run-id", chain["ids"]["imp"],
+         "--set", "P_PROP=1.5", "toy"],
+        cwd=str(chain["cwd"]), capture_output=True, text=True,
+        env={**os.environ, "PYTHONPATH": str(REPO / "src")})
+    assert proc.returncode != 0
+    assert "P_PROP" in proc.stderr and "1.5" in proc.stderr and "1.3" in proc.stderr
