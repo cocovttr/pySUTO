@@ -647,6 +647,12 @@ def test_a_budget_reached_without_converging_is_logged(imputer, acc, monkeypatch
     with caplog.at_level("WARNING", logger=network.logger.name):
         _run(imputer, acc, seeds)
     assert "STRICT_MAX_SWEEPS=1 without converging" in caplog.text
+    caplog.clear()
+    monkeypatch.setattr(network, "STRICT_MAX_SWEEPS", 64)
+    monkeypatch.setattr(network, "RELAXED_MAX_ROUNDS", 0)
+    with caplog.at_level("WARNING", logger=network.logger.name):
+        _run(imputer, acc, seeds)
+    assert "RELAXED_MAX_ROUNDS=0 without converging" in caplog.text
 
 
 # =============================================================================

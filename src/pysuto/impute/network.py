@@ -74,8 +74,7 @@ STRIPPING_ACCEPTS = frozenset({"stripping_ratio"})
 
 # The network's two inner convergence budgets, declared once (#139). Both loops are
 # monotone (a fill is never undone), so a budget reached without convergence is a
-# truncated fixpoint, and impute() logs it at WARNING. They stay inside one cascade step
-# because moving the relaxed phase to engine level would reorder the fills (ADR 0010 am.).
+# truncated fixpoint, and impute() logs it at WARNING (ADR 0010 am. 2026-11-12).
 STRICT_MAX_SWEEPS  = 64  # recipe + flow-balance sweeps per strict phase
 RELAXED_MAX_ROUNDS = 8   # strict -> relaxed -> strict rounds per impute() call
 
