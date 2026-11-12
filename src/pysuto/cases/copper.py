@@ -44,6 +44,7 @@ from pysuto.impute import (
     NetworkImputer,
     ParametricImputer,
     ShareImputer,
+    StockLeg,
     TimeImputer,
     TradeImputer,
     damp_leg_sigma,
@@ -436,6 +437,17 @@ def imputers(ctx) -> list:
     # STOCK_SEED_ABS_FLOOR_KT) — see the CopperImp note (ADR 0040).
     share = ShareImputer.from_stock_bounds_csv(
         str(inputs.params.resolve("stock_bounds") / "params.csv"),
+        legs = [
+            # PSC base = total cathode production = CSXEW + CER inputs to CP.
+            StockLeg("transfer", ("CP", "Process", "PSC", "SB"),
+                     (("CSXEW", "Flow", "CP", "Process"),
+                      ("CER", "Flow", "CP", "Process"))),
+            # MESC/USC base = the co-located Cathode→FU consumption edge.
+            StockLeg("seed", ("Cathode", "Flow", "MESC", "SB"),
+                     (("Cathode", "Flow", "FU", "SB"),)),
+            StockLeg("seed", ("Cathode", "Flow", "USC", "SB"),
+                     (("Cathode", "Flow", "FU", "SB"),)),
+        ],
         scale_abs_floor = 100.0,
         p               = spec.P_PROP,
         id              = "net_stock_share",
