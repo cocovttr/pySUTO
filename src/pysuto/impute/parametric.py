@@ -24,7 +24,7 @@ from pysuto.lp import lp_combine
 from pysuto.relation.param_relation import ParamRelationResolver, expand_edge_index
 from pysuto.relation.params import read_params
 
-from .base import BaseImputer, _apply_cv_cap, _log
+from .base import BaseImputer, _apply_cv_cap
 
 logger = get_logger(__name__)
 
@@ -212,15 +212,26 @@ class ParametricImputer(BaseImputer):
             id=id,
         )
 
-    def impute(
-        self,
-        f: np.ndarray,
-        sigma: np.ndarray,
-        missing: np.ndarray,
-        step: int,
-        acc_struct,
-    ) -> list[dict]:
-        entries: list[dict] = []
+    def writer_scope(self, acc) -> np.ndarray:
+        """The resolved CSV pair endpoints (either direction) + the lambda targets."""
+        scope = np.zeros(acc.n_edges, dtype=bool)
+        if self._csv_pairs:
+            ends = np.array([(a, b) for a, b, *_ in self._csv_pairs], dtype=np.int64)
+            scope[ends.ravel()] = True
+        if self._relations:
+            ei_exp = self._expanded_index(acc)
+            for rel in self._relations:
+                t_ids = ei_exp[rel.target(ei_exp)]["edge_id"].to_numpy(dtype=np.int64)
+                scope[t_ids] = True
+        return scope
+
+    def _expanded_index(self, acc) -> pd.DataFrame:
+        if self._ei_exp is None:
+            self._ei_exp = expand_edge_index(acc.edge_index, acc.node_index)
+        return self._ei_exp
+
+    def impute(self, ledger, step: int, acc_struct) -> None:
+        f, sigma = ledger.f, ledger.sigma
         cv_cap  = self.cv_cap
         p       = self.p
         q       = self.q
@@ -242,13 +253,11 @@ class ParametricImputer(BaseImputer):
                     [coeff * sigma[a_id], abs(f[a_id]) * sig_p, epsilon * f_b], p,
                 )
                 s_b, capped = _apply_cv_cap(s_b, f_b, cv_cap)
-                f[b_id]     = f_b
-                sigma[b_id] = s_b
-                entries.append(_log(
-                    b_id, step,
+                ledger.write(
+                    b_id, f_b, s_b, step,
                     "parametric_capped" if capped else "parametric",
-                    [a_id], [coeff], f_b, s_b, desc, param_id,
-                ))
+                    [a_id], [coeff], desc, param_id,
+                )
 
             elif a_nan and not b_nan and coeff != 0.0:
                 # coeff == 0 (e.g. concwruse: WR is copperless) makes the backward
@@ -266,19 +275,15 @@ class ParametricImputer(BaseImputer):
                      epsilon * f_a], p,
                 )
                 s_a, capped = _apply_cv_cap(s_a, f_a, cv_cap)
-                f[a_id]     = f_a
-                sigma[a_id] = s_a
-                entries.append(_log(
-                    a_id, step,
+                ledger.write(
+                    a_id, f_a, s_a, step,
                     "parametric_capped" if capped else "parametric",
-                    [b_id], [inv], f_a, s_a, desc, param_id,
-                ))
+                    [b_id], [inv], desc, param_id,
+                )
 
         # ── Lambda relations (directed: target ← sources) ─────────────
         if self._relations:
-            if self._ei_exp is None:
-                self._ei_exp = expand_edge_index(acc_struct.edge_index, acc_struct.node_index)
-            ei_exp = self._ei_exp
+            ei_exp = self._expanded_index(acc_struct)
             for rel in self._relations:
                 t_mask = rel.target(ei_exp)
                 t_ids  = ei_exp[t_mask]["edge_id"].values
@@ -326,15 +331,10 @@ class ParametricImputer(BaseImputer):
                     s_t = lp_combine(terms, p)
                     s_t, capped = _apply_cv_cap(s_t, f_t, cv_cap)
 
-                    f[t_id]     = f_t
-                    sigma[t_id] = s_t
-                    entries.append(_log(
-                        t_id, step,
+                    ledger.write(
+                        t_id, f_t, s_t, step,
                         "parametric_capped" if capped else "parametric",
-                        list(s_ids), coeffs, f_t, s_t,
-                        rel.description, rel.param_id,
-                    ))
-
-        return entries
+                        list(s_ids), coeffs, rel.description, rel.param_id,
+                    )
 
 

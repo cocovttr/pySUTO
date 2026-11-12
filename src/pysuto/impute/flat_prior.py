@@ -16,7 +16,7 @@ import numpy as np
 from pysuto.logging import get_logger
 from pysuto.relation.param_relation import expand_edge_index
 
-from .base import BaseImputer, _log
+from .base import BaseImputer
 
 logger = get_logger(__name__)
 
@@ -126,7 +126,7 @@ class FlatPriorImputer(BaseImputer):
         self.p = float(p)
         self._source_path: Optional[str] = None
         # agg_result.coverage attached by ImputationEngine.run via
-        # attach_agg_result() before impute() is called.
+        # attach() before impute() is called.
         self._coverage: Optional[np.ndarray] = None
         self._n_edges = int(acc_struct.n_edges)
 
@@ -212,13 +212,12 @@ class FlatPriorImputer(BaseImputer):
             list(zip(sec_from, reg_from))
         )
 
-    def attach_agg_result(self, agg_result) -> None:
+    def attach(self, agg_result) -> None:
         """
         Receive a reference to the current `AggregationResult` so the
         imputer can read per-edge ``coverage`` for density-aware CV.
 
-        Called by ``ImputationEngine.run`` before each step. Other imputers
-        without this method are simply skipped by the engine.
+        Called by ``ImputationEngine.run`` before each step.
         """
         cov = getattr(agg_result, "coverage", None)
         if cov is None:
@@ -264,7 +263,7 @@ class FlatPriorImputer(BaseImputer):
             logger.warning(
                 "FlatPriorImputer: no coverage attached; "
                 "treating every edge as fully covered (ρ=1, CV=cv_lo). "
-                "ImputationEngine should call attach_agg_result() before impute()."
+                "ImputationEngine should call attach() before impute()."
             )
             return np.ones(self._n_edges, dtype=float)
 
@@ -341,42 +340,29 @@ class FlatPriorImputer(BaseImputer):
                          np.where(scale_l2 > 0, scale_l2, global_scale))
         return scale
 
-    def impute(
-        self,
-        f: np.ndarray,
-        sigma: np.ndarray,
-        missing: np.ndarray,
-        step: int,
-        acc_struct,
-    ) -> list[dict]:
-        idx = np.where(missing)[0]
+    def writer_scope(self, acc) -> np.ndarray:
+        """Every edge: the final fallback may fill whatever is still missing."""
+        return np.ones(acc.n_edges, dtype=bool)
+
+    def impute(self, ledger, step: int, acc_struct) -> None:
+        f = ledger.f
+        idx = np.where(np.isnan(f))[0]
         if idx.size == 0:
-            return []
+            return
 
         if self.mode == "noisy_zero":
-            sh = self.sigma_high
-            f[idx]     = 0.0
-            sigma[idx] = sh
             desc = "no data, no imputer matched: noisy-zero (f=0, σ=sigma_high)"
-            return [
-                _log(int(j), step, "flat_prior_noisy_zero", [], [],
-                     0.0, sh, desc, None)
-                for j in idx
-            ]
+            ledger.write_many(idx, np.zeros(idx.size), np.full(idx.size, self.sigma_high),
+                              step, "flat_prior_noisy_zero", desc)
+            return
 
         cv_per_edge    = self._resolve_cv()
         scale_per_edge = self._resolve_scale(f)
         sigma_target   = cv_per_edge * scale_per_edge
 
-        f[idx]     = 0.0
-        sigma[idx] = sigma_target[idx]
-
         desc = "no data, no imputer matched: flat prior (cv·scale)"
-        return [
-            _log(int(j), step, "flat_prior", [], [],
-                 0.0, float(sigma_target[j]), desc, None)
-            for j in idx
-        ]
+        ledger.write_many(idx, np.zeros(idx.size), sigma_target[idx], step,
+                          "flat_prior", desc)
 
 
 # ---------------------------------------------------------------------------

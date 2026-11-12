@@ -47,7 +47,7 @@ from pysuto.relation.param_relation import (
 from pysuto.relation.params import read_params
 from pysuto.relation.structure import node_balances, process_recipes
 
-from .base import BaseImputer, _apply_cv_cap, _log
+from .base import BaseImputer, _apply_cv_cap
 from .parametric import _reg_sensitivity
 
 logger = get_logger(__name__)
@@ -149,6 +149,7 @@ class NetworkImputer(BaseImputer):
         self._lower: np.ndarray | None = None  # per-edge bounds (for in-imputer clipping)
         self._upper: np.ndarray | None = None
         self._n_clipped: int = 0
+        self._n_written: int = 0  # writes made in this impute() call (progress count)
 
     @property
     def source_paths(self) -> list[str]:
@@ -260,22 +261,27 @@ class NetworkImputer(BaseImputer):
                     best[wr] = (_Stripping(rr.a_edge_id, wr, k, pid), rr.specificity)
         return [rel for rel, _ in best.values()]
 
-    def _do_stripping(self, f, sigma, entries, step) -> None:
+    def _do_stripping(self, f, sigma, ledger, step) -> None:
         """WR Mass = k·Ore Mass at the flat σ, uncapped (see __init__)."""
         for s in self._stripping:
             if np.isnan(f[s.wr]) and not np.isnan(f[s.ore]):
-                self._w(s.wr, s.k * f[s.ore], self.stripping_sigma, f, sigma, entries, step,
+                self._w(s.wr, s.k * f[s.ore], self.stripping_sigma, ledger, step,
                         "network_stripping", [s.ore], [s.k], s.param_id, uncapped=True)
 
+    def writer_scope(self, acc) -> np.ndarray:
+        """Same-region edges only, and never a stock-change leg."""
+        return self._writable_mask
+
     def _writable(self, e: int) -> bool:
-        """Ownership: same-region edges only, and never a stock-change leg."""
+        """The imputer's own gate: whether ``e`` lies in its declared scope."""
         return bool(self._writable_mask[e])
 
     # -- imputation ---------------------------------------------------------
 
-    def impute(self, f, sigma, missing, step, acc_struct) -> list[dict]:
-        entries: list[dict] = []
+    def impute(self, ledger, step, acc_struct) -> None:
+        f, sigma = ledger.f, ledger.sigma
         self._n_clipped = 0
+        self._n_written = 0
         self._relaxed_fills = set()
         # Two-phase fixpoint. Strict phase: keep sweeping recipes + flow
         # balances until a full sweep fills nothing new (the engine cascade
@@ -287,28 +293,27 @@ class NetworkImputer(BaseImputer):
         # relaxed close can unlock further strict fills, so re-converge.
         for _outer in range(8):
             for _ in range(64):
-                n_before = len(entries)
+                n_before = self._n_written
                 for rec in self._recipes:
-                    self._do_recipe(rec, f, sigma, entries, step)
+                    self._do_recipe(rec, f, sigma, ledger, step)
                 for inc, out in self._flow_nodes:
-                    self._do_flow_balance(inc, out, f, sigma, entries, step)
-                if len(entries) == n_before:
+                    self._do_flow_balance(inc, out, f, sigma, ledger, step)
+                if self._n_written == n_before:
                     break
-            n_before = len(entries)
+            n_before = self._n_written
             for rec in self._recipes:
-                self._do_recipe(rec, f, sigma, entries, step,
+                self._do_recipe(rec, f, sigma, ledger, step,
                                 relax_primaries=True)
-            if len(entries) == n_before:
+            if self._n_written == n_before:
                 break
         # WR is a leaf (satellite): its fill unlocks nothing, so one pass at the end
-        self._do_stripping(f, sigma, entries, step)
+        self._do_stripping(f, sigma, ledger, step)
         if self._n_clipped:
             # One summary in place of the engine's per-edge out-of-bounds warnings
             # (now silent, since fills are clipped to bounds before they propagate).
             logger.info("NetworkImputer: clipped %d fill(s) to edge bounds", self._n_clipped)
-        return entries
 
-    def _do_recipe(self, rec, f, sigma, entries, step,
+    def _do_recipe(self, rec, f, sigma, ledger, step,
                    relax_primaries: bool = False) -> None:
         p = self.p
         P, W = rec.product, list(rec.wastes)
@@ -385,7 +390,7 @@ class NetworkImputer(BaseImputer):
         if P is not None and np.isnan(f[P]):
             f_P = eff * S
             s_P = lp_combine([eff * sig_S, eff_term, eps * abs(f_P)], p)
-            self._w(P, f_P, s_P, f, sigma, entries, step,
+            self._w(P, f_P, s_P, ledger, step,
                     "network_forward", known_PR if S_src == "inputs" else [P], [eff],
                     rec.eff_param_id)
             if relaxed_close:
@@ -404,7 +409,7 @@ class NetworkImputer(BaseImputer):
             s_i = lp_combine(
                 [sig_S] + [sigma[j] for j in known_PR] + sec_sig + imp_sig + [eps * abs(f_i)], p,
             )
-            self._w(i, f_i, s_i, f, sigma, entries, step,
+            self._w(i, f_i, s_i, ledger, step,
                     "network_backward", [P] if S_src == "product" else list(W),
                     [1.0 / eff if S_src == "product" else 1.0],
                     rec.eff_param_id)
@@ -419,15 +424,15 @@ class NetworkImputer(BaseImputer):
             s_w = lp_combine([(1.0 - eff) * sig_S, eff_term, eps * abs(f_w)], p)
             if rec.eff_param_id is None and self._lower[w] < 0.0:   # eff-less stock leg
                 s_w = max(s_w, self.effless_stock_sigma)
-            self._w(w, f_w, s_w, f, sigma, entries, step, method,
+            self._w(w, f_w, s_w, ledger, step, method,
                     known_PR if S_src == "inputs" else [P], [1.0 - eff], rec.eff_param_id)
             if relaxed_close:
                 self._relaxed_fills.add(w)
 
         # ---- Mass twins for this recipe's CC edges (atomic with the CC fills) ----
-        self._emit_twins(rec, f, sigma, entries, step)
+        self._emit_twins(rec, f, sigma, ledger, step)
 
-    def _emit_twins(self, rec, f, sigma, entries, step) -> None:
+    def _emit_twins(self, rec, f, sigma, ledger, step) -> None:
         p = self.p
         cc_edges = list(rec.inputs) + ([rec.product] if rec.product is not None else []) \
             + list(rec.wastes)
@@ -441,10 +446,10 @@ class NetworkImputer(BaseImputer):
             if np.isnan(f[m]):
                 f_m = float(f[cc] / conc)
                 s_m = lp_combine([sigma[cc] / conc, abs(f_m) * conc_sig / conc], p)
-                self._w(m, f_m, s_m, f, sigma, entries, step,
+                self._w(m, f_m, s_m, ledger, step,
                         "network_mass_twin", [cc], [1.0 / conc], None)
 
-    def _do_flow_balance(self, inc, out, f, sigma, entries, step) -> None:
+    def _do_flow_balance(self, inc, out, f, sigma, ledger, step) -> None:
         """Flow-node CC balance: Σ(supply in) = Σ(uses out); fill a lone gap."""
         p = self.p
         edges = list(inc) + list(out)
@@ -474,7 +479,7 @@ class NetworkImputer(BaseImputer):
         f_e = (in_sum - out_sum) if e in out else (out_sum - in_sum)
         others = [x for x in edges if x != e and not np.isnan(f[x])]
         s_e = lp_combine([sigma[x] for x in others], p)
-        self._w(e, f_e, s_e, f, sigma, entries, step,
+        self._w(e, f_e, s_e, ledger, step,
                 "network_balance", others, [1.0] * len(others), None)
         # emit the Mass twin for the freshly-balanced CC edge
         twin = self._cc_to_mass.get(e)
@@ -483,14 +488,14 @@ class NetworkImputer(BaseImputer):
             if np.isnan(f[m]):
                 f_m = float(f[e] / conc)
                 s_m = lp_combine([sigma[e] / conc, abs(f_m) * conc_sig / conc], p)
-                self._w(m, f_m, s_m, f, sigma, entries, step,
+                self._w(m, f_m, s_m, ledger, step,
                         "network_mass_twin", [e], [1.0 / conc], None)
 
     # -- write helper -------------------------------------------------------
 
-    def _w(self, e, val, sig, f, sigma, entries, step, method,
+    def _w(self, e, val, sig, ledger, step, method,
            sources, coeffs, param_id, desc="", uncapped=False) -> bool:
-        """Write a fill, guarded by ownership (same-region) + no-overwrite.
+        """Write a fill through the ledger, behind the imputer's own scope gate.
 
         The value is clipped to the edge's ``[lower, upper]`` bounds *before* it is
         written, so a negative residual (e.g. ``Ore→SXEW = Mining→Ore − Ore→MF`` in
@@ -498,7 +503,7 @@ class NetworkImputer(BaseImputer):
         downstream sums below their true values. A clipped fill widens σ to the clip
         gap (a saturated estimate, not a precise bound) and is tagged ``_clipped``.
         """
-        if not self._writable(e) or not np.isnan(f[e]):
+        if not self._writable(e) or not np.isnan(ledger.f[e]):
             return False
         val = float(val)
         sig = float(sig)
@@ -511,12 +516,11 @@ class NetworkImputer(BaseImputer):
         capped = False
         if not uncapped:  # cap self-disables at val==0
             sig, capped = _apply_cv_cap(sig, val, self.cv_cap)
-        f[e] = val
-        sigma[e] = float(sig)
-        entries.append(_log(
-            int(e), step,
+        if not ledger.write(
+            e, val, float(sig), step,
             method + ("_clipped" if was_clipped else "") + ("_capped" if capped else ""),
-            [int(s) for s in sources], [float(c) for c in coeffs],
-            val, float(sig), desc, param_id,
-        ))
+            [int(s) for s in sources], [float(c) for c in coeffs], desc, param_id,
+        ):
+            return False
+        self._n_written += 1
         return True

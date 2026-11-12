@@ -17,7 +17,7 @@ import pandas as pd
 from pysuto.logging import get_logger
 from pysuto.lp import lp_combine
 
-from .base import BaseImputer, _apply_cv_cap, _log
+from .base import BaseImputer, _apply_cv_cap
 
 logger = get_logger(__name__)
 
@@ -94,7 +94,7 @@ class TimeImputer(BaseImputer):
             if arr.dtype == bool:
                 self._scope_mask = arr
 
-    def attach_agg_result(self, agg_result) -> None:
+    def attach(self, agg_result) -> None:
         """
         Receive ``agg_result`` so ``scope_feed_id`` can be resolved to a
         per-edge mask in :meth:`impute` (where ``acc_struct.edge_index`` is
@@ -115,25 +115,30 @@ class TimeImputer(BaseImputer):
             np.asarray(agg_result.F)[feed_ids.index(self._scope_feed_id), :]
         )
 
-    def impute(
-        self,
-        f: np.ndarray,
-        sigma: np.ndarray,
-        missing: np.ndarray,
-        step: int,
-        acc_struct,
-    ) -> list[dict]:
-        ei = acc_struct.edge_index
+    def writer_scope(self, acc) -> np.ndarray:
+        """The edges the scope options admit: ``scope_edges`` (or the series of
+        ``scope_feed_id``) ∩ ``scope_valuations`` ∩ ``scope_times``; all edges when
+        none is set."""
+        ei = acc.edge_index
+        scope = np.ones(acc.n_edges, dtype=bool)
+        mask = self._resolve_scope_mask(ei)
+        if mask is not None:
+            scope &= mask
+        eid = ei["edge_id"].to_numpy(dtype=int)
+        if self._scope_valuations is not None:
+            ok = np.isin(ei["valuation"].to_numpy(dtype=str), list(self._scope_valuations))
+            scope[eid[~ok]] = False
+        if self._scope_times is not None:
+            ok = np.isin(ei["time"].astype(str).to_numpy(), list(self._scope_times))
+            scope[eid[~ok]] = False
+        return scope
 
-        # Build sorted time ordering
-        all_times = sorted(set(ei["time"].tolist()), key=_time_sort_key)
-        t_to_idx  = {t: i for i, t in enumerate(all_times)}
-
-        # Group edges by series key → {time_idx: edge_id}
+    def _resolve_scope_mask(self, ei) -> Optional[np.ndarray]:
+        """The per-edge mask of ``scope_edges`` / ``scope_feed_id``; None when neither
+        is set. Caches the ``scope_edges`` id-list form as a bool mask."""
         fid_arr = ei["from_id"].to_numpy(dtype=int)
         tid_arr = ei["to_id"].to_numpy(dtype=int)
         val_arr = ei["valuation"].to_numpy(dtype=str)
-        tim_arr = ei["time"].values
         eid_arr = ei["edge_id"].to_numpy(dtype=int)
 
         # Resolve scope_edges-as-int-list lazily (N_edges now known).
@@ -167,6 +172,24 @@ class TimeImputer(BaseImputer):
                 if series_seen.get(key, False):
                     mask[int(eid_arr[i])] = True
             self._scope_mask = mask
+        return self._scope_mask
+
+    def impute(self, ledger, step: int, acc_struct) -> None:
+        f, sigma = ledger.f, ledger.sigma
+        ei = acc_struct.edge_index
+
+        # Build sorted time ordering
+        all_times = sorted(set(ei["time"].tolist()), key=_time_sort_key)
+        t_to_idx  = {t: i for i, t in enumerate(all_times)}
+
+        # Group edges by series key → {time_idx: edge_id}
+        fid_arr = ei["from_id"].to_numpy(dtype=int)
+        tid_arr = ei["to_id"].to_numpy(dtype=int)
+        val_arr = ei["valuation"].to_numpy(dtype=str)
+        tim_arr = ei["time"].values
+        eid_arr = ei["edge_id"].to_numpy(dtype=int)
+
+        self._resolve_scope_mask(ei)
 
         # scope_edges / scope_valuations drop entire edges (and their history)
         # from the series. scope_times is applied later — at the per-target
@@ -186,8 +209,6 @@ class TimeImputer(BaseImputer):
             key = (fid_arr[i], tid_arr[i], val_arr[i])
             series.setdefault(key, {})[t_to_idx[tim_arr[i]]] = eid
 
-        entries: list[dict] = []
-
         for key, t_map in series.items():
             sorted_tidxs = sorted(t_map.keys())
 
@@ -198,23 +219,17 @@ class TimeImputer(BaseImputer):
                 if not np.isnan(f[e_id]):
                     continue
 
-                entry = self._fill_one(
-                    f, sigma, t_map, t_target, e_id, step,
-                )
-                if entry is not None:
-                    entries.append(entry)
-
-        return entries
+                self._fill_one(ledger, t_map, t_target, e_id, step)
 
     def _fill_one(
         self,
-        f: np.ndarray,
-        sigma: np.ndarray,
+        ledger,
         t_map: dict[int, int],
         t_target: int,
         e_id: int,
         step: int,
-    ) -> Optional[dict]:
+    ) -> None:
+        f, sigma = ledger.f, ledger.sigma
         method = self.method
 
         # Collect known observations before and after within window
@@ -235,7 +250,7 @@ class TimeImputer(BaseImputer):
 
         if method == "locf":
             if not before:
-                return None
+                return
             t_obs, s_id = before[-1]
             gap   = t_target - t_obs
             f_val = float(f[s_id])
@@ -244,7 +259,7 @@ class TimeImputer(BaseImputer):
 
         elif method == "nocb":
             if not after:
-                return None
+                return
             t_obs, s_id = after[0]
             gap   = t_obs - t_target
             f_val = float(f[s_id])
@@ -254,7 +269,7 @@ class TimeImputer(BaseImputer):
         elif method == "mean":
             candidates = before + after
             if len(candidates) < self.min_obs:
-                return None
+                return
             n     = len(candidates)
             w     = 1.0 / n
             f_val = float(sum(w * f[eid] for _, eid in candidates))
@@ -277,7 +292,7 @@ class TimeImputer(BaseImputer):
                 ) * (self.gap_inflation ** gap)
                 src, wts, meth = [a_id, b_id], [1 - lam, lam], "time_linear"
             elif self.interpolate_only:
-                return None
+                return
             elif before:
                 t_obs, s_id = before[-1]
                 gap   = t_target - t_obs
@@ -291,22 +306,12 @@ class TimeImputer(BaseImputer):
                 s_val = float(sigma[s_id]) * self.gap_inflation ** gap
                 src, wts, meth = [s_id], [1.0], "time_linear"
             else:
-                return None
+                return
 
         if f_val is None:
-            return None
+            return
 
-        f[e_id]     = f_val
-        sigma[e_id] = s_val
-        return self._make_entry(e_id, step, meth, src, wts, f_val, s_val)
-
-    @staticmethod
-    def _make_entry(
-        e_id: int, step: int, method: str,
-        src: list[int], coeffs: list[float],
-        f_val: float, s_val: float,
-    ) -> dict:
-        return _log(e_id, step, method, src, coeffs, f_val, s_val, "", None)
+        ledger.write(e_id, f_val, s_val, step, meth, src, wts)
 
 
 # ---------------------------------------------------------------------------

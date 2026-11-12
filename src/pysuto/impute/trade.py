@@ -29,7 +29,7 @@ from pysuto.logging import get_logger
 from pysuto.lp import lp_combine
 from pysuto.relation.param_relation import ParamRelationResolver, conc_twin_map, get_edge_cache
 
-from .base import BaseImputer, _apply_cv_cap, _log
+from .base import BaseImputer, _apply_cv_cap
 
 logger = get_logger(__name__)
 
@@ -51,6 +51,7 @@ class TradeImputer(BaseImputer):
         # populated by prepare()
         self._cc_to_mass: dict[int, tuple[int, float, float]] = {}
         self._seed_edges: list[int] = []  # cross-region Flow→Process CC edges with a twin
+        self._scope: np.ndarray | None = None  # every cross-region Flow→Process CC edge
 
     @property
     def source_paths(self) -> list[str]:
@@ -74,9 +75,15 @@ class TradeImputer(BaseImputer):
             ].to_numpy()
         )
         self._seed_edges = [cc for cc in self._cc_to_mass if cc in eligible]
+        self._scope = np.zeros(acc.n_edges, dtype=bool)
+        self._scope[np.fromiter(eligible, dtype=np.int64, count=len(eligible))] = True
 
-    def impute(self, f, sigma, missing, step, acc_struct) -> list[dict]:
-        entries: list[dict] = []
+    def writer_scope(self, acc) -> np.ndarray:
+        """Every cross-region ``Flow→Process`` CC edge (the network's complement)."""
+        return self._scope
+
+    def impute(self, ledger, step, acc_struct) -> None:
+        f, sigma = ledger.f, ledger.sigma
         p = self.p
         for cc in self._seed_edges:
             if not np.isnan(f[cc]):
@@ -89,11 +96,8 @@ class TradeImputer(BaseImputer):
             # inverted: ∂CC/∂Mass = conc, ∂CC/∂conc = Mass = f_cc/conc.
             s_cc = lp_combine([conc * sigma[m], abs(f_cc) * conc_sig / conc], p)
             s_cc, capped = _apply_cv_cap(s_cc, f_cc, self.cv_cap)
-            f[cc] = f_cc
-            sigma[cc] = s_cc
-            entries.append(_log(
-                int(cc), step,
+            ledger.write(
+                cc, f_cc, s_cc, step,
                 "trade_seed_capped" if capped else "trade_seed",
-                [int(m)], [conc], f_cc, s_cc, "", None,
-            ))
-        return entries
+                [int(m)], [conc],
+            )

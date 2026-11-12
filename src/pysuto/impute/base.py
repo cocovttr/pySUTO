@@ -4,7 +4,7 @@ base.py
 ``BaseImputer`` + the two helpers shared across every imputer:
 
 * :func:`_apply_cv_cap` — σ-cap to cv_cap × |f| (4 callers across 3 imputers).
-* :func:`_log`           — one dict per filled edge (used by every imputer).
+* :func:`_log`           — one dict per filled edge (built by the ledger).
 """
 
 from __future__ import annotations
@@ -63,10 +63,12 @@ class BaseImputer(ABC):
     """
     Abstract base for all imputers.
 
-    impute() receives the current f and sigma arrays (modified in-place),
-    the missing mask at the START of this step (bool, True where NaN),
-    the pipeline step index for logging, and the accounting structure.
-    Returns a list of log-entry dicts (one per filled edge).
+    The engine drives each imputer through four explicit hooks: :meth:`prepare`
+    (once, at registration), :meth:`attach` (before each step),
+    :meth:`writer_scope` (before each step) and :meth:`impute`. ``impute`` reads
+    ``ledger.f`` / ``ledger.sigma`` and writes only through the
+    :class:`~pysuto.impute.ledger.PriorLedger`, which enforces no-overwrite and the
+    scope :meth:`writer_scope` declares.
 
     ``id`` is a provenance label stamped onto every log entry and sidecar
     step record by :class:`ImputationEngine`. Each concrete ``__init__``
@@ -77,16 +79,19 @@ class BaseImputer(ABC):
     #: Provenance id; set by each concrete __init__ (default = class name).
     id: str = ""
 
+    def prepare(self, acc) -> None:
+        """Resolve everything that depends on the accounting structure; once."""
+
+    def attach(self, agg_result) -> None:
+        """Receive the (read-only) aggregation result before each step."""
+
     @abstractmethod
-    def impute(
-        self,
-        f: np.ndarray,
-        sigma: np.ndarray,
-        missing: np.ndarray,
-        step: int,
-        acc_struct,
-    ) -> list[dict]:
-        ...
+    def writer_scope(self, acc) -> np.ndarray:
+        """Bool ``(n_edges,)``: the edges this imputer is permitted to write."""
+
+    @abstractmethod
+    def impute(self, ledger, step: int, acc_struct) -> None:
+        """Fill edges through ``ledger`` (``ledger.f`` / ``ledger.sigma`` are the prior)."""
 
     @property
     def source_paths(self) -> list[str]:

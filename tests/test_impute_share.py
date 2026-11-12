@@ -8,7 +8,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from pysuto.impute import ShareImputer
+from pysuto.impute import ShareImputer, run_imputer
 from pysuto.impute.share import Z95
 
 
@@ -53,7 +53,7 @@ def test_share_transfer_seeds_1995_and_seed_is_zero_mean():
         p95={("psc", "A"): 0.05, ("mesc", "A"): 0.10},
         scale_abs_floor=1.0,
     )
-    imp.impute(f, sigma, missing, step=0, acc_struct=acc)
+    run_imputer(imp, f, sigma, 0, acc)
 
     # PSC 1995 seeded by NOCB share (0.03 from 1996) × base(1995)=100
     assert f[0] == pytest.approx(0.03 * 100.0)
@@ -74,7 +74,7 @@ def test_share_transfer_skips_when_no_base_or_no_observed_share():
     f[2] = 50.0; f[3] = 50.0; f[7] = 200.0
     missing = np.isnan(f)
     imp = ShareImputer(p95={("psc", "A"): 0.05, ("mesc", "A"): 0.10}, scale_abs_floor=1.0)
-    imp.impute(f, sigma, missing, step=0, acc_struct=acc)
+    run_imputer(imp, f, sigma, 0, acc)
     assert np.isnan(f[0]) and np.isnan(f[1])     # PSC left for flat-prior
     assert f[6] == 0.0                            # MESC seed still fires (base present)
 
@@ -87,7 +87,7 @@ def test_seed_skipped_when_base_missing():
     # e7 (MESC base) left NaN → MESC seed must skip (leave for flat-prior)
     missing = np.isnan(f)
     imp = ShareImputer(p95={("psc", "A"): 0.05, ("mesc", "A"): 0.10}, scale_abs_floor=1.0)
-    imp.impute(f, sigma, missing, step=0, acc_struct=acc)
+    run_imputer(imp, f, sigma, 0, acc)
     assert np.isnan(f[6])                          # no base → not seeded
     assert f[0] == pytest.approx(0.03 * 100.0)     # PSC transfer still works
 
@@ -101,7 +101,7 @@ def test_seed_sigma_is_one_percent_of_the_fu_leg_floored_at_0_3_kt():
     f[7] = 200.0                       # Cathode→FU 1995 (the co-located base)
     missing = np.isnan(f)
     imp = ShareImputer(p95={}, scale_abs_floor=100.0, seed_cv=0.01, seed_abs_floor=0.3)
-    entries = imp.impute(f, sigma, missing, step=0, acc_struct=acc)
+    entries = run_imputer(imp, f, sigma, 0, acc)
     assert f[6] == 0.0
     assert sigma[6] == pytest.approx(0.01 * 200.0)     # 1 % of the leg, not p95·100
     (log,) = [x for x in entries if x["edge_id"] == 6]
@@ -113,12 +113,12 @@ def test_seed_sigma_is_one_percent_of_the_fu_leg_floored_at_0_3_kt():
     # a tiny / no-trade pair sits on the floor
     f = np.full(8, np.nan); sigma = np.full(8, np.nan)
     f[7] = 5.0
-    imp.impute(f, sigma, np.isnan(f), step=0, acc_struct=acc)
+    run_imputer(imp, f, sigma, 0, acc)
     assert sigma[6] == pytest.approx(0.3)
 
     # no base → no seed (left to the flat prior / Stage-3 no-data anchor)
     f = np.full(8, np.nan); sigma = np.full(8, np.nan)
-    imp.impute(f, sigma, np.isnan(f), step=0, acc_struct=acc)
+    run_imputer(imp, f, sigma, 0, acc)
     assert np.isnan(f[6])
 
 

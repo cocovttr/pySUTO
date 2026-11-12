@@ -34,6 +34,9 @@ from pysuto.impute import (
     FormulaImputer,
     TimeImputer,
     FlatPriorImputer,
+    PriorLedger,
+    ScopeError,
+    run_imputer,
     _reg_sensitivity,
 )
 
@@ -276,9 +279,10 @@ class TestImputationEngine:
         class CountingImputer(BaseImputer):
             def __init__(self):
                 self.called = 0
-            def impute(self, f, sigma, missing, step, acc_struct):
+            def writer_scope(self, acc):
+                return np.ones(acc.n_edges, dtype=bool)
+            def impute(self, ledger, step, acc_struct):
                 self.called += 1
-                return []
 
         counter = CountingImputer()
         engine  = ImputationEngine(acc_struct=acc)
@@ -404,7 +408,7 @@ class TestParametricImputerCSV:
         f[0]  = 100.0;  sigma[0] = 5.0
         missing = np.isnan(f)
         imp = ParametricImputer(_csv_pairs=[(0, 2, 0.3, 0.0, 0.0, "p", "d")])
-        imp.impute(f, sigma, missing, 0, acc)
+        run_imputer(imp, f, sigma, 0, acc)
         assert f[2] == pytest.approx(30.0)
         # Forward branch uses bare coeff: σ_b = |coeff| · σ_a
         assert sigma[2] == pytest.approx(0.3 * 5.0)
@@ -416,7 +420,7 @@ class TestParametricImputerCSV:
         f[2]  = 30.0;  sigma[2] = 1.5
         missing = np.isnan(f)
         imp = ParametricImputer(_csv_pairs=[(0, 2, 0.3, 0.0, 0.0, "p", "d")])
-        imp.impute(f, sigma, missing, 0, acc)
+        run_imputer(imp, f, sigma, 0, acc)
         assert f[0] == pytest.approx(100.0)
         # Backward branch is regularized: σ_a = s(1/coeff) · σ_b
         # 1/0.3 ≈ 3.33; with α_min=0.05, q=3 this saturates close to 1
@@ -432,7 +436,7 @@ class TestParametricImputerCSV:
             _csv_pairs=[(0, 2, 1e-3, 0.0, 0.0, "p", "d")],
             q=3.0, alpha_min=0.05,
         )
-        imp.impute(f, sigma, missing, 0, acc)
+        run_imputer(imp, f, sigma, 0, acc)
         assert f[2] == pytest.approx(1e-3)
         # Forward uses bare α: σ_b = α · σ_a = 1e-3 · 1 = 1e-3
         # (regularized would give s(α) · σ_a ≈ (α/α_min) · σ_a = 0.02)
@@ -447,7 +451,7 @@ class TestParametricImputerCSV:
             _csv_pairs=[(0, 2, 100.0, 0.0, 0.0, "p", "d")],
             q=3.0, alpha_min=0.05,
         )
-        imp.impute(f, sigma, missing, 0, acc)
+        run_imputer(imp, f, sigma, 0, acc)
         assert f[2] == pytest.approx(100.0)
         # Forward uses bare α: σ_b = 100 · 1 = 100  (not capped)
         assert sigma[2] == pytest.approx(100.0, rel=1e-6)
@@ -458,7 +462,7 @@ class TestParametricImputerCSV:
         sigma = np.array([1.0, 2.0] + [np.nan]*8)
         missing = np.isnan(f)
         imp = ParametricImputer(_csv_pairs=[(0, 1, 2.0, 0.0, 0.0, "p", "d")])
-        imp.impute(f, sigma, missing, 0, acc)
+        run_imputer(imp, f, sigma, 0, acc)
         assert f[0] == pytest.approx(10.0)
         assert f[1] == pytest.approx(20.0)
 
@@ -467,7 +471,7 @@ class TestParametricImputerCSV:
         sigma = np.full(10, np.nan)
         missing = np.isnan(f)
         imp = ParametricImputer(_csv_pairs=[(0, 2, 0.5, 0.0, 0.0, "p", "d")])
-        imp.impute(f, sigma, missing, 0, acc)
+        run_imputer(imp, f, sigma, 0, acc)
         assert np.isnan(f[0]) and np.isnan(f[2])
 
     def test_sigma_propagation_includes_sigma_param(self, acc):
@@ -476,7 +480,7 @@ class TestParametricImputerCSV:
         sigma = np.full(10, np.nan);  sigma[0] = 0.0
         missing = np.isnan(f)
         imp = ParametricImputer(_csv_pairs=[(0, 2, 2.0, 3.0, 0.0, "p", "d")])
-        imp.impute(f, sigma, missing, 0, acc)
+        run_imputer(imp, f, sigma, 0, acc)
         # σ_b = |a|·σ_r = 10 · 3 = 30 kt (was σ_r = 3, a ratio unit added to kt)
         assert sigma[2] == pytest.approx(30.0, rel=1e-12)
 
@@ -487,7 +491,7 @@ class TestParametricImputerCSV:
         f     = np.full(10, np.nan);  f[0]     = size
         sigma = np.full(10, np.nan);  sigma[0] = 0.0
         imp = ParametricImputer(_csv_pairs=[(0, 2, r, sig_r, 0.0, "p", "d")])
-        imp.impute(f, sigma, np.isnan(f), 0, acc)
+        run_imputer(imp, f, sigma, 0, acc)
         assert sigma[2] == pytest.approx(size * sig_r, rel=1e-12)
         assert sigma[2] / abs(f[2]) == pytest.approx(sig_r / r, rel=1e-12)
 
@@ -498,7 +502,7 @@ class TestParametricImputerCSV:
         f     = np.full(10, np.nan);  f[2]     = size
         sigma = np.full(10, np.nan);  sigma[2] = 0.0
         imp = ParametricImputer(_csv_pairs=[(0, 2, r, sig_r, 0.0, "p", "d")])
-        imp.impute(f, sigma, np.isnan(f), 0, acc)
+        run_imputer(imp, f, sigma, 0, acc)
         assert sigma[0] == pytest.approx(size * sig_r / r ** 2, rel=1e-12)
         assert sigma[0] / abs(f[0]) == pytest.approx(sig_r / r, rel=1e-12)
 
@@ -507,7 +511,7 @@ class TestParametricImputerCSV:
         f     = np.full(10, np.nan);  f[0]     = 500.0
         sigma = np.full(10, np.nan);  sigma[0] = 0.0
         imp = ParametricImputer(_csv_pairs=[(0, 2, 0.0, 0.001, 0.0, "p", "d")])
-        imp.impute(f, sigma, np.isnan(f), 0, acc)
+        run_imputer(imp, f, sigma, 0, acc)
         assert f[2] == 0.0
         assert sigma[2] == pytest.approx(500.0 * 0.001, rel=1e-12)
 
@@ -516,7 +520,7 @@ class TestParametricImputerCSV:
         sigma = np.full(10, np.nan);  sigma[0] = 0.0
         missing = np.isnan(f)
         imp = ParametricImputer(_csv_pairs=[(0, 2, 1.0, 0.0, 0.1, "p", "d")])
-        imp.impute(f, sigma, missing, 0, acc)
+        run_imputer(imp, f, sigma, 0, acc)
         # f_b = 10, sigma_b = sqrt(0 + (0.1*10)²) = 1.0
         assert f[2] == pytest.approx(10.0)
         assert sigma[2] == pytest.approx(1.0)
@@ -529,7 +533,7 @@ class TestParametricImputerCSV:
         missing = np.isnan(f)
         # coeff=2 → natural fill 200; the imputer no longer reads bound_upper.
         imp = ParametricImputer(_csv_pairs=[(0, 2, 2.0, 0.0, 0.0, "p", "d")])
-        imp.impute(f, sigma, missing, 0, acc)
+        run_imputer(imp, f, sigma, 0, acc)
         assert f[2] == pytest.approx(200.0)
 
     def test_log_entries_returned(self, acc):
@@ -537,7 +541,7 @@ class TestParametricImputerCSV:
         sigma = np.full(10, np.nan);  sigma[0] = 0.5
         missing = np.isnan(f)
         imp = ParametricImputer(_csv_pairs=[(0, 2, 1.0, 0.0, 0.0, "pid", "desc")])
-        entries = imp.impute(f, sigma, missing, 3, acc)
+        entries = run_imputer(imp, f, sigma, 3, acc)
         assert len(entries) == 1
         e = entries[0]
         assert e["edge_id"]  == 2
@@ -556,7 +560,7 @@ class TestParametricImputerCSV:
             _csv_pairs=[(0, 2, 0.01, 0.0, 0.0, "p", "d")],
             q=3.0, alpha_min=0.05,
         )
-        imp.impute(f, sigma, missing, 0, acc)
+        run_imputer(imp, f, sigma, 0, acc)
         # f uses bare inverse: f_a = (1/0.01) * 1 = 100
         assert f[0] == pytest.approx(100.0)
         # σ uses s(inv) ≈ 1, so σ_a ≈ σ_b = 1.0  (vs. 100 without regularization)
@@ -572,7 +576,7 @@ class TestParametricImputerCSV:
             _csv_pairs=[(0, 2, 1000.0, 0.0, 0.0, "p", "d")],
             q=3.0, alpha_min=0.05,
         )
-        imp.impute(f, sigma, missing, 0, acc)
+        run_imputer(imp, f, sigma, 0, acc)
         expected = _reg_sensitivity(1e-3, 3.0, 0.05) * 1.0
         assert sigma[0] == pytest.approx(expected)
         assert sigma[0] == pytest.approx(1e-3 / 0.05, rel=1e-3)
@@ -724,7 +728,7 @@ class TestParametricImputerLambda:
             coefficients=[0.1],
         )
         imp = ParametricImputer(relations=[rel])
-        imp.impute(f, sigma, missing, 0, acc)
+        run_imputer(imp, f, sigma, 0, acc)
 
         # target 0 (Mining_A→Ore_A) should be filled from source 4 (Ore_A→Mining_A)
         # same region A, same time 2020
@@ -742,7 +746,7 @@ class TestParametricImputerLambda:
             coefficients=[1.0],
         )
         imp = ParametricImputer(relations=[rel])
-        imp.impute(f, sigma, missing, 0, acc)
+        run_imputer(imp, f, sigma, 0, acc)
         assert np.isnan(f[0])
 
     def test_log_entry_contains_description(self, acc):
@@ -757,7 +761,7 @@ class TestParametricImputerLambda:
             coefficients=[1.0],
         )
         imp = ParametricImputer(relations=[rel])
-        entries = imp.impute(f, sigma, missing, 0, acc)
+        entries = run_imputer(imp, f, sigma, 0, acc)
         assert len(entries) == 1
         assert entries[0]["description"] == "my description"
 
@@ -789,7 +793,7 @@ class TestFormulaImputer:
             clip_lower=None,
         )
         imp = FormulaImputer(relations=[rel])
-        imp.impute(f, sigma, missing, 0, acc)
+        run_imputer(imp, f, sigma, 0, acc)
         assert f[4] == pytest.approx(80.0)
         assert sigma[4] == pytest.approx(8.0)
 
@@ -826,7 +830,7 @@ class TestFormulaImputer:
             clip_lower=None,
         )
         imp = FormulaImputer(relations=[rel])
-        imp.impute(f, sigma, missing, 0, acc)
+        run_imputer(imp, f, sigma, 0, acc)
         assert f[1] == pytest.approx(70.0)
 
     def test_missing_zero_counts_nan_source_as_zero(self, acc):
@@ -851,12 +855,12 @@ class TestFormulaImputer:
         # subtract source (edge 4) left NaN
         f     = np.full(10, np.nan);  f[0] = 100.0
         sigma = np.full(10, np.nan);  sigma[0] = 5.0
-        FormulaImputer(relations=[_rel("zero")]).impute(f, sigma, np.isnan(f), 0, acc)
+        run_imputer(FormulaImputer(relations=[_rel("zero")]), f, sigma, 0, acc)
         assert f[1] == pytest.approx(100.0), "NaN subtract term must count as 0"
         # default "block" semantics unchanged
         f     = np.full(10, np.nan);  f[0] = 100.0
         sigma = np.full(10, np.nan);  sigma[0] = 5.0
-        FormulaImputer(relations=[_rel("block")]).impute(f, sigma, np.isnan(f), 0, acc)
+        run_imputer(FormulaImputer(relations=[_rel("block")]), f, sigma, 0, acc)
         assert np.isnan(f[1]), "default must still block on a NaN source"
 
     def test_clip_lower_zero(self, acc):
@@ -877,7 +881,7 @@ class TestFormulaImputer:
             clip_lower=0.0,
         )
         imp = FormulaImputer(relations=[rel])
-        entries = imp.impute(f, sigma, missing, 0, acc)
+        entries = run_imputer(imp, f, sigma, 0, acc)
         assert f[1] == pytest.approx(0.0)
         assert entries[0]["method"] == "formula_clipped"
 
@@ -899,7 +903,7 @@ class TestFormulaImputer:
             clip_lower=0.0,
         )
         imp = FormulaImputer(relations=[rel])
-        entries = imp.impute(f, sigma, missing, 0, acc)
+        entries = run_imputer(imp, f, sigma, 0, acc)
         assert entries[0]["method"] == "formula"
         assert f[1] == pytest.approx(50.0)
 
@@ -937,7 +941,7 @@ class TestFormulaImputer:
             clip_lower=None,
         )
         imp = FormulaImputer(relations=[rel])
-        imp.impute(f, sigma, missing, 0, acc)
+        run_imputer(imp, f, sigma, 0, acc)
 
         # Edge 4 (Ore_A→Mining_A): from_region=A → source should be edge 0 (to_region=A)
         assert f[4] == pytest.approx(100.0)
@@ -956,7 +960,7 @@ class TestFormulaImputer:
             clip_lower=0.0,
         )
         imp = FormulaImputer(relations=[rel])
-        imp.impute(f, sigma, missing, 0, acc)
+        run_imputer(imp, f, sigma, 0, acc)
         assert np.isnan(f[0])
 
     def test_aggregate_sum_over_multiple_sources(self, acc):
@@ -982,7 +986,7 @@ class TestFormulaImputer:
             clip_lower=None,
         )
         imp = FormulaImputer(relations=[rel])
-        imp.impute(f, sigma, missing, 0, acc)
+        run_imputer(imp, f, sigma, 0, acc)
         assert f[4] == pytest.approx(30.0)
 
     def test_param_ref_identity(self, acc):
@@ -1006,7 +1010,7 @@ class TestFormulaImputer:
             clip_lower=None,
         )
         imp = FormulaImputer(relations=[rel], params={"eff_mine": 0.9})
-        imp.impute(f, sigma, missing, 0, acc)
+        run_imputer(imp, f, sigma, 0, acc)
         assert f[4] == pytest.approx(9.0)
 
     def test_param_ref_inverse(self, acc):
@@ -1030,7 +1034,7 @@ class TestFormulaImputer:
             clip_lower=None,
         )
         imp = FormulaImputer(relations=[rel], params={"eff_mine": 0.5})
-        imp.impute(f, sigma, missing, 0, acc)
+        run_imputer(imp, f, sigma, 0, acc)
         assert f[4] == pytest.approx(20.0)   # 10 / 0.5
 
 
@@ -1054,7 +1058,7 @@ class TestTimeImputer:
         missing = np.isnan(f)
 
         imp = TimeImputer(window=5, method="linear")  # default p=1.3
-        entries = imp.impute(f, sigma, missing, 0, acc)
+        entries = run_imputer(imp, f, sigma, 0, acc)
 
         # λ = 0.5 → f_6 = 15.0
         assert f[6] == pytest.approx(15.0)
@@ -1073,7 +1077,7 @@ class TestTimeImputer:
         missing = np.isnan(f)
 
         imp = TimeImputer(window=5, method="linear", p=2.0)
-        imp.impute(f, sigma, missing, 0, acc)
+        run_imputer(imp, f, sigma, 0, acc)
         # σ² = 0.25·4 + 0.25·16 = 5 → σ = sqrt(5)
         assert sigma[6] == pytest.approx(np.sqrt(5.0))
 
@@ -1085,7 +1089,7 @@ class TestTimeImputer:
         missing = np.isnan(f)
 
         imp = TimeImputer(window=5, method="locf")
-        imp.impute(f, sigma, missing, 0, acc)
+        run_imputer(imp, f, sigma, 0, acc)
         assert f[6] == pytest.approx(42.0)
 
     def test_nocb(self, acc):
@@ -1096,7 +1100,7 @@ class TestTimeImputer:
         missing = np.isnan(f)
 
         imp = TimeImputer(window=5, method="nocb")
-        imp.impute(f, sigma, missing, 0, acc)
+        run_imputer(imp, f, sigma, 0, acc)
         assert f[6] == pytest.approx(99.0)
 
     def test_gap_inflation_applied(self, acc):
@@ -1107,7 +1111,7 @@ class TestTimeImputer:
         missing = np.isnan(f)
 
         imp = TimeImputer(window=5, method="locf", gap_inflation=2.0)
-        imp.impute(f, sigma, missing, 0, acc)
+        run_imputer(imp, f, sigma, 0, acc)
         # gap=1 step → σ_6 = 1 * 2^1 = 2
         assert sigma[6] == pytest.approx(2.0)
         # gap=2 steps → σ_8 = 1 * 2^2 = 4
@@ -1125,7 +1129,7 @@ class TestTimeImputer:
         missing = np.isnan(f)
 
         imp = TimeImputer(window=1, method="locf")
-        imp.impute(f, sigma, missing, 0, acc)
+        run_imputer(imp, f, sigma, 0, acc)
         # t=2021 (edge 6): gap=1 from t=2020 → filled
         assert f[6] == pytest.approx(5.0)
         # t=2022 (edge 8): cascades from newly-filled t=2021 (gap=1) → also filled
@@ -1139,7 +1143,7 @@ class TestTimeImputer:
         missing = np.isnan(f)
 
         imp = TimeImputer(window=0, method="locf")
-        imp.impute(f, sigma, missing, 0, acc)
+        run_imputer(imp, f, sigma, 0, acc)
         assert np.isnan(f[6])
         assert np.isnan(f[8])
 
@@ -1152,7 +1156,7 @@ class TestTimeImputer:
         missing = np.isnan(f)
 
         imp = TimeImputer(window=5, method="mean")
-        imp.impute(f, sigma, missing, 0, acc)
+        run_imputer(imp, f, sigma, 0, acc)
         # mean of 10 and 30 = 20
         assert f[6] == pytest.approx(20.0)
 
@@ -1166,7 +1170,7 @@ class TestTimeImputer:
         missing = np.isnan(f)
 
         imp = TimeImputer(window=5, method="linear")
-        imp.impute(f, sigma, missing, 0, acc)
+        run_imputer(imp, f, sigma, 0, acc)
         assert f[6] == pytest.approx(99.0)   # unchanged
 
     def test_independent_series_do_not_interact(self, acc):
@@ -1179,7 +1183,7 @@ class TestTimeImputer:
         missing = np.isnan(f)
 
         imp = TimeImputer(window=5, method="linear")
-        imp.impute(f, sigma, missing, 0, acc)
+        run_imputer(imp, f, sigma, 0, acc)
 
         # Mining_A t=2021 filled
         assert not np.isnan(f[6])
@@ -1194,7 +1198,7 @@ class TestTimeImputer:
         missing = np.isnan(f)
 
         imp = TimeImputer(window=5, method="linear")
-        entries = imp.impute(f, sigma, missing, 0, acc)
+        entries = run_imputer(imp, f, sigma, 0, acc)
         methods = {e["method"] for e in entries}
         assert "time_linear" in methods
 
@@ -1279,7 +1283,7 @@ class TestFormulaImputerAccBounds:
         f[4]  = 50.0;  sigma[4] = 0.0
         missing = np.isnan(f)
         imp = FormulaImputer(relations=[self._make_balance_rel(clip_lower=0.0)])
-        entries = imp.impute(f, sigma, missing, 0, acc)
+        entries = run_imputer(imp, f, sigma, 0, acc)
         assert f[1] == pytest.approx(0.0)
         assert entries[0]["method"] == "formula_clipped"
 
@@ -1296,7 +1300,7 @@ class TestFormulaImputerAccBounds:
         missing = np.isnan(f)
         # rel.clip_lower=0.0 is set — if it were still used, f[1] would be 0
         imp = FormulaImputer(relations=[self._make_balance_rel(clip_lower=0.0)])
-        entries = imp.impute(f, sigma, missing, 0, acc)
+        entries = run_imputer(imp, f, sigma, 0, acc)
         assert f[1] == pytest.approx(-40.0)          # NOT clipped to 0
         assert entries[0]["method"] == "formula"      # NOT "formula_clipped"
 
@@ -1318,7 +1322,7 @@ class TestTimeImputerInterpolateOnly:
         f[8]  = 20.0;  sigma[8] = 2.0   # t=2022
         missing = np.isnan(f)
         imp = TimeImputer(window=5, method="linear", interpolate_only=True)
-        imp.impute(f, sigma, missing, 0, acc)
+        run_imputer(imp, f, sigma, 0, acc)
         assert f[6] == pytest.approx(15.0)   # interpolated at λ=0.5
 
     def test_interpolate_only_skips_leading_gap(self, acc):
@@ -1328,7 +1332,7 @@ class TestTimeImputerInterpolateOnly:
         f[8]  = 20.0;  sigma[8] = 1.0   # only t=2022 known
         missing = np.isnan(f)
         imp = TimeImputer(window=5, method="linear", interpolate_only=True)
-        imp.impute(f, sigma, missing, 0, acc)
+        run_imputer(imp, f, sigma, 0, acc)
         assert np.isnan(f[0])   # t=2020 — no before anchor
         assert np.isnan(f[6])   # t=2021 — no before anchor
 
@@ -1339,7 +1343,7 @@ class TestTimeImputerInterpolateOnly:
         f[0]  = 10.0;  sigma[0] = 1.0   # only t=2020 known
         missing = np.isnan(f)
         imp = TimeImputer(window=5, method="linear", interpolate_only=True)
-        imp.impute(f, sigma, missing, 0, acc)
+        run_imputer(imp, f, sigma, 0, acc)
         assert np.isnan(f[6])   # t=2021 — no after anchor
         assert np.isnan(f[8])   # t=2022 — no after anchor
 
@@ -1369,13 +1373,13 @@ class TestTimeImputerScoping:
 
         imp = TimeImputer(window=5, method="linear", interpolate_only=True,
                           scope_edges=scope)
-        imp.impute(f, sigma, missing, 0, acc)
+        run_imputer(imp, f, sigma, 0, acc)
 
         assert f[6] == pytest.approx(15.0)        # in scope — interpolated
         assert np.isnan(f[7])                     # out of scope — untouched
 
     def test_scope_feed_id_resolves_via_attach(self, acc):
-        """scope_feed_id resolves to a mask via attach_agg_result(agg_result)."""
+        """scope_feed_id resolves to a mask via attach(agg_result)."""
         # Two feeds. Feed "crude_ore" only covers edges 0 and 8.
         F     = np.full((2, 10), np.nan)
         Sigma = np.full((2, 10), np.nan)
@@ -1401,8 +1405,8 @@ class TestTimeImputerScoping:
 
         imp = TimeImputer(window=5, method="linear", interpolate_only=True,
                           scope_feed_id="crude_ore")
-        imp.attach_agg_result(ar)
-        imp.impute(f_work, sigma_work, missing, 0, acc)
+        imp.attach(ar)
+        run_imputer(imp, f_work, sigma_work, 0, acc)
 
         # Mining_A→Ore_A (in crude_ore) — t=2021 interpolated.
         assert f_work[6] == pytest.approx(15.0)
@@ -1421,7 +1425,7 @@ class TestTimeImputerScoping:
         # Try scope_times=["2021"] — should fill only edge 6.
         imp = TimeImputer(window=5, method="linear", interpolate_only=True,
                           scope_times=["2021"])
-        imp.impute(f, sigma, missing, 0, acc)
+        run_imputer(imp, f, sigma, 0, acc)
 
         assert f[6] == pytest.approx(15.0)
         assert not np.isnan(f[0])    # untouched, was anchor
@@ -1439,7 +1443,7 @@ class TestTimeImputerScoping:
         imp = TimeImputer(window=5, method="linear", interpolate_only=False,
                           gap_inflation=1.5,
                           scope_times=["2021", "2022"])
-        entries = imp.impute(f, sigma, missing, 0, acc)
+        entries = run_imputer(imp, f, sigma, 0, acc)
 
         # Both 2021 and 2022 filled by single-sided "linear" path (LOCF-like).
         assert f[6] == pytest.approx(10.0)
@@ -1461,7 +1465,7 @@ class TestTimeImputerScoping:
         ar = _agg_result([1.0] + [np.nan]*9)
         imp = TimeImputer(scope_feed_id="nope")
         with pytest.raises(ValueError, match="not in"):
-            imp.attach_agg_result(ar)
+            imp.attach(ar)
 
 
 # =============================================================================
@@ -1514,7 +1518,7 @@ class TestParametricImputerSpecificityDedup:
         # --- region-A pair: specific row (coeff=0.9) must win ---
         f_a     = np.full(10, np.nan);  f_a[0]     = 10.0
         sig_a   = np.full(10, np.nan);  sig_a[0]   = 0.0
-        imp.impute(f_a, sig_a, np.isnan(f_a), 0, acc)
+        run_imputer(imp, f_a, sig_a, 0, acc)
         assert f_a[2] == pytest.approx(9.0), (
             f"Expected 9.0 (coeff=0.9 from specific row), got {f_a[2]}"
         )
@@ -1522,7 +1526,7 @@ class TestParametricImputerSpecificityDedup:
         # --- region-B pair: only wildcard row applies (coeff=0.5) ---
         f_b     = np.full(10, np.nan);  f_b[1]     = 10.0
         sig_b   = np.full(10, np.nan);  sig_b[1]   = 0.0
-        imp.impute(f_b, sig_b, np.isnan(f_b), 0, acc)
+        run_imputer(imp, f_b, sig_b, 0, acc)
         assert f_b[3] == pytest.approx(5.0), (
             f"Expected 5.0 (coeff=0.5 from wildcard row), got {f_b[3]}"
         )
@@ -1589,7 +1593,7 @@ class TestFlatPriorImputer:
             default_cv=0.5,
             acc_struct=acc,
         )
-        imp.impute(f, sigma, missing, 0, acc)
+        run_imputer(imp, f, sigma, 0, acc)
         # edge 0 is supply, group has only edge 8 finite → scale=100, σ = 0.001·100 = 0.1
         assert f[0] == 0.0
         assert sigma[0] == pytest.approx(0.001 * 100.0)
@@ -1607,7 +1611,7 @@ class TestFlatPriorImputer:
             default_cv=0.5,
             acc_struct=acc,
         )
-        imp.impute(f, sigma, missing, 0, acc)
+        run_imputer(imp, f, sigma, 0, acc)
         assert f[4] == 0.0
         assert sigma[4] == pytest.approx(0.3 * 200.0)
 
@@ -1623,7 +1627,7 @@ class TestFlatPriorImputer:
             default_cv=0.7,
             acc_struct=acc,
         )
-        imp.impute(f, sigma, missing, 0, acc)
+        run_imputer(imp, f, sigma, 0, acc)
         # Edge 4 (use) has no rule → default_cv=0.7. Its narrow + broader (Ore, Mass) groups
         # are both empty (only edge 5 is in (Ore, Mass) and it's NaN), so scale falls all the
         # way to level 3: global median of finite, non-zero |f| = median([50]) = 50.
@@ -1652,7 +1656,7 @@ class TestFlatPriorImputer:
             default_cv=0.5,
             acc_struct=acc,
         )
-        imp.impute(f, sigma, missing, 0, acc)
+        run_imputer(imp, f, sigma, 0, acc)
         # edge 0's group includes edge 6 (finite) → scale=80, σ = 0.001·80 = 0.08
         assert sigma[0] == pytest.approx(0.001 * 80.0)
 
@@ -1669,7 +1673,7 @@ class TestFlatPriorImputer:
             default_cv=0.5,
             acc_struct=acc,
         )
-        imp.impute(f, sigma, missing, 0, acc)
+        run_imputer(imp, f, sigma, 0, acc)
         # f is still 0 for every filled edge.
         assert np.all(f == 0.0)
         # σ = CV(mask) · 1.0 per edge; supply edges get 0.001, use edges get 0.3.
@@ -1687,7 +1691,7 @@ class TestFlatPriorImputer:
             default_cv=0.5,
             acc_struct=acc,
         )
-        entries = imp.impute(f, sigma, missing, 5, acc)
+        entries = run_imputer(imp, f, sigma, 5, acc)
         # 9 missing edges → 9 entries
         assert len(entries) == 9
         for e in entries:
@@ -1712,7 +1716,7 @@ class TestFlatPriorImputer:
             default_cv=0.5,
             acc_struct=acc,
         )
-        imp.attach_agg_result(agg)
+        imp.attach(agg)
         cv = imp._resolve_cv()
         # Edges with region_from == A (covered) → cv_lo for their mask.
         # Edges with region_from == B (uncovered) → cv_hi for their mask.
@@ -1901,7 +1905,7 @@ class TestTimeInterpScopeExcludesStockLegs:
         f[5], sigma[5] = 50.0, 1.0
         imp = TimeImputer(window=3, method="linear", min_obs=2, interpolate_only=True,
                           scope_edges=scope, id="time_interp")
-        imp.impute(f, sigma, np.isnan(f), 0, acc)
+        run_imputer(imp, f, sigma, 0, acc)
         assert f[1] == pytest.approx(15.0), "Cathode→FU still interpolates"
         assert np.isnan(f[4]), "Cathode→MESC must stay a gap (ADR 0040)"
 
@@ -1925,7 +1929,7 @@ class TestTimeImputerSameRegionScope:
                           interpolate_only=True,
                           scope_edges=_same_region_scope(acc),
                           id="time_interp")
-        imp.impute(f, sigma, missing, 0, acc)
+        run_imputer(imp, f, sigma, 0, acc)
 
         assert f[1] == pytest.approx(15.0), "domestic series still interpolates"
         assert np.isnan(f[4]), "bilateral leg must stay an honest gap (ADR 0026)"
@@ -1943,7 +1947,7 @@ class TestTimeImputerSameRegionScope:
 
         imp = TimeImputer(window=3, method="linear", min_obs=2,
                           interpolate_only=True, id="time_interp")
-        imp.impute(f, sigma, missing, 0, acc)
+        run_imputer(imp, f, sigma, 0, acc)
 
         assert f[1] == pytest.approx(15.0)
         assert f[4] == pytest.approx(40.0)
@@ -1965,7 +1969,117 @@ class TestTimeImputerSameRegionScope:
         imp = TimeImputer(window=3, method="linear", min_obs=2,
                           interpolate_only=True, scope_edges=scope,
                           id="time_interp")
-        entries = imp.impute(f, sigma, missing, 0, acc)
+        entries = run_imputer(imp, f, sigma, 0, acc)
 
         assert entries == []
         assert np.isnan(f[4])
+
+
+# =============================================================================
+# 8. PriorLedger — write-time no-overwrite + writer scope (#131)
+# =============================================================================
+
+class _Writer(BaseImputer):
+    """Writes value 7.0 (σ 0.7) on every edge in ``targets`` inside ``scope``."""
+
+    def __init__(self, targets, scope, id="writer"):
+        self.id = id
+        self._targets = list(targets)
+        self._scope = np.zeros(10, dtype=bool)
+        self._scope[list(scope)] = True
+
+    def writer_scope(self, acc):
+        return self._scope
+
+    def impute(self, ledger, step, acc_struct):
+        for e in self._targets:
+            ledger.write(e, 7.0, 0.7, step, "scripted", [], [])
+
+
+class TestPriorLedger:
+
+    def _ledger(self, strict):
+        ledger = PriorLedger(np.full(10, np.nan), np.full(10, np.nan), strict_scope=strict)
+        scope = np.zeros(10, dtype=bool)
+        scope[:3] = True
+        ledger.open("w", 2, scope)
+        return ledger
+
+    def test_in_scope_write_is_stamped_with_imputer_and_pass(self):
+        ledger = self._ledger(strict=True)
+        assert ledger.write(1, 4.0, 0.4, 0, "m", [0], [2.0], "d", "pid")
+        (entry,) = ledger.close()
+        assert (entry["edge_id"], entry["imputer_id"], entry["pass"]) == (1, "w", 2)
+        assert (entry["f_after"], entry["sigma_after"]) == (4.0, 0.4)
+        assert ledger.f[1] == 4.0 and ledger.sigma[1] == 0.4
+
+    def test_out_of_scope_write_raises_when_strict(self):
+        ledger = self._ledger(strict=True)
+        with pytest.raises(ScopeError, match="outside its writer scope"):
+            ledger.write(5, 4.0, 0.4, 0, "m", [], [])
+        assert np.isnan(ledger.f[5])
+
+    def test_out_of_scope_write_is_dropped_and_counted_otherwise(self):
+        ledger = self._ledger(strict=False)
+        assert not ledger.write(5, 4.0, 0.4, 0, "m", [], [])
+        assert np.isnan(ledger.f[5]) and ledger.n_dropped == 1
+        assert ledger.close() == []
+
+    def test_an_edge_that_holds_a_value_is_never_overwritten(self):
+        ledger = self._ledger(strict=True)
+        ledger.f[1], ledger.sigma[1] = 9.0, 0.9
+        assert not ledger.write(1, 4.0, 0.4, 0, "m", [], [])
+        assert ledger.f[1] == 9.0 and ledger.close() == []
+
+    def test_write_many_checks_scope_and_skips_filled_edges(self):
+        ledger = self._ledger(strict=False)
+        ledger.f[0] = 1.0
+        n = ledger.write_many(np.array([0, 1, 2, 6]), np.zeros(4), np.ones(4), 0, "m")
+        assert n == 2 and ledger.n_dropped == 1
+        assert [e["edge_id"] for e in ledger.close()] == [1, 2]
+        with pytest.raises(ScopeError):
+            self._ledger(strict=True).write_many(np.array([6]), np.zeros(1), np.ones(1), 0, "m")
+
+    def test_a_scope_of_the_wrong_shape_is_refused(self):
+        ledger = PriorLedger(np.full(10, np.nan), np.full(10, np.nan))
+        with pytest.raises(ValueError, match="writer scope"):
+            ledger.open("w", None, np.ones(4, dtype=bool))
+
+    def test_engine_raises_strict_on_an_out_of_scope_write(self, acc):
+        engine = ImputationEngine(acc_struct=acc, strict_scope=True)
+        engine.register(_Writer(targets=[5], scope=[0, 1, 2]))
+        with pytest.raises(ScopeError):
+            engine.run(_agg_result([1.0] + [np.nan] * 9))
+
+    def test_engine_drops_the_out_of_scope_write_in_production(self, acc):
+        engine = ImputationEngine(acc_struct=acc)
+        engine.register(_Writer(targets=[1, 5], scope=[0, 1, 2]))
+        result = engine.run(_agg_result([1.0] + [np.nan] * 9))
+        assert result.f_agg[1] == 7.0 and np.isnan(result.f_agg[5])
+        assert result.imputation_log.as_dataframe()["edge_id"].tolist() == [1]
+
+    def test_no_imputer_reads_its_hooks_through_hasattr(self):
+        import pathlib
+        import pysuto.impute as pkg
+        for path in pathlib.Path(pkg.__file__).parent.glob("*.py"):
+            assert "hasattr(" not in path.read_text(), path.name
+
+    def test_flat_prior_scope_is_every_edge(self, acc):
+        imp = FlatPriorImputer(acc, mode="noisy_zero", sigma_high=1e3)
+        assert imp.writer_scope(acc).all()
+
+    def test_parametric_scope_is_the_endpoints_of_its_pairs(self, acc):
+        imp = ParametricImputer(_csv_pairs=[(0, 2, 0.5, 0.05, 0.0, "a", ""),
+                                            (4, 3, 2.0, 0.05, 0.0, "b", "")])
+        assert np.flatnonzero(imp.writer_scope(acc)).tolist() == [0, 2, 3, 4]
+
+    def test_parametric_cannot_write_outside_its_pairs(self, acc):
+        f, sigma = np.full(10, np.nan), np.full(10, np.nan)
+        f[0], sigma[0] = 10.0, 1.0
+        imp = ParametricImputer(_csv_pairs=[(0, 2, 0.5, 0.05, 0.0, "a", "")])
+        ledger = PriorLedger(f, sigma, strict_scope=True)
+        ledger.open(imp.id, None, imp.writer_scope(acc))
+        imp.impute(ledger, 0, acc)
+        assert f[2] == pytest.approx(5.0)
+        with pytest.raises(ScopeError):
+            ledger.write(7, 1.0, 0.1, 0, "m", [], [])

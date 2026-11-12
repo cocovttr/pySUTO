@@ -35,7 +35,7 @@ import pytest
 
 from pysuto.acc import ValuationRoles
 from pysuto.agg import AggregationResult
-from pysuto.impute import NetworkImputer
+from pysuto.impute import NetworkImputer, run_imputer
 from pysuto.relation.structure import process_recipes
 
 
@@ -297,7 +297,7 @@ def _run(imputer, acc, seeds):
         e = acc.eid(fs, ts, v)
         f[e] = val
         sigma[e] = 0.01 * abs(val) if val else 0.01
-    imputer.impute(f, sigma, np.isnan(f), step=0, acc_struct=acc)
+    run_imputer(imputer, f, sigma, 0, acc)
     return f, sigma
 
 
@@ -384,7 +384,7 @@ def test_negative_balance_clipped_not_propagated(imputer, acc):
         e = acc.eid(fs, ts, v)
         f[e] = val
         sigma[e] = 0.01 * val
-    entries = imputer.impute(f, sigma, np.isnan(f), step=0, acc_struct=acc)
+    entries = run_imputer(imputer, f, sigma, 0, acc)
 
     e_sxew = acc.eid("Ore", "SXEW", "CC")
     # clipped to the lower bound, not left negative
@@ -524,7 +524,7 @@ def test_no_overwrite_observed(imputer, acc):
     e_out = acc.eid("MF", "Concentrate", "CC")
     f[e_in] = 100.0; sigma[e_in] = 1.0
     f[e_out] = 999.0; sigma[e_out] = 2.0   # observed, "wrong" vs 0.8*100
-    imputer.impute(f, sigma, np.isnan(f), step=0, acc_struct=acc)
+    run_imputer(imputer, f, sigma, 0, acc)
     assert f[e_out] == 999.0   # untouched
     assert sigma[e_out] == 2.0
 
@@ -594,7 +594,7 @@ def _run2(imputer, acc, seeds):
         e = acc.eid(fs, ts, v, t)
         f[e] = val
         sigma[e] = 0.01 * abs(val) if val else 0.01
-    entries = imputer.impute(f, sigma, np.isnan(f), step=0, acc_struct=acc)
+    entries = run_imputer(imputer, f, sigma, 0, acc)
     return f, {en["edge_id"]: en["method"] for en in entries}
 
 
@@ -796,7 +796,7 @@ def _bi_run(imp, acc, seeds):
         e = acc.eid(fs, fr, ts, tr, v)
         f[e] = val
         sigma[e] = 0.01 * abs(val) if val else 0.01
-    imp.impute(f, sigma, np.isnan(f), step=0, acc_struct=acc)
+    run_imputer(imp, f, sigma, 0, acc)
     return f, sigma
 
 

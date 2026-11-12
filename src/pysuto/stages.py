@@ -30,10 +30,7 @@ from pysuto.acc import ALL_SPEC_KEYS, AccountingStructure, check_built_acc, chec
 from pysuto.case import Cascade, CaseContext, CaseSpec, check_case
 from pysuto.collector import FeedCollector
 from pysuto.constraints import ConstraintEngine
-from pysuto.diag import (
-    AggDiagnostic, CoverageDiagnostic, ImpDiagnostic, StatsDiagnostic,
-    ownership_violations,
-)
+from pysuto.diag import AggDiagnostic, CoverageDiagnostic, ImpDiagnostic, StatsDiagnostic
 from pysuto.impute import ImputationEngine
 from pysuto.input_registry import InputRegistries, input_pins
 from pysuto.logging import get_logger
@@ -43,7 +40,8 @@ from pysuto.registry import DataFeedRegistry, ImputationRunRegistry
 def run_imp(case: CaseSpec, feed_ids: list, label: str,
             overrides: Optional[dict] = None, *, data_dir: str = "data",
             imp_dir: Optional[str] = None, pin_inputs_from: Optional[str] = None,
-            logger: Optional[logging.Logger] = None) -> str:
+            logger: Optional[logging.Logger] = None,
+            strict_scope: bool = False) -> str:
     """Run Stage 2 of ``case`` on ``feed_ids``; return the imp run id.
 
     The run builds from ``case``'s Stage 2 section on the acc ``case.acc_id``;
@@ -51,6 +49,8 @@ def run_imp(case: CaseSpec, feed_ids: list, label: str,
     sidecar. ``data_dir`` holds ``proc/`` and ``input/``; the run is written to
     ``imp_dir`` (default ``<data_dir>/proc/imp``). ``pin_inputs_from`` names an imp run
     in ``<data_dir>/proc/imp`` whose recorded input versions this run uses (#53).
+    ``strict_scope`` makes an imputer's write outside its writer scope raise
+    :class:`~pysuto.impute.ScopeError`; by default it is logged and dropped.
     """
     spec   = case.imp
     if spec.validate is not None:
@@ -116,7 +116,7 @@ def run_imp(case: CaseSpec, feed_ids: list, label: str,
     # The case's cascade (spec.imputers): its fixpoint group in the group's order, then
     # each terminal imputer, registered in the order listed.
     logger.info("C  Building imputation engine")
-    engine = ImputationEngine(acc_struct=acc)
+    engine = ImputationEngine(acc_struct=acc, strict_scope=strict_scope)
 
     for item in spec.imputers(ctx):
         if isinstance(item, Cascade):
@@ -135,15 +135,6 @@ def run_imp(case: CaseSpec, feed_ids: list, label: str,
     ctx.agg_result = agg_result
     if spec.post_impute is not None:
         spec.post_impute(ctx)
-
-    # Ownership-partition check (ADR 0010): trade owns cross-region edges, the
-    # network owns same-region edges. A clean run has zero violations; warn loudly
-    # if a guard ever regressed.
-    _viol = ownership_violations(agg_result.imputation_log.as_dataframe(), acc.edge_meta)
-    if len(_viol):
-        logger.warning("C  ownership-partition VIOLATIONS: %d edge(s) filled by an "
-                       "unintended owner\n%s", len(_viol),
-                       _viol.head(20).to_string(index=False))
 
     # ── D  Register run ───────────────────────────────────────────────────────
     logger.info("D  Registering imputation run in %s", imp_dir)

@@ -943,7 +943,8 @@ def run_stage2(run_root: PathLike, feed_run_ids: Optional[dict] = None) -> str:
     the imp run id.
     """
     keys = list(feed_run_ids.values()) if feed_run_ids else list(FEED_IDS)
-    return run_imp(CASE, keys, LABEL, data_dir=str(run_root), logger=_log)
+    return run_imp(CASE, keys, LABEL, data_dir=str(run_root), logger=_log,
+                   strict_scope=True)
 
 
 def run_stage3(run_root: PathLike, imp_run_id: Optional[str] = None) -> str:

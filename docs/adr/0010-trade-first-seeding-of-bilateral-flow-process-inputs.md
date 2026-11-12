@@ -119,7 +119,8 @@ carries a real prior (verified: ER→CER 2020 prior 1.8 → 20.8k, vs solved ≈
   writes only cross-region `Flow→Process` CC edges, NetworkImputer only same-region edges. The `agg` flag is
   documented (in `_parametric_consumes`) as the *relation-type marker* (pooled recipe vs per-pair) that
   splits the shared params CSV between consumers. A read-only post-run check (`diag.ownership_violations`)
-  flags any edge filled by an unintended owner (empty on the reference run).
+  flags any edge filled by an unintended owner (empty on the reference run). *Amended (#131): the check
+  is retired; each imputer declares a writer scope and `PriorLedger` enforces it at write time.*
 
 ## Considered options
 
