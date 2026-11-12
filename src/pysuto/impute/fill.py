@@ -12,7 +12,7 @@ a measured, separate change):
 * ``"parametric"`` — conc, ore-grade and efficiency pairs, every term in the filled edge's
   flow units (kt): forward ``Lp(|r|·σ_a, |f_a|·σ_param, ε·f_b)``, backward
   ``Lp(s(1/r)·σ_b, |f_a|·σ_param/|r|, ε·f_a)`` with the bounded sensitivity ``s``
-  (:func:`~pysuto.impute.parametric._reg_sensitivity`); methods ``parametric`` /
+  (:func:`~pysuto.impute.base._reg_sensitivity`); methods ``parametric`` /
   ``parametric_capped`` (#148).
 * ``"trade"`` — the cross-region trade-seed of the CC leg from its BACI Mass twin, forward
   only: ``Lp(r·σ_m, |f_cc|·σ_param/r)``, no ε term; methods ``trade_seed`` /
@@ -26,8 +26,7 @@ import numpy as np
 from pysuto.lp import lp_combine
 from pysuto.relation.sources import Fill
 
-from .base import BaseImputer, _apply_cv_cap
-from .parametric import _reg_sensitivity
+from .base import BaseImputer, _apply_cv_cap, _reg_sensitivity
 
 SIGMA_RULES = ("parametric", "trade")
 

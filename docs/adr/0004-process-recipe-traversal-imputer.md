@@ -26,9 +26,19 @@ with the same `ParamRelationResolver` the constraint builders use. It is a new *
 new *engine* — it reuses the engine cascade/fixpoint, the Lp/σ machinery, `_reg_sensitivity`,
 the `ImputationLog`, and the bounds-clip.
 
+**Amended 2026-11-12 (#131, #136) — "sole writer" is a writer scope.** The network is the *only
+permitted* writer of process-incident same-region chain edges against the trade fill, but not the
+only one of every same-region edge: scopes may overlap, and the cascade order decides which source
+writes an edge first (GLOSSARY "Writer scope"). The reference imp run
+`imp_20261112_133434_22fc54b3` already contradicts exclusivity — the `conc` fill wrote 852
+same-region `Cathode→FU` Mass edges, the fallback this ADR describes under *Provenance shift* —
+so the claim is replaced by what is enforced: `PriorLedger` rejects a write outside an imputer's
+declared scope (strict in tests, log-and-drop in production), and the `ownership_violations` check
+is retired.
+
 ## Considered options
 
-- **A. New `NetworkImputer` in the existing engine; sole writer of chain edges. (chosen.)**
+- **A. New `NetworkImputer` in the existing engine; the permitted writer of chain edges (writer scope, see the amendment above). (chosen.)**
   One ledger (`agg_result`), one σ/provenance path, one coefficient source shared with
   Stage 3. The race that produced the conc-after-eff bug is removed structurally: on its
   territory the network is the only writer and it emits CC + Mass + waste atomically.

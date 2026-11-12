@@ -63,8 +63,7 @@ from pysuto.relation.ratio_relation import (
 from pysuto.relation.relation import Relation
 from pysuto.relation.structure import process_recipes
 
-from .base import BaseImputer, _apply_cv_cap
-from .parametric import _reg_sensitivity
+from .base import BaseImputer, _apply_cv_cap, _reg_sensitivity
 
 logger = get_logger(__name__)
 

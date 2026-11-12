@@ -11,8 +11,8 @@ import pandas as pd
 import pytest
 
 from pysuto.constraints.ratio import ACCEPTS_BOUND, ACCEPTS_EQ, RatioConstraintBuilder
-from pysuto.impute import parametric
-from pysuto.impute.parametric import ParametricImputer
+from pysuto.relation import sources
+from pysuto.relation.sources import ParamSource
 from pysuto.relation.params import SELECTOR_KEYS, ParamRow, read_params
 
 
@@ -82,11 +82,11 @@ class TestReadParams:
         assert [r.param_id for r in rows] == ["conc1", "eff1"]
         assert "1 filtered" in caplog.text and "stripping_ratio" in caplog.text
 
-    def test_parametric_declares_its_types_and_leaves_the_stripping_ratio(self):
-        """Replaces the old _parametric_consumes test: ParametricImputer reads
-        concentration / efficiency; the stripping_ratio family is outside its ACCEPTS."""
-        assert parametric.ACCEPTS == {"concentration", "efficiency"}
-        assert "stripping_ratio" not in parametric.ACCEPTS
+    def test_the_pair_source_declares_its_types_and_leaves_the_stripping_ratio(self):
+        """The params source's pair reading takes concentration / efficiency; the
+        stripping_ratio family is outside its PAIR_ACCEPTS."""
+        assert sources.PAIR_ACCEPTS == {"concentration", "efficiency"}
+        assert "stripping_ratio" not in sources.PAIR_ACCEPTS
         assert "stripping_ratio" in ACCEPTS_EQ
         assert "stripping_ratio" not in ACCEPTS_BOUND
 
@@ -181,7 +181,7 @@ class TestSoftRowWithoutSigmaRule:
         b = RatioConstraintBuilder.from_csv(str(p), _Acc())
         assert b._pairs[0].sigma == pytest.approx(0.1 / 1.645)
 
-    def test_parametric_imputer_raises_on_a_row_without_one(self, tmp_path):
+    def test_the_params_source_raises_on_a_row_without_one(self, tmp_path):
         p = _write(tmp_path / "c.csv", [_rec(unc_type="", value_sd="")], ",")
         with pytest.raises(ValueError, match="no σ rule"):
-            ParametricImputer.from_csv(str(p), _Acc())
+            ParamSource.from_params(str(p), _Acc())

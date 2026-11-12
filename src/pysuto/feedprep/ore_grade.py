@@ -251,7 +251,7 @@ def build_param_rows(grades: pd.DataFrame, bands: pd.DataFrame, labels: OreGrade
     limit and a measurement uncertainty — can be changed independently. The
     values are unchanged: `value_sd` is the quarter-width of the same series
     envelope the retired `min_max` mode read, so the soft ratio row, the
-    `ParametricImputer` prior and the `NetworkImputer` twin map are identical.
+    parametric fill's prior and the `NetworkImputer` twin map are identical.
 
     The band itself stays the region's series envelope (ADR 0015). A year-local
     band was built and measured in Round M and **rejected** — it removed Chile's

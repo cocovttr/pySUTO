@@ -4,7 +4,7 @@ lp.py
 Pure-math Lp / power-mean σ combiner.
 
 Single source of truth for ( Σ |x_i|^p )^(1/p) used across Stage 1 / 2 / 3.
-Imported by the Lp-combining imputers (formula, parametric, trade, time,
+Imported by the Lp-combining imputers (fill, time,
 network); ConstraintEngine's σ-regularisation computes the same recipe inline.
 """
 

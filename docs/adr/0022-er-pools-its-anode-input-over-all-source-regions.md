@@ -56,7 +56,7 @@ The change is one cell of `data/input/params/eff/current/params.csv`:
 ```
 
 It also moves ER out of the `ParametricImputer`, which skips `agg` rows
-(`src/pysuto/impute/parametric.py`), onto the `NetworkImputer`'s pooled recipe traversal — the
+(`src/pysuto/impute/parametric.py`, since replaced by the params source's `FillImputer`, #136), onto the `NetworkImputer`'s pooled recipe traversal — the
 same path Smelting and CFR already take ([ADR 0004](0004-process-recipe-traversal-imputer.md)).
 
 ## Considered options

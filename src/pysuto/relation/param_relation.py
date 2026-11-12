@@ -7,7 +7,7 @@ Owns the edge-index expansion + cache and the A/B enumeration. The params-templa
 column schema (A/B selector fields, wildcards, "same" directive) and the typed rows
 live in :mod:`pysuto.relation.params`.
 
-Consumed as a shared seam by Stage 2 (`ParametricImputer.from_csv`)
+Consumed as a shared seam by Stage 2 (`ParamSource.from_params`)
 and Stage 3 (`RatioConstraintBuilder.from_csv`,
 `RatioBoundBuilder.from_csv`). Each adapter reads its rows with
 `read_params` and calls `ParamRelationResolver.resolve_row(row)`; the resolver

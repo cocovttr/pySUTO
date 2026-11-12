@@ -418,15 +418,15 @@ At $p = 2$ this reduces to $1/\sqrt{\sum_k 1/\sigma_k^2[j]}$. For $p \in [1, 2]$
 
 ##### Imputation — parametric
 
-A `ParametricRelation` fills target edge $j$ as a linear combination of source edges $\{i_1, \dots, i_m\}$ with coefficients $\alpha_l$:
+A parametric `Fill` fills target edge $j$ from a source relation (a pair `Relation`, $m = 1$) as a linear combination of source edges $\{i_1, \dots, i_m\}$ with coefficients $\alpha_l$:
 
 $$f_j = \sum_{l=1}^{m} \alpha_l \cdot f_{i_l}$$
 
 $$\sigma_j \;=\; \left( \sum_{l=1}^{m} |\alpha_l \cdot \sigma_{i_l}|^p \;+\; |\sigma_\mathrm{param}|^p \;+\; |\varepsilon \cdot f_j|^p \right)^{1/p}$$
 
-The fill always uses bare $\alpha_l$. σ propagation uses bare $\alpha_l$ in the **forward CSV branch (A→B)** and in **lambda relations**. The **backward CSV branch (B→A)** is the only place where $1/\alpha$ is replaced by the [regularized sensitivity](#regularized-sensitivity) below — this caps σ amplification when $1/\alpha \gg 1$ (the ore-grade-inverse case).
+The fill always uses bare $\alpha_l$. σ propagation uses bare $\alpha_l$ in the **forward branch (A→B)**. The **backward branch (B→A)** is the only place where $1/\alpha$ is replaced by the [regularized sensitivity](#regularized-sensitivity) below — this caps σ amplification when $1/\alpha \gg 1$ (the ore-grade-inverse case).
 
-The $\varepsilon$ (`epsilon`) term encodes structural uncertainty in the relation itself. $\sigma_\mathrm{param}$ is the per-row σ from the CSV (omitted for lambda relations).
+The $\varepsilon$ (`epsilon`) term encodes structural uncertainty in the relation itself. $\sigma_\mathrm{param}$ is the per-row σ from the CSV.
 
 ##### Regularized sensitivity
 
@@ -480,9 +480,8 @@ Only finite, non-zero values count at every level, so upstream-imputed zeros nev
 - **`BaseImputer`** ([impute/](src/pysuto/impute/)) — ABC; subclass and implement `.writer_scope(acc)` (the edges it may write) and `.impute(ledger, step, acc)` to add a new fill method; `.prepare(acc)` and `.attach(agg_result)` are optional hooks.
 - **`PriorLedger`** ([impute/ledger.py](src/pysuto/impute/ledger.py)) — the one write path of the prior: every imputer writes through it, and it enforces no-overwrite and the imputer's declared writer scope at write time, stamping imputer id and pass. `ImputationEngine(strict_scope=True)` raises `ScopeError` on an out-of-scope write (the toy runs so); the default logs it at WARNING and drops it.
 - **`FillImputer`** ([impute/fill.py](src/pysuto/impute/fill.py)) — one `Fill(source, rule, scope, id)` of the params relation source ([relation/sources.py](src/pysuto/relation/sources.py): a params file read as pair `Relation`s `b − r·a = 0`; `rule` ∈ forward / backward / both) with its own σ rule. The **trade** fill is the conc source forward (Mass→CC) in the cross-region `Flow→Process` content scope: it seeds those **CC** import legs from their BACI **Mass** twin (`f_CC = conc·f_Mass`, method `trade_seed`); it runs **first** in the cascade so the network recipe gate can pool the covered legs (see [ADR 0010](docs/adr/0010-trade-first-seeding-of-bilateral-flow-process-inputs.md)).
-- **`NetworkImputer`** ([impute/network.py](src/pysuto/impute/network.py)) — process-recipe traversal: closes each Process node's CC mass balance (`product = eff·Σinputs`, SEM waste, Mass twins) plus Flow-node balances; **sole writer of same-region chain edges**. A missing same-region primary blocks the forward fill; missing `Scrap` and missing cross-region imports count as 0 (see [ADR 0004](docs/adr/0004-process-recipe-traversal-imputer.md), [ADR 0010](docs/adr/0010-trade-first-seeding-of-bilateral-flow-process-inputs.md)).
-- **`ParametricImputer`** — bidirectional edge-pair fills from a CSV (`.from_csv(...)`, no longer built by copper or the toy: the conc and ore-grade `Fill`s of `FillImputer` replace it) or `ParametricRelation` lambdas; covers concentration (data category 3) and efficiency (data category 4) parameters.
-- **`FormulaImputer`** — directed multi-source balance equations with region/time-correlated source selection and a physical clip. Building blocks: `ParamRef`, `SourceTerm`, `FormulaRelation`.
+- **`NetworkImputer`** ([impute/network.py](src/pysuto/impute/network.py)) — process-recipe traversal: closes each Process node's CC mass balance (`product = eff·Σinputs`, SEM waste, Mass twins) plus Flow-node balances; the permitted writer of same-region chain edges (its writer scope). A missing same-region primary blocks the forward fill; missing `Scrap` and missing cross-region imports count as 0 (see [ADR 0004](docs/adr/0004-process-recipe-traversal-imputer.md), [ADR 0010](docs/adr/0010-trade-first-seeding-of-bilateral-flow-process-inputs.md)).
+- **`FillEntry` / `CascadeStep`** ([case.py](src/pysuto/case.py)) — how a case declares its cascade as data (#136): `ImpSection.cascade` lists the entries in declaration order, each a `FillEntry(id, params_id, rule, sigma_rule, twin, scope)` (one `Fill` of a params relation source, built from the registered params file) or a `CascadeStep(id, build)` (the network); the knob `CASCADE_ORDER` is the order they run in and `ImpSection.terminal(ctx)` returns the terminal imputers. The imp sidecar records each entry's params id, param types, rule, σ rule and scope name (`stage_config["case"]["imp"]["cascade"]`), and each fill step's `source_path` (its step record). Writer scopes are enforced by the ledger, not by the entries being exclusive ([ADR 0004](docs/adr/0004-process-recipe-traversal-imputer.md) amendment, [ADR 0011](docs/adr/0011-one-edge-relation-shared-across-imputation-and-constraints.md)).
 - **`TimeImputer`** — sliding-window temporal interpolation/extrapolation; `method ∈ {"linear","locf","nocb","mean"}`. Scoped to **same-region** edges in the copper driver: a bilateral trade leg absent in a year is a recorded zero, not a gap ([ADR 0026](docs/adr/0026-bilateral-trade-legs-are-not-time-interpolated.md)); never a stock-change leg.
 - **`ShareImputer`** ([impute/share.py](src/pysuto/impute/share.py)) — the net-stock seed: a `Cathode→MESC` / `Cathode→USC` leg no feed reports is held at 0 with `σ = max(0.01·|co-located Cathode→FU flow|, 0.3 kt)`; terminal, before the flat prior ([ADR 0040](docs/adr/0040-stock-change-legs-are-held-at-their-prior.md)). Its PSC share-transfer mode is pre-empted by the recipe and fires 0×; a PSC seed at 1 % of `CP→Cathode` was rejected on measurement ([ADR 0041](docs/adr/0041-signed-edges-carry-no-one-signed-hard-band-and-are-seeded.md)).
 - **`FlatPriorImputer`** — final-fallback flat prior keyed by `AccountingStructure` edge masks; register **last**.
@@ -494,10 +493,10 @@ Only finite, non-zero values count at every level, so upstream-imputed zeros nev
 | Parameter | Default | Where | Effect |
 |---|---|---|---|
 | `p` | `1.3` | every imputer + `FeedCollector.aggregate` | Lp exponent |
-| `q` | `3.0` | `ParametricImputer` | Sharpness of backward-branch sensitivity knee |
-| `alpha_min` | `0.05` | `ParametricImputer` | Effective-sensitivity floor for inverse multipliers |
-| `cv_cap` | `inf` | `ParametricImputer` | Optional hard cap on per-fill CV |
-| `epsilon` | per relation | `ParametricRelation` / `FormulaRelation` | Relative residual uncertainty added in quadrature |
+| `q` | `3.0` | `FillImputer` (parametric σ rule) | Sharpness of backward-branch sensitivity knee |
+| `alpha_min` | `0.05` | `FillImputer` (parametric σ rule) | Effective-sensitivity floor for inverse multipliers |
+| `cv_cap` | `inf` | `FillImputer` | Optional hard cap on per-fill CV |
+| `epsilon` | per params row | the source's `Relation` (`meta["epsilon"]`) | Relative residual uncertainty added in quadrature |
 | `window`, `gap_inflation` | `5`, `1.0` | `TimeImputer` | Look-back/forward range; per-step σ multiplier |
 | `default_cv` | required | `FlatPriorImputer` | CV applied to edges that match no listed mask (no density modulation) |
 | `cv_lo`, `cv_hi` (per mask) | from `flat_prior_cv.csv` | `FlatPriorImputer` | Tight / loose endpoints of the coverage-density interpolation `cv_lo + (cv_hi − cv_lo)·(1 − ρ)` |
@@ -513,24 +512,14 @@ agg_result = collector.aggregate(p=1.3)
 # agg_result.f_agg, agg_result.sigma_agg, agg_result.Omega, agg_result.coverage
 ```
 
-**Parametric imputation with both CSV parameters and a lambda relation:**
+**Parametric imputation from a params file:**
 
 ```python
 engine = ImputationEngine(acc_struct=acc)
 
-engine.register(ParametricImputer.from_csv(
-    "data/input/params/copper_conc_params.csv", acc_struct=acc,
-    p=1.3, q=3.0, alpha_min=0.05,
-))
-
-scrap_return = ParametricRelation(
-    description="Scrap return ≈ 12% of cathode→FU flow",
-    target=lambda ei: (ei.sector_from == "SR") & (ei.sector_to == "FU"),
-    sources=lambda ei: (ei.sector_from == "Cathode") & (ei.sector_to == "FU"),
-    coefficients=[0.12],
-    epsilon=0.25,
-)
-engine.register(ParametricImputer(relations=[scrap_return], p=1.3))
+source = ParamSource.from_params("data/input/params/copper_conc_params.csv", acc)
+engine.register(FillImputer(Fill(source, "both", id="conc"), "parametric",
+                            p=1.3, q=3.0, alpha_min=0.05))
 engine.register(TimeImputer(window=5, method="linear", gap_inflation=1.05, p=1.3))
 engine.register(FlatPriorImputer.from_csv(
     "data/input/params/flat_prior_cv.csv", acc_struct=acc,
@@ -579,7 +568,7 @@ Five built-in constraint types populate rows of `G`:
 
 **Type 2 (soft sum).** σ_c modes: `sd` (absolute), `fraction_of_flow` (fraction of node-flow magnitude from `f_agg`), `p_mean` (Lp combine over `_rhs_ids` σ_agg using the global Lp exponent).
 
-**Type 3 (soft ratio).** $r$ is `value_nominal` from the params CSV; σ_c follows the three uncertainty modes (`sd`, `min_max`, `pedigree`) shared with `ParametricImputer`. The same CSV file thus serves both stages. A row with `agg=true` is **set-scoped**: `RatioConstraintBuilder` pools every matched a-side edge against every matched b-side edge per `(region_to, time, valuation)` bucket into one soft row $\sum b - r\sum a = \varepsilon$ — used for the pooled recovery recipe `product = eff·(Concentrate/Matte + Scrap)` at Smelting/CFR (see [ADR 0005](docs/adr/0005-pool-scrap-into-eff-constraint-and-stripping-ratio.md)).
+**Type 3 (soft ratio).** $r$ is `value_nominal` from the params CSV; σ_c follows the three uncertainty modes (`sd`, `min_max`, `pedigree`) shared with the parametric fill. The same CSV file thus serves both stages. A row with `agg=true` is **set-scoped**: `RatioConstraintBuilder` pools every matched a-side edge against every matched b-side edge per `(region_to, time, valuation)` bucket into one soft row $\sum b - r\sum a = \varepsilon$ — used for the pooled recovery recipe `product = eff·(Concentrate/Matte + Scrap)` at Smelting/CFR (see [ADR 0005](docs/adr/0005-pool-scrap-into-eff-constraint-and-stripping-ratio.md)).
 
 **Type 4 / Type 5.** Hard inequalities, σ_c = 0. When a ratio-bound row sets `agg=true`, `RatioBoundBuilder` sums every matched a-side edge into one G row and every matched b-side edge into another, scoped per `(region_to, time, valuation)` bucket — used both for stock-change bounds (numerator/denominator summed over source regions per destination region; see [data/input/params/stock_bounds/current/params.csv](data/input/params/stock_bounds/current/params.csv)) and for the pooled eff bounds at Smelting/CFR. Bucketing on `region_to` keeps each process region's recipe separate. Since Round X the stock-change rows cover the producer stock change (`CP→PSC`) only: the user and exchange stock-change legs (`Cathode→USC`, `Cathode→MESC`) carry no row and are held at their prior by the Stage-2 net-stock seed σ, `max(0.01·|co-located FU flow|, 0.3 kt)`, because a signed leg with a loose σ is a sink for every contradiction of the cathode balance and a zero-centred row pulled the reported stock changes toward zero ([ADR 0040](docs/adr/0040-stock-change-legs-are-held-at-their-prior.md)). Since Round Y the producer stock change is tied to its Mass twin by the cathode concentration row, and `RatioBoundBuilder` emits no one-signed hard band on any signed edge — such a band is satisfiable for a negative pair only at zero, which had kept every USC/MESC leg non-negative; seeding PSC like USC/MESC was measured and rejected ([ADR 0041](docs/adr/0041-signed-edges-carry-no-one-signed-hard-band-and-are-seeded.md)).
 
@@ -937,8 +926,8 @@ world.to_piot().sankey("2020").write_html("copper_process_network_2020.html")
 | [registry/](src/pysuto/registry/) | `BaseOutputRegistry`, `DataFeedRegistry`, `ImputationRunRegistry`, `ConstraintRunRegistry`, `OptimRunRegistry`, `UncPropRunRegistry`, `PsutRunRegistry`, `SweepRunRegistry`, `_RegistryEntry`, `make_run_id`, `build_sidecar`, `stage_lock`, `LockHeld` | Harmonized output registries (Stages 1–6); shared run-id pattern + sidecar schema; the advisory stage lock on `data/proc` (#101). **Subpackage layout:** `base.py`, `feed.py`, `imputation.py`, `constraint.py`, `optim.py`, `uncprop.py`, `psut.py`, `sweep.py`, `lock.py`, `_sidecar.py`. |
 | [input_registry.py](src/pysuto/input_registry.py) | `InputRegistry`, `InputRegistries`, `pins_from_inputs`, `input_pins` | Per-kind versioned snapshot store for `feed`, `acc`, `params`, `mask` inputs; hardlink dedup; auto-bump on content-hash change; pins that replay a sidecar's input versions (#53). Imports nothing from `acc`; the spec-comparing checks of acc versions live in `acc.py` (#119). |
 | [knobs.py](src/pysuto/knobs.py) | `parse_overrides`, `apply_overrides`, `add_knob_args`, `overrides_from_cli`, `write_run_id` | The driver knob protocol: `--set KNOB=VALUE` against a driver's `KNOBS`, and `--run-id-file` (#100). |
-| [case.py](src/pysuto/case.py) | `CaseSpec`, `Section`, `ImpSection`, `ConstSection`, `Cascade`, `CaseContext` | A case as a typed declaration (#120): its acc id, one frozen section per stage and the `driver_knobs` it sets on the Stage 4–6 drivers (#124), whose UPPER_CASE fields are the stage's knobs and whose functions (`imputers`, `builders`, selectors) build over a `CaseContext`; `with_knobs` applies `--set`, `describe` serialises a section into a run's `stage_config["case"]`. |
-| [cases/](src/pysuto/cases/) | `copper.CASE`, `CopperImp`, `CopperConst`, `imputers`, `builders`, `pre_impute`, `post_impute`, `damp_leg_sigma`, `screen_outlier_trade_legs`, `screen_contradicted_nodes`, `time_interp_scope`, `cascade_in_order`, `scale_total_resolver` (over `constraints.anchors`, #145) | Case instances, at the top of the import direction. `copper.py` holds the copper Stage 2 and 3 model: every knob at its shipped value, the imputer cascade, the constraint builders and the σ algorithms (#121); the Stage 2–6 drivers take `--case <id>` (default `copper`; `pysuto.cases.load_case` finds `pysuto.cases.<id>.CASE`) and parse arguments, take the stage lock and run the stage. |
+| [case.py](src/pysuto/case.py) | `CaseSpec`, `Section`, `ImpSection`, `ConstSection`, `FillEntry`, `CascadeStep`, `Cascade`, `CaseContext` | A case as a typed declaration (#120): its acc id, one frozen section per stage and the `driver_knobs` it sets on the Stage 4–6 drivers (#124), whose UPPER_CASE fields are the stage's knobs and whose entries and functions (the Stage 2 `cascade` of `FillEntry` data and `terminal`, the Stage 3 `builders`, selectors) build over a `CaseContext`; `with_knobs` applies `--set`, `describe` serialises a section into a run's `stage_config["case"]`. |
+| [cases/](src/pysuto/cases/) | `copper.CASE`, `CopperImp`, `CopperConst`, `CASCADE`, `terminal`, `builders`, `pre_impute`, `post_impute`, `damp_leg_sigma`, `screen_outlier_trade_legs`, `screen_contradicted_nodes`, `time_interp_scope`, `scale_total_resolver` (over `constraints.anchors`, #145) | Case instances, at the top of the import direction. `copper.py` holds the copper Stage 2 and 3 model: every knob at its shipped value, the declared imputer cascade, the constraint builders and the σ algorithms (#121); the Stage 2–6 drivers take `--case <id>` (default `copper`; `pysuto.cases.load_case` finds `pysuto.cases.<id>.CASE`) and parse arguments, take the stage lock and run the stage. |
 | [feedprep/](src/pysuto/feedprep/) | `trade_shares.compute_trade_share_weights`, `trade_shares.build_edges_frame`, `reexport.net_reexports`, `reexport.waterfill`, `ore_grade.compute_insitu_grades`, `OreGradeLabels` | The feed-side algorithms of a case, labels as parameters (#147): the BACI-trade-share weights of ICSG's producer fan (ADR 0002, 0024), the re-export netting (ADR 0027) and the ore-grade triangle (ADR 0015, 0023). `scripts/build_{trade_shares,baci_reexport,ore_grade}.py` parse arguments and call them; `cases/copper_feed.py` binds copper's labels, reads the registered ICSG inputs and holds the complete ICSG `FeedSpec`, `ICSG_SPEC` (trade-share weights, #53's refusal of stale ones, observed zeros). |
 | [stages.py](src/pysuto/stages.py) | `run_imp`, `run_const` | The bodies of the Stage 2 and 3 drivers as library functions over a `CaseSpec`, a data dir and the upstream run id (#124); the toy's `run_stage2` / `run_stage3` call them. `pysuto.case.check_case` refuses a run made by another case. |
 | [pipeline.py](src/pysuto/pipeline.py), [\_\_main\_\_.py](src/pysuto/__main__.py) | `Pipeline`, `Chain`, `StepFailed`, `Axis`, `Sweep`, `STEPS`, `ALL_STEPS`, `TIED`, `STEP_GB`, `split_key` | Stage drivers composed as subprocess steps, Stage 1 (a case's hook) to Stage 6 (`python -m pysuto run`, #125); one chain per `run(overrides, label)` with `<stage>.<KNOB>` overrides (#103); random (Latin hypercube) or grid sweeps of chains, resumable, recorded via `SweepRunRegistry` (#105); a sweep may keep only its last step's runs, the others passing through a scratch store (#108). |
@@ -948,12 +937,12 @@ world.to_piot().sankey("2020").write_html("copper_process_network_2020.html")
 | [lp.py](src/pysuto/lp.py) | `lp_combine` | The Lp / power-mean σ combiner `(Σ \|x_i\|^p)^(1/p)`, one source of truth for Stages 1–3. |
 | [masks.py](src/pysuto/masks.py) | `MaskRuleSet`, `coerce_mask`, `load_masks_csv` | Named boolean edge masks over an `AccountingStructure` (flat-prior CV ranges, builder scope, feed `edge_scope_mask`). |
 | [relation/params.py](src/pysuto/relation/params.py) | `ParamRow`, `read_params`, `WILDCARD`, `A_FIELDS`, `B_FIELDS` | The one reader of the params CSVs (#128): `read_params(path, accepts)` parses with a single policy (sniffed delimiter, `dtype=str`, `#` comments) into frozen, typed `ParamRow`s (`agg` as a bool, `sigma()` from `unc_type`, `specificity`); each consumer declares an `ACCEPTS` set of `param_type`s, other rows are filtered and counted in the log, a malformed accepted row raises, and a soft row with no σ rule raises. `constraints/sum.py` reads another schema and stays. |
-| [relation/param_relation.py](src/pysuto/relation/param_relation.py) | `ParamRelationResolver`, `ResolvedRelation`, `expand_edge_index`, `conc_twin_map`, `conc_nominal_lookup` | The A→B relation resolver over a `ParamRow` (selectors, `*` / `same` wildcards), shared by Stage 2 (`ParametricImputer.from_csv`) and Stage 3 (`RatioConstraintBuilder` / `RatioBoundBuilder.from_csv`). |
+| [relation/param_relation.py](src/pysuto/relation/param_relation.py) | `ParamRelationResolver`, `ResolvedRelation`, `expand_edge_index`, `conc_twin_map`, `conc_nominal_lookup` | The A→B relation resolver over a `ParamRow` (selectors, `*` / `same` wildcards), shared by Stage 2 (`ParamSource.from_params`) and Stage 3 (`RatioConstraintBuilder` / `RatioBoundBuilder.from_csv`). |
 | [relation/structure.py](src/pysuto/relation/structure.py) | `ProcessRecipe`, `NodeBalance`, `process_recipes`, `node_balances` | The structural relation sources, derived once from the acc and cached per acc: a recipe (inputs, Flow `products`, secondary-SB `wastes` per process-region-year) and the content balance of every Flow and Process node-period. `acc` imports nothing from `impute`; the NetworkImputer reads these and raises on a recipe with more than one Flow product until co-products land (#129, #130). |
 | [flow_node_balance.py](src/pysuto/flow_node_balance.py) | `flow_node_balance`, `contradicted_flow_nodes` | Detects a contradicted flow node — inflow and outflow priors that disagree — for the Stage 2 and Stage 3 drivers; detection only, the policy is the caller's ([ADR 0019](docs/adr/0019-contradicted-flow-nodes-lose-anchor-authority.md)). |
 | [collector.py](src/pysuto/collector.py) | `FeedCollector` | Select feeds, align onto common edge index, produce `AggregationResult`. |
 | [agg.py](src/pysuto/agg.py) | `AggregationMath`, `AggregationResult` | Build `Ω`, compute `f_agg`, `σ_agg`, coverage. |
-| [impute/](src/pysuto/impute/) | `ImputationEngine`, `BaseImputer`, `PriorLedger`, `FillImputer`, `NetworkImputer`, `ParametricImputer`, `FormulaImputer`, `TimeImputer`, `ShareImputer`, `FlatPriorImputer`, `ParametricRelation`, `FormulaRelation`, `SourceTerm`, `ParamRef`, `ImputationLog`, `ImputationMetadata` | Ordered imputation pipeline; per-edge provenance logging. **Subpackage layout:** `engine.py`, `base.py`, `ledger.py`, `fill.py`, `network.py`, `parametric.py`, `formula.py`, `time.py`, `share.py`, `flat_prior.py`. |
+| [impute/](src/pysuto/impute/) | `ImputationEngine`, `BaseImputer`, `PriorLedger`, `FillImputer`, `NetworkImputer`, `TimeImputer`, `ShareImputer`, `FlatPriorImputer`, `ImputationLog`, `ImputationMetadata` | Ordered imputation pipeline; per-edge provenance logging. **Subpackage layout:** `engine.py`, `base.py`, `ledger.py`, `fill.py`, `network.py`, `time.py`, `share.py`, `flat_prior.py`. |
 | [constraints/](src/pysuto/constraints/) | `ConstraintEngine`, `BaseConstraintBuilder`, `MassBalanceBuilder`, `SumConstraintBuilder`, `RatioConstraintBuilder`, `RatioBoundBuilder`, `FlowBoundsBuilder`, `ConstraintBlock`, `ConstraintRun` | Plugin constraint pipeline; persists to `data/proc/const/` via `ConstraintRunRegistry` (lives in [registry/](src/pysuto/registry/)). **Subpackage layout:** `engine.py`, `base.py`, `mass_balance.py`, `sum.py`, `ratio.py`, `flow_bound.py`, `run.py`. |
 | [solver.py](src/pysuto/solver.py) | `Solver`, `OptimResult` | Stage-4 orchestrator: builds the σ-weighted period QP (warm or cold prior) and hands it to an injected QP backend; imports no numerical solver. `Solver.objective_at` scores any year-local posterior under a const run's QP, split by family (#102). |
 | [qp.py](src/pysuto/qp.py) | `QPProblem`, `QPResult`, `QPBackend` | The neutral standard-form period QP and the backend protocol (ADR 0042). |
@@ -979,7 +968,7 @@ from pysuto.feedpipe import run_feed_pipeline
 from pysuto.registry import DataFeedRegistry
 from pysuto.input_registry import InputRegistries
 from pysuto.impute import (
-    ImputationEngine, FillImputer, NetworkImputer, ParametricImputer,
+    ImputationEngine, FillImputer, NetworkImputer,
     TimeImputer, ShareImputer, FlatPriorImputer,
 )
 from pysuto.relation.sources import Fill, ParamSource, trade_scope
@@ -995,8 +984,8 @@ from pysuto.diag import AggDiagnostic, ImpDiagnostic
 cfg           = load_config()           # config/config.yaml: pipeline.acc_id only
 ACC_ID        = cfg.pipeline.acc_id     # "copper"
 P_PROP        = 1.3                     # global Lp exponent — a driver constant
-Q_REG         = 3.0                     # ParametricImputer backward-branch knee sharpness
-ALPHA_MIN_REG = 0.05                    # ParametricImputer inverse-multiplier floor
+Q_REG         = 3.0                     # parametric fill's backward-branch knee sharpness
+ALPHA_MIN_REG = 0.05                    # parametric fill's inverse-multiplier floor
 
 # ── Stage 0: initialise the input registries (scan-and-bump) ─────────────
 # Walks data/input/{feed,acc,params,mask}/<id>/current/ and bumps any id whose
@@ -1406,10 +1395,9 @@ pysuto/
 ├── collector.py           FeedCollector                                   ─┐
 ├── agg.py                 AggregationMath · AggregationResult              │ Stage 2
 ├── impute/                ImputationEngine · BaseImputer                    │
-│   ├── engine.py           ParametricImputer · FormulaImputer · TimeImputer  │
-│   ├── base.py             FlatPriorImputer · ParametricRelation             │
-│   ├── parametric.py       FormulaRelation · SourceTerm · ParamRef           │
-│   ├── formula.py          ImputationLog · ImputationMetadata                │
+│   ├── engine.py           ImputationLog · ImputationMetadata                │
+│   ├── base.py             BaseImputer · the σ cap and sensitivity helpers   │
+│   ├── ledger.py           PriorLedger · ScopeError                          │
 │   ├── network.py          NetworkImputer                                    │
 │   ├── fill.py             FillImputer (trade seed · conc · ore-grade fills) │
 │   ├── time.py                                                               │
@@ -1503,7 +1491,7 @@ Each layer has a dedicated test file in `tests/`. There is no `conftest.py`: fix
 | [test_registry.py](tests/test_registry.py) | `DataFeedRegistry` save/load/round-trip |
 | [test_collector.py](tests/test_collector.py) | Feed alignment, NaN coverage mask, `Ω` column sums |
 | [test_agg.py](tests/test_agg.py) | `Ω` construction, `f_agg = 1ᵀ(Ω⊙F)`, σ_agg invariants |
-| [test_imputation.py](tests/test_imputation.py) | ParametricImputer, TimeImputer, FlatPriorImputer; log completeness; σ propagation; pipeline chaining |
+| [test_imputation.py](tests/test_imputation.py) | FillImputer pairs, ParamSource, TimeImputer, FlatPriorImputer; log completeness; σ propagation; pipeline chaining |
 | [test_network_imputer.py](tests/test_network_imputer.py) | NetworkImputer recipe closure, flow-balance, Ore split, stripping ratio, conc-by-construction twins; bilateral_import gate + flow-balance cross-region-as-0 ([ADR 0010](docs/adr/0010-trade-first-seeding-of-bilateral-flow-process-inputs.md)) |
 | [test_param_fill.py](tests/test_param_fill.py) | The trade fill (cross-region CC trade-seed), the params relation source and the parametric σ rule + trade→network handoff reviving ER→CER→CP; the trade and network writer scopes partition the edges |
 | [test_relation_params.py](tests/test_relation_params.py) | The one params reader (#128): `;` and `,` files parse equal, comment rows skipped, foreign `param_type` filtered by declaration, malformed value raises, a soft row without a σ rule raises |
@@ -1566,4 +1554,4 @@ Laner, D., Rechberger, H., & Astrup, T. (2016). A novel approach to characterize
 
 Lenzen, M., Wood, R., & Wiedmann, T. (2009). Matrix balancing under conflicting information. *Economic Systems Research*, 22(1), 1–23.
 
-Pauliuk, S., Heeren, N., Berrill, P., Fishman, T., Nistad, A., Tu, Q., Wolfram, P., & Hertwich, E. G. (2019). Global scenarios of resource and emission savings from material efficiency in residential buildings and cars. *Nature Communications*, 12, 5097. *(cited for the data-category 3/4 intensive property typology used in `ParametricImputer`)*
+Pauliuk, S., Heeren, N., Berrill, P., Fishman, T., Nistad, A., Tu, Q., Wolfram, P., & Hertwich, E. G. (2019). Global scenarios of resource and emission savings from material efficiency in residential buildings and cars. *Nature Communications*, 12, 5097. *(cited for the data-category 3/4 intensive property typology used in the params relation source)*

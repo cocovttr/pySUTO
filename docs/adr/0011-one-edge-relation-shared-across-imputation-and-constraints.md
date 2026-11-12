@@ -4,7 +4,8 @@
 writer scope = permission, cascade order = precedence, scopes may overlap; N-product recipes close
 by sum with one unknown; scale totals and hard bounds are emit-only relations; see
 [issue #26](https://github.com/florihu/pySUTO/issues/26) §2 and the `Relation` / `Writer scope`
-entries in [GLOSSARY.md](../../GLOSSARY.md))
+entries in [GLOSSARY.md](../../GLOSSARY.md)); built 2026-11-12 through #128–#136, consequences as
+built below, copper's imp arrays and log unchanged (checked by #132 and #138)
 
 Stage-2 imputation and Stage-3 constraint-building are **two independent enumerations of the same
 edge-relation network**, and the duplication is a recurring source of drift:
@@ -15,7 +16,7 @@ edge-relation network**, and the duplication is a recurring source of drift:
   ([src/pysuto/impute/network.py](../../src/pysuto/impute/network.py), CC, solves a single unknown).
 - **eff/conc ratio** `a − r·a = …` is enumerated by `RatioConstraintBuilder.from_csv`
   ([src/pysuto/constraints/ratio.py](../../src/pysuto/constraints/ratio.py)) **and** by
-  `ParametricImputer.from_csv` ([src/pysuto/impute/parametric.py](../../src/pysuto/impute/parametric.py))
+  `ParametricImputer.from_csv` (`src/pysuto/impute/parametric.py`, deleted in #136)
   — from the *same* params CSV, via the *same* `ParamRelationResolver`.
 - **pooled-eff recipe** `Σb = r·Σa` is the `RatioConstraintBuilder` `agg` bucket **and**
   `NetworkImputer._do_recipe`.
@@ -65,3 +66,29 @@ do not fit the linear-edge-relation mould).
 - **Large blast radius** — touches `impute/` and `constraints/` (or a shared `relation/` module both import);
   both stages must be re-verified. Hence deferred and staged after ADR 0010, not bundled with the er-cer fix.
 - Cf. the long-standing "express all SUT edge relations as one unit" idea (memory `edge-relation-unification-idea`).
+
+### As built (#128–#136, 2026-11-12)
+
+- **One params reader, one source.** `pysuto.relation.params.read_params` is the only reader of
+  a params CSV (#128); `ParamSource` resolves its per-pair or twin rows into `Relation`s
+  (`pysuto.relation.sources`), the object Stage 3's ratio builders already shared.
+- **A fill is a source, a rule and a scope.** `Fill(source, rule, scope, id)` and
+  `FillImputer` replace the per-family imputers: the trade seed (`forward`, the cross-region
+  `Flow→Process` content scope, σ rule `trade`) and the conc and ore-grade fills (`both`, σ rule
+  `parametric`) are three `Fill`s of the params relation source. `TradeImputer`, `FormulaImputer`
+  and `ParametricImputer` are deleted; copper's cascade no longer holds the `eff` fill, which
+  wrote 0 edges in every reference run — the network's pooled recipe owns the `eff` rows.
+- **The network solves Relations.** `NetworkImputer` builds its Flow and Process balances, conc
+  twins and pooled-`eff` relations from `pysuto.relation.balance` and `ratio_relation`, the
+  constructors `MassBalanceBuilder` and `RatioConstraintBuilder` use (#134); a recipe with one
+  unknown product fills it forward, with none it derives the inputs backward, with two or more it
+  fills nothing (ADR 0004 option E stays rejected, #130).
+- **The case declares the cascade as data.** `ImpSection.cascade` lists `FillEntry` entries
+  (a params family, a reading, a rule, a σ rule, a scope function) and `CascadeStep`s (the
+  network); the knob `CASCADE_ORDER` orders them and the imp sidecar records each entry's source,
+  rule and scope (#136). A case's terminal fillers (`TimeImputer`, `FlatPriorImputer`, copper's `ShareImputer`)
+  stay imputers behind `ImpSection.terminal`: temporal interpolation and the last-resort fallback
+  are not linear edge relations.
+- **Not yet shared:** `_do_recipe`'s arithmetic still runs beside the pooled-`eff` `Relation`
+  (#134), and the fill's σ rules and the network's differ; one σ rule per `Relation` and one
+  engine-level fixpoint change copper's numbers and are their own measured tickets (#139, #140).
