@@ -1294,9 +1294,9 @@ framework's; "entity kind" for a role.
 **Relation** — one linear equality over edges with a σ (`Σ αᵢ aᵢ = c ± σ`) that exists before
 either stage consumes it: a **constraint row** is a relation *emitted* into `G`; an imputation
 fill is a relation *solved* for its lone unknown. A **process recipe**, a Flow-node balance and a
-`conc`/`eff` params row are relation *sources*, not relations (a recipe yields the node balance
-and the pooled `eff` ratio; the Mass twin is the per-edge `conc` ratio). **Scale totals** and hard
-bounds are *emit-only* relations — never solved for a prior. _Avoid_: "constraint row" for the
+`conc`/`eff` params row are relation *sources*, not relations (a recipe references its Process
+node's balance and carries the pooled `eff` ratio; the Mass twin is the per-edge `conc` ratio).
+**Scale totals** and hard bounds are *emit-only* relations — never solved for a prior. _Avoid_: "constraint row" for the
 pre-stage object; "recipe" for a single relation.
 
 **Writer scope** — the set of edges a relation source is *permitted* to write. Scopes may overlap;

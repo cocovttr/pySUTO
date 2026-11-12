@@ -35,7 +35,8 @@ import pytest
 
 from pysuto.acc import ValuationRoles
 from pysuto.agg import AggregationResult
-from pysuto.impute import NetworkImputer, derive_process_recipes
+from pysuto.impute import NetworkImputer
+from pysuto.relation.structure import process_recipes
 
 
 # =============================================================================
@@ -156,10 +157,6 @@ class MockAcc:
         nf = self.node_index.loc[ei["from_id"].values].reset_index(drop=True).add_prefix("from_")
         nt = self.node_index.loc[ei["to_id"].values].reset_index(drop=True).add_prefix("to_")
         return pd.concat([ei, nf, nt], axis=1)
-
-    @property
-    def process_recipes(self):
-        return derive_process_recipes(self)
 
     # edge_id helpers for tests --------------------------------------------
     def eid(self, fs, ts, val, time="2020"):
@@ -309,14 +306,14 @@ def _run(imputer, acc, seeds):
 # =============================================================================
 
 def test_recipe_skeleton(acc):
-    recs = {r.process_sector: r for r in derive_process_recipes(acc)}
+    recs = {r.process: r for r in process_recipes(acc)}
     assert set(recs) == {"Mining", "MF", "Smelting", "SXEW", "CP"}
     smelt = recs["Smelting"]
     # pooled inputs: Concentrate + Scrap (both use edges into Smelting)
     in_secs = {acc.edge_meta.loc[acc.edge_meta.edge_id == i, "from_sector"].iloc[0]
                for i in smelt.inputs}
     assert in_secs == {"Concentrate", "Scrap"}
-    assert acc.edge_meta.loc[acc.edge_meta.edge_id == smelt.product, "to_sector"].iloc[0] == "Matte"
+    assert acc.edge_meta.loc[acc.edge_meta.edge_id == smelt.products[0], "to_sector"].iloc[0] == "Matte"
     waste_secs = {acc.edge_meta.loc[acc.edge_meta.edge_id == w, "to_sector"].iloc[0]
                   for w in smelt.wastes}
     assert waste_secs == {"Slag"}
@@ -749,10 +746,6 @@ class _BiAcc:
         nf = self.node_index.loc[ei["from_id"].values].reset_index(drop=True).add_prefix("from_")
         nt = self.node_index.loc[ei["to_id"].values].reset_index(drop=True).add_prefix("to_")
         return pd.concat([ei, nf, nt], axis=1)
-
-    @property
-    def process_recipes(self):
-        return derive_process_recipes(self)
 
     def eid(self, fs, fr, ts, tr, val):
         m = self.edge_meta

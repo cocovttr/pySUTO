@@ -1771,23 +1771,6 @@ class AccountingStructure:
             dtype=np.int64, count=len(cols_cur),
         )
 
-    @cached_property
-    def process_recipes(self):
-        """Structural process-recipe skeletons grouped per Process node.
-
-        One recipe per ``(process_sector, region, time)`` with at least one
-        process-incident content supply edge: its ``inputs`` (use edges into the
-        process, content valuation, any region), ``product`` (the single supply
-        edge to a ``Flow``), and ``wastes`` (supply edges to ``SB`` nodes of
-        boundary role ``secondary``). Derived from ``edge_meta`` + the
-        ``supply``/``use`` masks + :attr:`roles`, all of which :meth:`load`
-        restores. The recipe carries no parameters;
-        :class:`~pysuto.impute.network.NetworkImputer` attaches
-        efficiency/concentration from the params CSVs.
-        """
-        from pysuto.impute.network import derive_process_recipes
-        return derive_process_recipes(self)
-
     # ------------------------------------------------------------------
     # Save / Load  (extended to persist bounds)
     # ------------------------------------------------------------------

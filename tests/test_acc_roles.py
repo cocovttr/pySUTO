@@ -29,6 +29,7 @@ from pysuto.acc import (
 )
 from pysuto.input_registry import InputRegistry
 from pysuto.psut import classify_blocks
+from pysuto.relation.structure import process_recipes
 
 from test_acc_spec import ROOT_SHEETS, _write_ods, _write_ods_case
 
@@ -149,8 +150,8 @@ def test_own_labels_give_copper_labels_structure_edge_for_edge():
     np.testing.assert_array_equal(own.bounds.u, cu.bounds.u)
     assert own.boundary_roles == cu.boundary_roles
     # the library reads roles: the recipes and the PSUT blocks do not see the labels
-    assert own.process_recipes == cu.process_recipes
-    assert any(r.wastes for r in own.process_recipes)
+    assert process_recipes(own) == process_recipes(cu)
+    assert any(r.wastes for r in process_recipes(own))
     pd.testing.assert_series_equal(classify_blocks(own.edge_meta, own.boundary_roles),
                                    classify_blocks(cu.edge_meta, cu.boundary_roles))
 
