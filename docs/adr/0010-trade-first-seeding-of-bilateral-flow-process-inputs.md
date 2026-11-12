@@ -31,6 +31,8 @@ recipe with **no** known primary stays blocked (no fabricated zeros), and a rela
 never used to backward-fill the primary it assumed absent (that would echo the missing=0 assumption
 as an explicit 0 — the route stays an honest NaN gap, consistent with "never seeded to 0" below).
 
+**Amended 2026-11-12 — the fixpoint's budgets are named, not merged (#139).** The two-phase fixpoint stays inside the network's step, its budgets `network.STRICT_MAX_SWEEPS` and `RELAXED_MAX_ROUNDS` beside the engine's `CASCADE_MAX_ITER`: one engine-level relaxed sweep would run after the conc fills and reorder the fills, which copper's imp must not do bit-for-bit. A budget reached without converging is logged at WARNING. The reference imp `imp_20261112_154659_f4ec08ae` converged in 2 of 10 engine passes; the network's inner sweeps are not in the log.
+
 **Amended 2026-09-21 — a 100 %-secondary process has no primary by construction.** The first guard
 above — "a recipe with **no** known primary stays blocked (no fabricated zeros)" — is relaxed in one
 case: when no primary is known *but a SEM secondary is*. The relaxed pass then closes the recipe on

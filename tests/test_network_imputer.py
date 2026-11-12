@@ -636,6 +636,25 @@ def test_cp_pool_closes_per_year_via_flow_balance(imputer2, acc2):
         assert f[acc2.eid("CP", "PSC", "CC", t)] == pytest.approx(0.0)
 
 
+def test_a_budget_reached_without_converging_is_logged(imputer, acc, monkeypatch, caplog):
+    """#139: a truncated fixpoint warns; a converged one is silent."""
+    from pysuto.impute import network
+    seeds = {("Ore", "MF", "CC"): 100.0}
+    with caplog.at_level("WARNING", logger=network.logger.name):
+        _run(imputer, acc, seeds)
+    assert "without converging" not in caplog.text
+    monkeypatch.setattr(network, "STRICT_MAX_SWEEPS", 1)
+    with caplog.at_level("WARNING", logger=network.logger.name):
+        _run(imputer, acc, seeds)
+    assert "STRICT_MAX_SWEEPS=1 without converging" in caplog.text
+    caplog.clear()
+    monkeypatch.setattr(network, "STRICT_MAX_SWEEPS", 64)
+    monkeypatch.setattr(network, "RELAXED_MAX_ROUNDS", 0)
+    with caplog.at_level("WARNING", logger=network.logger.name):
+        _run(imputer, acc, seeds)
+    assert "RELAXED_MAX_ROUNDS=0 without converging" in caplog.text
+
+
 # =============================================================================
 # Flow-balance order across processes (#113)
 # =============================================================================

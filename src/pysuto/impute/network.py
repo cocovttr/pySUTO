@@ -72,6 +72,12 @@ logger = get_logger(__name__)
 EFF_ACCEPTS       = frozenset({"efficiency"})
 STRIPPING_ACCEPTS = frozenset({"stripping_ratio"})
 
+# The network's two inner convergence budgets, declared once (#139). Both loops are
+# monotone (a fill is never undone), so a budget reached without convergence is a
+# truncated fixpoint, and impute() logs it at WARNING (ADR 0010 am. 2026-11-12).
+STRICT_MAX_SWEEPS  = 64  # recipe + flow-balance sweeps per strict phase
+RELAXED_MAX_ROUNDS = 8   # strict -> relaxed -> strict rounds per impute() call
+
 _EPS = 1e-12  # guard for divisions by (1−eff) when eff≈1
 _SECONDARY = BoundaryRole.SECONDARY.value  # the residual-output / secondary-input role
 
@@ -325,8 +331,8 @@ class NetworkImputer(BaseImputer):
         # absent parallel route (count 0, ≥1 primary known) — convergence
         # proves "missing" means *underivable*, not "not yet derived". A
         # relaxed close can unlock further strict fills, so re-converge.
-        for _outer in range(8):
-            for _ in range(64):
+        for _outer in range(RELAXED_MAX_ROUNDS):
+            for _ in range(STRICT_MAX_SWEEPS):
                 n_before = self._n_written
                 for rec in self._recipes:
                     self._do_recipe(rec, f, sigma, ledger, step)
@@ -334,12 +340,18 @@ class NetworkImputer(BaseImputer):
                     self._do_flow_balance(rel, out, f, sigma, ledger, step)
                 if self._n_written == n_before:
                     break
+            else:
+                logger.warning("NetworkImputer %s: strict phase hit STRICT_MAX_SWEEPS=%d "
+                               "without converging", self.id, STRICT_MAX_SWEEPS)
             n_before = self._n_written
             for rec in self._recipes:
                 self._do_recipe(rec, f, sigma, ledger, step,
                                 relax_primaries=True)
             if self._n_written == n_before:
                 break
+        else:
+            logger.warning("NetworkImputer %s: hit RELAXED_MAX_ROUNDS=%d without "
+                           "converging", self.id, RELAXED_MAX_ROUNDS)
         # WR is a leaf (satellite): its fill unlocks nothing, so one pass at the end
         self._do_stripping(f, sigma, ledger, step)
         if self._n_clipped:
