@@ -37,62 +37,31 @@ import scipy.sparse as sp
 # ---------------------------------------------------------------------------
 
 def _make_toy_run(run_id: str = "toy_run"):
-    from pysuto.constraints import ConstraintRun
-
-    G = sp.csr_matrix(np.array([
+    """Two periods over the block ``G_t`` (3 rows, 3 edges); the arrays below are
+    the period's, so each period's edges are its own three columns."""
+    G_t = sp.csr_matrix(np.array([
         [ 1.0,  1.0, -1.0],   # zero,   hard  (mass balance)
         [ 1.0,  0.0,  0.0],   # free,   soft  (observation on a0)
         [ 1.0, -2.0,  0.0],   # nonneg, hard  (a0 <= 2*a1)
     ]))
-    row_meta = pd.DataFrame({
-        "constraint_id": ["balance", "obs_a0", "ratio_bound"],
-        "is_hard":       [True, False, True],
-        "sense":     ["eq", "eq", "le"],
-    })
-    return ConstraintRun(
-        G              = G,
-        row_meta       = row_meta,
-        a0             = np.array([1.0, 2.0, 3.0]),
-        sigma_a        = np.array([1.0, 1.0, 1.0]),
-        u              = np.array([10.0, 10.0, 10.0]),
-        l              = np.array([0.0, 0.0, 0.0]),
-        timestep_data  = {
-            "2020": {"c": np.array([0.0, 1.0, 0.0]),
-                     "sigma_c": np.array([0.0, 0.5, 0.0])},
-            "2021": {"c": np.array([0.0, 1.5, 0.0]),
-                     "sigma_c": np.array([0.0, 0.5, 0.0])},
-        },
-        run_id     = run_id,
-        acc_id     = "toy_acc",
-        agg_id     = "toy_agg",
-        created_at = "2026-04-29T00:00:00",
+    a_prior, sigma_a = np.array([1.0, 2.0, 3.0]), np.ones(3)
+    sigma_c = np.array([0.0, 0.5, 0.0])
+    run = _block_run(
+        G_t, ["zero", "free", "nonneg"],
+        {"2020": (np.array([0.0, 1.0, 0.0]), sigma_c, a_prior, sigma_a),
+         "2021": (np.array([0.0, 1.5, 0.0]), sigma_c, a_prior, sigma_a)},
+        run_id=run_id,
     )
+    run.row_meta = run.row_meta.drop(columns="type")       # untyped rows, as before
+    return run
 
 
 def _make_infeasible_run(run_id: str = "bad_run"):
     """Hard nonneg row 'a0 <= -1' contradicts the l=0 lower bound."""
-    from pysuto.constraints import ConstraintRun
-
-    G = sp.csr_matrix(np.array([[1.0, 0.0]]))
-    row_meta = pd.DataFrame({
-        "constraint_id": ["bad_bound"],
-        "is_hard":       [True],
-        "sense":     ["le"],
-    })
-    return ConstraintRun(
-        G             = G,
-        row_meta      = row_meta,
-        a0            = np.zeros(2),
-        sigma_a       = np.ones(2),
-        u             = np.full(2, 10.0),
-        l             = np.zeros(2),
-        timestep_data = {
-            "2020": {"c": np.array([-1.0]), "sigma_c": np.array([0.0])},
-        },
-        run_id     = run_id,
-        acc_id     = "bad_acc",
-        agg_id     = "bad_agg",
-        created_at = "2026-04-29T00:00:00",
+    return _block_run(
+        sp.csr_matrix(np.array([[1.0, 0.0]])), ["nonneg"],
+        {"2020": (np.array([-1.0]), np.array([0.0]), np.zeros(2), np.ones(2))},
+        run_id=run_id,
     )
 
 
@@ -109,7 +78,7 @@ def toy_run():
 def toy_solver(monkeypatch, toy_run):
     """ClarabelSolver with load_run patched to return the toy ConstraintRun."""
     from pysuto.solver import ClarabelSolver
-    s = ClarabelSolver(const_dir="unused", verbose_first_solve=False)
+    s = ClarabelSolver(const_dir="unused", verbose_first_solve=False, prior_mode="cold")
     monkeypatch.setattr(s, "load_run", lambda _rid: toy_run)
     return s
 
@@ -124,16 +93,14 @@ class TestSolveAll:
         results = toy_solver.solve_all("toy_run")
         assert set(results.keys()) == {"2020", "2021"}
 
-    def test_legacy_path_full_vector_no_block_indices(self, toy_solver, toy_run):
-        """Legacy path (no G_blocks) keeps full-length F_opt/residuals and
-        leaves cols_t/rows_t as None — the schema discriminator."""
+    def test_results_are_year_local(self, toy_solver, toy_run):
+        """F_opt/residuals/c_star cover the period's edges and rows, with the
+        global index arrays cols_t/rows_t."""
         results = toy_solver.solve_all("toy_run")
-        E, M = toy_run.G.shape[1], toy_run.G.shape[0]
-        for r in results.values():
-            assert r.cols_t is None and r.rows_t is None
-            assert r.F_opt.shape == (E,)
-            assert r.residuals.shape == (M,)
-            assert r.c_star.shape == (M,)
+        for t, r in results.items():
+            np.testing.assert_array_equal(r.cols_t, toy_run.edge_cols_by_t[t])
+            assert r.F_opt.shape == (3,)
+            assert r.residuals.shape == r.c_star.shape == (3,)
 
     def test_status_solved(self, toy_solver):
         results = toy_solver.solve_all("toy_run")
@@ -142,15 +109,15 @@ class TestSolveAll:
 
     def test_F_opt_within_bounds(self, toy_solver, toy_run):
         results = toy_solver.solve_all("toy_run")
-        for r in results.values():
-            assert (r.F_opt >= toy_run.l - 1e-6).all()
-            assert (r.F_opt <= toy_run.u + 1e-6).all()
+        for t, r in results.items():
+            assert (r.F_opt >= toy_run.l[r.cols_t] - 1e-6).all()
+            assert (r.F_opt <= toy_run.u[r.cols_t] + 1e-6).all()
 
     def test_hard_residuals_satisfied(self, toy_solver, toy_run):
         """Hard equality rows: residual ~= 0; ``le`` rows: residual <= 0."""
         results = toy_solver.solve_all("toy_run")
-        sense = toy_run.row_meta["sense"].to_numpy()
-        hard  = toy_run.row_meta["is_hard"].to_numpy().astype(bool)
+        sense = toy_run.row_meta["sense"].to_numpy()[:3]
+        hard  = toy_run.row_meta["is_hard"].to_numpy().astype(bool)[:3]
         zero_idx   = np.where(hard & (sense == "eq"))[0]
         nonneg_idx = np.where(hard & (sense == "le"))[0]
         for t, r in results.items():
@@ -222,6 +189,7 @@ class TestConvergenceCapture:
             const_dir="unused",
             verbose_first_solve=False,
             capture_iter_history=False,
+            prior_mode="cold",
         )
         monkeypatch.setattr(s, "load_run", lambda _rid: toy_run)
         results = s.solve_all("toy_run")
@@ -272,13 +240,13 @@ class TestPersist:
             assert "linsolver_name" in conv
             assert isinstance(conv["iterations"], int)
 
-        # per-timestep npz with iter_history; legacy run carries no block index
+        # per-timestep npz with iter_history and the block index
         for t, r in results.items():
             npz = np.load(run_dir / "timesteps" / f"t_{t}.npz")
             assert set(npz.files) >= {
                 "F_opt", "eps_opt", "c_star", "residuals", "iter_history",
             }
-            assert "cols_t" not in npz.files and "rows_t" not in npz.files
+            assert {"cols_t", "rows_t"} <= set(npz.files)
             np.testing.assert_array_equal(npz["F_opt"], r.F_opt)
             assert npz["iter_history"].dtype == ITER_DTYPE
             assert npz["iter_history"].shape == r.iter_history.shape
@@ -323,6 +291,7 @@ class TestPersist:
             const_dir="unused",
             verbose_first_solve=False,
             capture_iter_history=False,
+            prior_mode="cold",
         )
         monkeypatch.setattr(s, "load_run", lambda _rid: toy_run)
         results = s.solve_all("toy_run")
@@ -593,47 +562,6 @@ class TestEngineToSolverIntegration:
         # All timesteps solved
         for r in results.values():
             assert r.solver_status == "Solved"
-
-    def test_per_t_path_matches_legacy_path_F_opt(self, tmp_path, monkeypatch):
-        """Numerical equivalence: solver's per-t path and legacy full-G path
-        produce identical F_opt at the t-edges (to solver tol_gap_abs).
-
-        Compared under ``prior_mode='cold'``: the legacy full-vector path has no
-        per-year ``cols`` and so cannot replicate the block path's year-local
-        warm-start chain (``a_prior(t)=a_post(t-1)``). Path-equivalence is only
-        well-defined in cold mode, where each year solves independently against
-        the cold seed; the warm chain is a block-path feature exercised by
-        ``test_block_path_warm_start_chains_posterior``.
-        """
-        from pysuto.solver import ClarabelSolver
-        import copy
-        acc, cr, storage_dir = self._build_real_run(tmp_path)
-
-        # ── new per-t path: serve cr (with G_blocks) in-memory.
-        solver_new = ClarabelSolver(
-            const_dir=storage_dir, verbose_first_solve=False, prior_mode="cold",
-        )
-        monkeypatch.setattr(solver_new, "load_run", lambda _rid: cr)
-        new_results = solver_new.solve_all(cr.run_id)
-
-        # ── legacy path: same cr but with G_blocks emptied.
-        cr_legacy = copy.copy(cr)
-        cr_legacy.G_blocks       = {}
-        cr_legacy.edge_cols_by_t = {}
-        solver_legacy = ClarabelSolver(
-            const_dir=storage_dir, verbose_first_solve=False, prior_mode="cold",
-        )
-        monkeypatch.setattr(solver_legacy, "load_run", lambda _rid: cr_legacy)
-        legacy_results = solver_legacy.solve_all(cr.run_id)
-
-        for t in ("2020", "2021"):
-            cols_t   = cr.edge_cols_by_t[t]
-            # Block path is year-local; legacy is full-vector → slice it.
-            new_F_t  = new_results[t].F_opt
-            leg_F_t  = legacy_results[t].F_opt[cols_t]
-            assert np.allclose(new_F_t, leg_F_t, atol=1e-7, rtol=1e-7), \
-                f"t={t}: per-t F_opt differs from legacy: " \
-                f"max abs diff {np.max(np.abs(new_F_t - leg_F_t)):.3e}"
 
     def test_block_path_warm_start_chains_posterior(self, tmp_path, monkeypatch):
         """Block-path warm start (the default) stores the per-period prior on
@@ -1098,15 +1026,6 @@ class TestQpVariables:
             ClarabelSolver(const_dir=str(tmp_path / "c"), opt_dir=str(tmp_path / "o"),
                            qp_variables="whitened")
 
-    def test_legacy_full_g_path_solves_for_the_flows_only(self, tmp_path, monkeypatch,
-                                                          toy_run):
-        from pysuto.solver import ClarabelSolver
-        s = ClarabelSolver(const_dir=str(tmp_path / "c"), opt_dir=str(tmp_path / "o"),
-                           verbose_first_solve=False, qp_variables="defects")
-        monkeypatch.setattr(s, "load_run", lambda _rid: toy_run)
-        with pytest.raises(ValueError, match="block path"):
-            s.solve_all("toy_run")
-
 
 class TestObjectiveAt:
     """#102: ``objective_at`` scores any year-local posterior under a const run's QP,
@@ -1308,7 +1227,8 @@ class TestFeasibilityCheck:
     def test_infeasible_raises(self, monkeypatch):
         from pysuto.solver import ClarabelSolver
         run = _make_infeasible_run()
-        s   = ClarabelSolver(const_dir="unused", verbose_first_solve=False)
+        s   = ClarabelSolver(const_dir="unused", verbose_first_solve=False,
+                           prior_mode="cold")
         monkeypatch.setattr(s, "load_run", lambda _rid: run)
         with pytest.raises(RuntimeError, match="Feasibility check FAILED"):
             s.solve_all("bad_run")

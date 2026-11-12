@@ -382,115 +382,6 @@ class ClarabelSolver:
             ceiling_factor = self.sigma_a_ceiling_factor,
         )
 
-    def _build_problem(
-        self,
-        run:      ConstraintRun,
-        t_label:  str,
-    ) -> dict:
-        """
-        Build (P, q, A, b, cones) and return everything needed to solve and
-        post-process this timestep. Reusable internals are computed once per
-        ConstraintRun (see :meth:`_problem_skeleton`); this method assembles
-        the per-timestep b only when called via solve_timestep / solve_all.
-        """
-        skel = self._problem_skeleton(run)
-        b    = self._build_b(run, t_label, skel["perm"])
-        return {**skel, "b": b}
-
-    def _problem_skeleton(self, run: ConstraintRun) -> dict:
-        """
-        Build the time-invariant pieces: P, q, A, cones, and the row
-        permutation that maps original row order → [soft eq; hard eq; le].
-        Computed once per ConstraintRun.
-        """
-        G        = run.G
-        row_meta = run.row_meta
-        a_0, sigma_a = self._condition_prior(run.a_prior_global, run.sigma_a)
-
-        # Permute rows → [soft eq; hard eq; le]
-        layout = row_layout(row_meta["sense"].to_numpy(), row_meta["is_hard"].to_numpy())
-        perm   = layout.perm
-        n_slack, n_eq, n_le = layout.n_slack, layout.n_eq, layout.n_le
-        n_a = G.shape[1]
-        M   = G.shape[0]
-
-        # Permuted G (CSR for hstack)
-        G_p = G.tocsr()[perm]
-
-        # Slack column block: S = [-I_{n_slack}; 0]
-        S_top = -sp.eye(n_slack, format="csr")
-        S_bot = sp.csr_matrix((n_eq + n_le, n_slack))
-        S     = sp.vstack([S_top, S_bot], format="csr") if n_slack else \
-                sp.csr_matrix((M, 0))
-
-        # A = [G_p | S]  in CSC for Clarabel
-        A = sp.hstack([G_p, S], format="csc")
-
-        # P = 2 · diag([Σ_a^{-1}; Σ_c^{-1}_free]) — diagonal, CSC, upper-triangle
-        inv_sa = 1.0 / (sigma_a ** 2)
-
-        # σ_c on free rows may vary per timestep (e.g. SumConstraintBuilder
-        # deactivates rows of other years via SIGMA_C_INACTIVE, and
-        # fraction_of_flow scales σ_c with year-t flow magnitude). We no
-        # longer require σ_c on free rows to be time-invariant; instead
-        # the per-t Hessian is rebuilt in solve_all via Clarabel's
-        # update(P=…). The initial P uses t_first's σ_c so the solver can
-        # be instantiated once.
-        first_td = next(iter(run.timestep_data.values()), None)
-        if first_td is not None and n_slack:
-            sc_first = np.array(first_td["sigma_c"], dtype=float, copy=True)
-            sc_first = np.where(np.isnan(sc_first), self.sigma_c_floor, sc_first)
-            sc_first = np.maximum(sc_first, self.sigma_c_floor)
-            sc_free_init = sc_first[perm[:n_slack]]
-        else:
-            sc_free_init = np.zeros(n_slack)
-
-        inv_scf_init = 1.0 / (sc_free_init ** 2) if n_slack else np.zeros(0)
-        P_diag = 2.0 * np.concatenate([inv_sa, inv_scf_init])
-        P = sp.diags(P_diag, format="csc")
-
-        return {
-            "P":          P,
-            "A":          A,
-            "cones":      clarabel_cones(layout),
-            "perm":       perm,
-            "n_slack":    n_slack,
-            "n_eq":       n_eq,
-            "n_le":       n_le,
-            "n_a":        n_a,
-            "M":          M,
-            "sigma_a":    sigma_a,
-            "inv_sa":     inv_sa,
-            "a_0_init":   a_0,
-        }
-
-    def _build_P_diag(self, inv_sa: np.ndarray, run: ConstraintRun,
-                      t_label: str, perm: np.ndarray, n_slack: int) -> np.ndarray:
-        """
-        Per-timestep Hessian diagonal: ``2 · [Σ_a^{-1}; Σ_c(t)^{-1}_free]``.
-
-        ``Σ_a^{-1}`` is time-invariant (computed once and passed in).
-        ``Σ_c(t)^{-1}_free`` is recomputed from ``timestep_data[t]["sigma_c"]``
-        with NaN → floor; same conditioning used in ``_problem_skeleton``.
-        """
-        if n_slack:
-            sc_t = np.array(run.timestep_data[t_label]["sigma_c"],
-                            dtype=float, copy=True)
-            sc_t = np.where(np.isnan(sc_t), self.sigma_c_floor, sc_t)
-            sc_t = np.maximum(sc_t, self.sigma_c_floor)
-            inv_scf = 1.0 / (sc_t[perm[:n_slack]] ** 2)
-        else:
-            inv_scf = np.zeros(0)
-        return 2.0 * np.concatenate([inv_sa, inv_scf])
-
-    def _build_q(self, inv_sa: np.ndarray, a_0: np.ndarray, n_slack: int) -> np.ndarray:
-        """q = [-2 Σ_a^{-1} a_0(t); 0]. Recomputed per timestep when warm-starting."""
-        return np.concatenate([-2.0 * inv_sa * a_0, np.zeros(n_slack)])
-
-    def _build_b(self, run: ConstraintRun, t_label: str, perm: np.ndarray) -> np.ndarray:
-        c_t = run.timestep_data[t_label]["c"]
-        return np.asarray(c_t, dtype=float)[perm]
-
     @staticmethod
     def _info_to_dict(info) -> dict:
         """Flatten Clarabel's ``DefaultInfo`` into JSON-safe scalars."""
@@ -660,151 +551,22 @@ class ClarabelSolver:
 
         # A failed call must not leave the previous call's facts for persist().
         self._solve_config, self._solve_summary, self._solve_inputs = {}, {}, {}
+        if not run.G_blocks:
+            raise ValueError(
+                f"constraint run {run_id!r} has no per-period partition (G_blocks): "
+                f"Stage 4 solves one QP per period and the full-G path is gone; "
+                f"rebuild the run with Stage 3"
+            )
         t0 = time.perf_counter()
-        if run.G_blocks:
-            results = self._solve_all_via_blocks(run, ts_labels, check_labels)
-            self._solve_config = {
-                "n_workers":           min(self.n_workers, len(ts_labels)),
-                "max_threads":         _PERIOD_MAX_THREADS,
-                "direct_solve_method": self.direct_solve_method,
-                "qp_variables":        self.qp_variables,
-            }
-        else:
-            results = self._solve_all_legacy(run, ts_labels, check_labels)
-            self._solve_config = {"n_workers": 1}
+        results = self._solve_all_via_blocks(run, ts_labels, check_labels)
+        self._solve_config = {
+            "n_workers":           min(self.n_workers, len(ts_labels)),
+            "max_threads":         _PERIOD_MAX_THREADS,
+            "direct_solve_method": self.direct_solve_method,
+            "qp_variables":        self.qp_variables,
+        }
         # Wall-clock after loading: feasibility probe + period solves.
         self._solve_summary = {"solve_wall_s": time.perf_counter() - t0}
-        return results
-
-    def _solve_all_legacy(
-        self,
-        run:       ConstraintRun,
-        ts_labels: list[str],
-        check_labels: list[str],
-    ) -> dict[str, OptimResult]:
-        """Legacy path: full-G QP per timestep with solver.update() warm-start.
-        Used only when run.G_blocks is empty (test fixtures predating Slice 2)."""
-        if self.qp_variables != "flows":
-            raise ValueError(
-                f"qp_variables={self.qp_variables!r} needs the block path "
-                f"(run.G_blocks); the legacy full-G path solves for the flows only"
-            )
-        # Feasibility pre-check
-        logger.info("Feasibility pre-check on %d/%d timesteps…",
-                    len(check_labels), len(ts_labels))
-        for t in check_labels:
-            self.feasibility_check(run, t)
-        if check_labels:
-            logger.info("Feasibility pre-check passed.")
-
-        # Build skeleton once (P, A, cones are time-invariant)
-        skel    = self._problem_skeleton(run)
-        cones   = skel["cones"]
-        P, A    = skel["P"], skel["A"]
-        perm    = skel["perm"]
-        n_slack = skel["n_slack"]
-        n_a     = skel["n_a"]
-        M       = skel["M"]
-        inv_sa  = skel["inv_sa"]
-
-        # Prior: a_prior(0) = cold seed (conditioned f_agg); a_prior(t>0) =
-        # previous F_opt under prior_mode='warm' (full-vector path: cols align,
-        # so the carry-forward is genuine), else the cold seed every year.
-        a_0_cold = np.array(skel["a_0_init"], dtype=float, copy=True)
-        a_0_t    = np.array(a_0_cold, dtype=float, copy=True)
-
-        results: dict[str, OptimResult] = {}
-        solver: Optional[clarabel.DefaultSolver] = None
-
-        for k, t in enumerate(ts_labels):
-            b = self._build_b(run, t, perm)
-            q = self._build_q(inv_sa, a_0_t, n_slack)
-            # P now varies per timestep because σ_c on free rows can vary
-            # (e.g. SumConstraintBuilder deactivates non-t-year rows with
-            # σ_c = SIGMA_C_INACTIVE). The diagonal is rebuilt each iter;
-            # cone structure, n_slack, n_a are time-invariant so reusing
-            # the Clarabel instance is fine.
-            P_diag = self._build_P_diag(inv_sa, run, t, perm, n_slack)
-            P_t    = sp.diags(P_diag, format="csc")
-
-            t0 = time.perf_counter()
-            verbose = self.verbose_first_solve and k == 0
-            if solver is None:
-                settings = self._settings(verbose=verbose)
-                solver   = clarabel.DefaultSolver(P_t, q, A, b, cones, settings)
-            else:
-                solver.update(P=P_t, q=q, b=b)
-
-            hist: list[tuple] = []
-            if self.capture_iter_history:
-                def _cb(info, _hist=hist):
-                    _hist.append((
-                        int(info.iterations),
-                        float(info.cost_primal), float(info.cost_dual),
-                        float(info.gap_abs),
-                        float(info.res_primal), float(info.res_dual),
-                        float(info.ktratio),    float(info.mu),
-                        float(info.step_length),
-                    ))
-                    return False
-                solver.set_termination_callback(_cb)
-
-            sol     = solver.solve()
-            elapsed = time.perf_counter() - t0
-            status  = str(sol.status)
-
-            if self.capture_iter_history:
-                solver.unset_termination_callback()
-
-            convergence  = self._info_to_dict(solver.get_info())
-            iter_history = (
-                np.array(hist, dtype=ITER_DTYPE) if hist else None
-            )
-
-            if status not in _OK_STATUSES:
-                raise RuntimeError(
-                    f"Timestep {t!r}: Clarabel status={status}; halting "
-                    f"(no fallback). iterations={sol.iterations}"
-                )
-
-            x       = np.asarray(sol.x)
-            F_opt   = x[:n_a]
-            eps_opt = x[n_a:] if n_slack else np.zeros(0)
-
-            # Map ε back into M-length vector at original row positions
-            eps_full = np.zeros(M)
-            if n_slack:
-                eps_full[perm[:n_slack]] = eps_opt
-
-            c_full        = np.asarray(run.timestep_data[t]["c"])
-            c_star        = c_full + eps_full
-            residuals     = run.G @ F_opt - c_full
-
-            results[t] = OptimResult(
-                timestep      = t,
-                F_opt         = F_opt,
-                eps_opt       = eps_opt,
-                c_star        = c_star,
-                residuals     = residuals,
-                objective     = float(sol.obj_val),
-                iterations    = int(sol.iterations),
-                solve_time_s  = elapsed,
-                solver_status = status,
-                convergence   = convergence,
-                iter_history  = iter_history,
-                a_prior       = np.array(a_0_t, dtype=float, copy=True),
-            )
-
-            logger.info(
-                "t=%s  status=%s  iters=%d  obj=%.4e  gap=%.2e  dres=%.2e  step=%.2f  time=%.2fs",
-                t, status, sol.iterations, sol.obj_val,
-                convergence["gap_abs"], convergence["res_dual"],
-                convergence["step_length"], elapsed,
-            )
-
-            # Prior for next timestep: warm → a_prior(t+1) ← a*(t); cold → cold seed
-            a_0_t = F_opt if self.prior_mode == "warm" else a_0_cold
-
         return results
 
     @staticmethod

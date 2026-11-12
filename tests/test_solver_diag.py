@@ -51,7 +51,7 @@ def toy_results(monkeypatch):
     """Solve the toy run and return (results, const_run)."""
     from pysuto.solver import ClarabelSolver
     run = _make_toy_run()
-    s = ClarabelSolver(const_dir="unused", verbose_first_solve=False)
+    s = ClarabelSolver(const_dir="unused", verbose_first_solve=False, prior_mode="cold")
     monkeypatch.setattr(s, "load_run", lambda _rid: run)
     results = s.solve_all("toy_run")
     return results, run
@@ -136,7 +136,7 @@ class TestFromOptId:
 
         ConstraintRunRegistry(str(const_dir)).register(run)
 
-        s = ClarabelSolver(const_dir="unused", verbose_first_solve=False)
+        s = ClarabelSolver(const_dir="unused", verbose_first_solve=False, prior_mode="cold")
         opt_run_id = s.persist(
             run_id     = run.run_id,
             results    = results,
