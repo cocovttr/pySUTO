@@ -684,7 +684,9 @@ def run_stage1(data_dir: str) -> "dict[str, str]":
     BACI feed run, so every run of this hook registers a new ``trade_shares`` version.
 
     The caller holds the stage lock (the pipeline's ``feed`` step does), so the drivers
-    run one at a time; the feed builds, run in-process, take none of their own.
+    run one at a time. The two ``build_*`` scripts run as subprocesses (their ``main``
+    takes no lock) and the feeds in-process through ``run_feed`` (no lock either); the
+    feed scripts' own ``__main__`` locks would refuse while the caller holds it.
 
     Returns
     -------

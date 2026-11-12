@@ -76,6 +76,12 @@ def test_the_build_scripts_take_a_data_dir(tmp_path, monkeypatch):
     assert T.ACC_DIR == str(tmp_path / "proc" / "acc")
 
 
+def test_the_hook_nets_the_same_baci_version_as_the_script_default(monkeypatch):
+    monkeypatch.syspath_prepend(os.path.join(os.path.dirname(__file__), "..", "scripts"))
+    import build_baci_reexport as R
+    assert copper_feed.BACI_SOURCE_VERSION == R.SOURCE_VERSION
+
+
 def test_a_byte_identical_rebuild_of_a_feed_input_bumps_no_version(tmp_path):
     cur = tmp_path / "feed" / "baci" / "current"
     cur.mkdir(parents=True)
