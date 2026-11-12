@@ -1307,8 +1307,7 @@ relations — never solved for a prior. _Avoid_: "constraint row" for the pre-st
 **Writer scope** — the set of edges a relation source is *permitted* to write. Scopes may overlap;
 **cascade order** decides precedence among sources whose scope contains an edge; a write outside
 scope is rejected (`PriorLedger`: an error in tests, logged and dropped in production). _Avoid_:
-"ownership", "sole writer" — they implied an exclusivity the `conc` fallback never respected
-(it wrote 852 same-region `Cathode→FU` Mass edges of `imp_20261112_133434_22fc54b3`).
+"ownership", "sole writer" — they implied an exclusivity the `conc` fallback never respected.
 
 **Relation source** — what yields a case's relations: a params file (`ParamSource`, its per-pair or
 conc-twin reading), the structure of the acc (recipes, Flow-node balances). A source is declared

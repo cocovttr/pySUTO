@@ -16,7 +16,7 @@ edge-relation network**, and the duplication is a recurring source of drift:
   ([src/pysuto/impute/network.py](../../src/pysuto/impute/network.py), CC, solves a single unknown).
 - **eff/conc ratio** `a − r·a = …` is enumerated by `RatioConstraintBuilder.from_csv`
   ([src/pysuto/constraints/ratio.py](../../src/pysuto/constraints/ratio.py)) **and** by
-  `ParametricImputer.from_csv` ([src/pysuto/impute/parametric.py](../../src/pysuto/impute/parametric.py))
+  `ParametricImputer.from_csv` (`src/pysuto/impute/parametric.py`, deleted in #136)
   — from the *same* params CSV, via the *same* `ParamRelationResolver`.
 - **pooled-eff recipe** `Σb = r·Σa` is the `RatioConstraintBuilder` `agg` bucket **and**
   `NetworkImputer._do_recipe`.
@@ -86,7 +86,7 @@ do not fit the linear-edge-relation mould).
 - **The case declares the cascade as data.** `ImpSection.cascade` lists `FillEntry` entries
   (a params family, a reading, a rule, a σ rule, a scope function) and `CascadeStep`s (the
   network); the knob `CASCADE_ORDER` orders them and the imp sidecar records each entry's source,
-  rule and scope (#136). The terminal fillers (`TimeImputer`, `ShareImputer`, `FlatPriorImputer`)
+  rule and scope (#136). A case's terminal fillers (`TimeImputer`, `FlatPriorImputer`, copper's `ShareImputer`)
   stay imputers behind `ImpSection.terminal`: temporal interpolation and the last-resort fallback
   are not linear edge relations.
 - **Not yet shared:** `_do_recipe`'s arithmetic still runs beside the pooled-`eff` `Relation`

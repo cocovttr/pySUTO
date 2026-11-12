@@ -18,7 +18,7 @@ Outputs
 -------
 data/input/params/copper_conc_params.csv
     Concentration parameters — two rows per sector (use-direction + supply-
-    direction) so the ParametricImputer can link Mass↔CC edges regardless
+    direction) so the params relation source can link Mass↔CC edges regardless
     of which endpoint holds the flow node.
 
 data/input/params/copper_efficiency_params.csv

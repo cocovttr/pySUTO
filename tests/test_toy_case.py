@@ -136,6 +136,10 @@ def test_every_registered_imputer_writes_and_the_time_imputer_fills_the_two_gaps
     log      = imp.load(ids["imp"]).imputation_log.as_dataframe()
     registered = {r["imputer_id"] for r in imp.load_sidecar(ids["imp"])["imputers"]}
     assert registered == set(toy.CASE.imp.CASCADE_ORDER) | {"time_interp", "flat_prior"}
+    cascade = imp.load_sidecar(ids["imp"])["stage_config"]["case"]["imp"]["cascade"]
+    assert [(e["id"], e["kind"]) for e in cascade] == [
+        ("trade", "fill"), ("network", "step"), ("conc", "fill")]
+    assert cascade[0]["source"]["params_id"] == "conc"
     assert all((log["imputer_id"] == i).any() for i in registered), \
         log.groupby("imputer_id").size().to_dict()
 
