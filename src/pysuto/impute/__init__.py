@@ -27,7 +27,7 @@ from .base       import BaseImputer
 from .engine     import ImputationEngine, ImputationLog, ImputationMetadata
 from .parametric import ParametricImputer, ParametricRelation, _reg_sensitivity
 from .formula    import FormulaImputer, FormulaRelation, ParamRef, SourceTerm
-from .network    import NetworkImputer, ProcessRecipe, derive_process_recipes
+from .network    import NetworkImputer
 from .trade      import TradeImputer
 from .time       import TimeImputer, time_interp_scope
 from .screens    import damp_leg_sigma, screen_contradicted_nodes, screen_outlier_trade_legs
@@ -41,8 +41,6 @@ __all__ = [
     "ImputationMetadata",
     "TradeImputer",
     "NetworkImputer",
-    "ProcessRecipe",
-    "derive_process_recipes",
     "ParametricImputer",
     "ParametricRelation",
     "FormulaImputer",

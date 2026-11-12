@@ -947,10 +947,11 @@ world.to_piot().sankey("2020").write_html("copper_process_network_2020.html")
 | [masks.py](src/pysuto/masks.py) | `MaskRuleSet`, `coerce_mask`, `load_masks_csv` | Named boolean edge masks over an `AccountingStructure` (flat-prior CV ranges, builder scope, feed `edge_scope_mask`). |
 | [relation/params.py](src/pysuto/relation/params.py) | `ParamRow`, `read_params`, `WILDCARD`, `A_FIELDS`, `B_FIELDS` | The one reader of the params CSVs (#128): `read_params(path, accepts)` parses with a single policy (sniffed delimiter, `dtype=str`, `#` comments) into frozen, typed `ParamRow`s (`agg` as a bool, `sigma()` from `unc_type`, `specificity`); each consumer declares an `ACCEPTS` set of `param_type`s, other rows are filtered and counted in the log, a malformed accepted row raises, and a soft row with no σ rule raises. `constraints/sum.py` reads another schema and stays. |
 | [relation/param_relation.py](src/pysuto/relation/param_relation.py) | `ParamRelationResolver`, `ResolvedRelation`, `expand_edge_index`, `conc_twin_map`, `conc_nominal_lookup` | The A→B relation resolver over a `ParamRow` (selectors, `*` / `same` wildcards), shared by Stage 2 (`ParametricImputer.from_csv`) and Stage 3 (`RatioConstraintBuilder` / `RatioBoundBuilder.from_csv`). |
+| [relation/structure.py](src/pysuto/relation/structure.py) | `ProcessRecipe`, `NodeBalance`, `process_recipes`, `node_balances` | The structural relation sources, derived once from the acc and cached per acc: a recipe (inputs, Flow `products`, secondary-SB `wastes` per process-region-year) and the content balance of every Flow and Process node-period. `acc` imports nothing from `impute`; the NetworkImputer reads these and raises on a recipe with more than one Flow product until co-products land (#129, #130). |
 | [flow_node_balance.py](src/pysuto/flow_node_balance.py) | `flow_node_balance`, `contradicted_flow_nodes` | Detects a contradicted flow node — inflow and outflow priors that disagree — for the Stage 2 and Stage 3 drivers; detection only, the policy is the caller's ([ADR 0019](docs/adr/0019-contradicted-flow-nodes-lose-anchor-authority.md)). |
 | [collector.py](src/pysuto/collector.py) | `FeedCollector` | Select feeds, align onto common edge index, produce `AggregationResult`. |
 | [agg.py](src/pysuto/agg.py) | `AggregationMath`, `AggregationResult` | Build `Ω`, compute `f_agg`, `σ_agg`, coverage. |
-| [impute/](src/pysuto/impute/) | `ImputationEngine`, `BaseImputer`, `TradeImputer`, `NetworkImputer`, `ProcessRecipe`, `ParametricImputer`, `FormulaImputer`, `TimeImputer`, `ShareImputer`, `FlatPriorImputer`, `ParametricRelation`, `FormulaRelation`, `SourceTerm`, `ParamRef`, `ImputationLog`, `ImputationMetadata` | Ordered imputation pipeline; per-edge provenance logging. **Subpackage layout:** `engine.py`, `base.py`, `trade.py`, `network.py`, `parametric.py`, `formula.py`, `time.py`, `share.py`, `flat_prior.py`. |
+| [impute/](src/pysuto/impute/) | `ImputationEngine`, `BaseImputer`, `TradeImputer`, `NetworkImputer`, `ParametricImputer`, `FormulaImputer`, `TimeImputer`, `ShareImputer`, `FlatPriorImputer`, `ParametricRelation`, `FormulaRelation`, `SourceTerm`, `ParamRef`, `ImputationLog`, `ImputationMetadata` | Ordered imputation pipeline; per-edge provenance logging. **Subpackage layout:** `engine.py`, `base.py`, `trade.py`, `network.py`, `parametric.py`, `formula.py`, `time.py`, `share.py`, `flat_prior.py`. |
 | [constraints/](src/pysuto/constraints/) | `ConstraintEngine`, `BaseConstraintBuilder`, `MassBalanceBuilder`, `SumConstraintBuilder`, `RatioConstraintBuilder`, `RatioBoundBuilder`, `FlowBoundsBuilder`, `ConstraintBlock`, `ConstraintRun` | Plugin constraint pipeline; persists to `data/proc/const/` via `ConstraintRunRegistry` (lives in [registry/](src/pysuto/registry/)). **Subpackage layout:** `engine.py`, `base.py`, `mass_balance.py`, `sum.py`, `ratio.py`, `flow_bound.py`, `run.py`. |
 | [solver.py](src/pysuto/solver.py) | `Solver`, `OptimResult` | Stage-4 orchestrator: builds the σ-weighted period QP (warm or cold prior) and hands it to an injected QP backend; imports no numerical solver. `Solver.objective_at` scores any year-local posterior under a const run's QP, split by family (#102). |
 | [qp.py](src/pysuto/qp.py) | `QPProblem`, `QPResult`, `QPBackend` | The neutral standard-form period QP and the backend protocol (ADR 0042). |
@@ -1392,6 +1393,7 @@ pysuto/
 ├── masks.py               MaskRuleSet · coerce_mask · load_masks_csv       │
 ├── relation/              params.py (ParamRow · read_params)               │
 │                          param_relation.py (ParamRelationResolver)        │
+│                          structure.py (ProcessRecipe · node_balances)     │
 ├── flow_node_balance.py   contradicted_flow_nodes  (St2–St3 check)         │
 ├── utils.py               _NpEncoder · io helpers                          │
 ├── logging.py             structured run logging                          ─┘
@@ -1403,7 +1405,7 @@ pysuto/
 │   ├── base.py             FlatPriorImputer · ParametricRelation             │
 │   ├── parametric.py       FormulaRelation · SourceTerm · ParamRef           │
 │   ├── formula.py          ImputationLog · ImputationMetadata                │
-│   ├── network.py          NetworkImputer · ProcessRecipe                    │
+│   ├── network.py          NetworkImputer                                    │
 │   ├── trade.py            TradeImputer (cross-region CC trade-seed)         │
 │   ├── time.py                                                               │
 │   ├── share.py            ShareImputer (net-stock share + seed)             │

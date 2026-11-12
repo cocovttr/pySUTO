@@ -23,7 +23,7 @@ import pandas as pd
 import pytest
 
 from pysuto.acc import ValuationRoles
-from pysuto.impute import NetworkImputer, TradeImputer, derive_process_recipes
+from pysuto.impute import NetworkImputer, TradeImputer
 from pysuto.lp import lp_combine
 
 
@@ -99,10 +99,6 @@ class _ChainAcc:
         nf = self.node_index.loc[ei["from_id"].values].reset_index(drop=True).add_prefix("from_")
         nt = self.node_index.loc[ei["to_id"].values].reset_index(drop=True).add_prefix("to_")
         return pd.concat([ei, nf, nt], axis=1)
-
-    @property
-    def process_recipes(self):
-        return derive_process_recipes(self)
 
     def eid(self, fs, fr, ts, tr, val):
         m = self.edge_meta

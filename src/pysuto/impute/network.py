@@ -45,6 +45,7 @@ from pysuto.relation.param_relation import (
     get_edge_cache,
 )
 from pysuto.relation.params import read_params
+from pysuto.relation.structure import node_balances, process_recipes
 
 from .base import BaseImputer, _apply_cv_cap, _log
 from .parametric import _reg_sensitivity
@@ -58,65 +59,6 @@ STRIPPING_ACCEPTS = frozenset({"stripping_ratio"})
 
 _EPS = 1e-12  # guard for divisions by (1−eff) when eff≈1
 _SECONDARY = BoundaryRole.SECONDARY.value  # the residual-output / secondary-input role
-
-
-# ---------------------------------------------------------------------------
-# Structural recipe skeleton (parameter-free; built from acc only)
-# ---------------------------------------------------------------------------
-
-@dataclass(frozen=True)
-class ProcessRecipe:
-    """One Process node's CC supply-use skeleton (edge ids, no parameters).
-
-    inputs   use-side content edge ids into the process (any region; incl. Scrap).
-    product  the single supply content edge to a Flow node, or None.
-    wastes   supply content edge ids to SB nodes of boundary role ``secondary``.
-    """
-
-    process_sector: str
-    region: str
-    time: str
-    inputs: tuple[int, ...]
-    product: int | None
-    wastes: tuple[int, ...]
-
-
-def derive_process_recipes(acc) -> list[ProcessRecipe]:
-    """Build :class:`ProcessRecipe` skeletons from ``acc`` (masks + roles).
-
-    Reads ``edge_meta``, the ``supply``/``use`` masks, the content valuation and the
-    boundary roles — all of which survive the save/load round-trip.
-    """
-    em = acc.edge_meta
-    supply = np.asarray(acc.masks["supply"], dtype=bool)
-    use = np.asarray(acc.masks["use"], dtype=bool)
-    is_cc = (em["valuation"].to_numpy() == acc.valuation_roles.content)
-
-    sup = em[supply & is_cc & (em["from_entity"].to_numpy() == "Process")]
-    use_e = em[use & is_cc & (em["to_entity"].to_numpy() == "Process")]
-
-    recipes: list[ProcessRecipe] = []
-    for (proc, region, time), g in sup.groupby(
-        ["from_sector", "from_region", "time"], sort=False
-    ):
-        flow_out = g[g["to_entity"].to_numpy() == "Flow"]
-        product = int(flow_out["edge_id"].iloc[0]) if len(flow_out) else None
-        waste_rows = g[
-            (g["to_entity"].to_numpy() == "SB")
-            & (boundary_role_values(acc.boundary_roles, g["to_sector"]) == _SECONDARY)
-        ]
-        wastes = tuple(int(e) for e in waste_rows["edge_id"])
-
-        ig = use_e[
-            (use_e["to_sector"].to_numpy() == proc)
-            & (use_e["to_region"].to_numpy() == region)
-            & (use_e["time"].to_numpy() == time)
-        ]
-        inputs = tuple(int(e) for e in ig["edge_id"])
-        recipes.append(
-            ProcessRecipe(str(proc), str(region), str(time), inputs, product, wastes)
-        )
-    return recipes
 
 
 # ---------------------------------------------------------------------------
@@ -262,9 +204,16 @@ class NetworkImputer(BaseImputer):
 
         # attach eff to each structural recipe
         self._recipes = []
-        for rec in acc.process_recipes:
+        for rec in process_recipes(acc):
+            if len(rec.products) > 1:
+                raise ValueError(
+                    f"process {rec.process!r} ({rec.region}, {rec.time}) has "
+                    f"{len(rec.products)} Flow products {rec.products}; the network "
+                    "imputer handles one (co-products, #130)"
+                )
+            product = rec.products[0] if rec.products else None
             eff, eff_sig, eff_eps, pid = product_eff.get(
-                rec.product, (1.0, 0.0, 0.0, None)
+                product, (1.0, 0.0, 0.0, None)
             )
             secondary = tuple(i for i in rec.inputs if role_from.get(i) == _SECONDARY)
             non_sem = [i for i in rec.inputs if role_from.get(i) != _SECONDARY]
@@ -274,12 +223,16 @@ class NetworkImputer(BaseImputer):
             bilateral_import = tuple(i for i in non_sem if reg_from.get(i) != reg_to.get(i))
             self._recipes.append(
                 _RRecipe(rec.inputs, primary, secondary, bilateral_import,
-                         rec.product, rec.wastes,
+                         product, rec.wastes,
                          float(eff), float(eff_sig), float(eff_eps), pid)
             )
 
         # Flow-node CC balances: (incoming supply edges, outgoing use edges)
-        self._flow_nodes = self._build_flow_balances(acc)
+        self._flow_nodes = [
+            (b.incoming, b.outgoing)
+            for b in node_balances(acc, acc.valuation_roles.content)
+            if b.entity == "Flow"
+        ]
 
     def _load_eff_map(self, path, resolver) -> dict:
         # Recovery-efficiency rows only: any other process ratio (the stripping
@@ -317,30 +270,6 @@ class NetworkImputer(BaseImputer):
     def _writable(self, e: int) -> bool:
         """Ownership: same-region edges only, and never a stock-change leg."""
         return bool(self._writable_mask[e])
-
-    def _build_flow_balances(self, acc):
-        """Per **(Flow node, year)**: (incoming CC supply edges, outgoing CC use edges).
-
-        Keyed by ``(node_id, time)``. ``node_index`` carries no time axis, so
-        grouping on the bare node id would pool all years onto one node — leaving
-        the balance with as many unknowns as years and the single-unknown
-        determinacy guard in :meth:`_do_flow_balance` could never fire.
-        """
-        em = acc.edge_meta
-        cc = em[em["valuation"].to_numpy() == acc.valuation_roles.content]
-        flow_ids = set(acc.node_index.index[acc.node_index["entity"].to_numpy() == "Flow"])
-        by_to = {k: g["edge_id"].to_numpy() for k, g in cc.groupby(["to_id", "time"])}
-        by_from = {k: g["edge_id"].to_numpy() for k, g in cc.groupby(["from_id", "time"])}
-        balances = []
-        # nodes/years with both in- and out-edges, sorted: a set iterates in string-hash
-        # order, which changes with every process (#113)
-        for key in sorted(by_to.keys() & by_from.keys()):
-            if key[0] not in flow_ids:
-                continue
-            inc = tuple(int(e) for e in by_to[key])
-            out = tuple(int(e) for e in by_from[key])
-            balances.append((inc, out))
-        return balances
 
     # -- imputation ---------------------------------------------------------
 
