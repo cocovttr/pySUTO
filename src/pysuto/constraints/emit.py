@@ -40,14 +40,16 @@ def emit(relations: list[Relation], n_edges: int) -> ConstraintBlock:
     lens = np.fromiter((len(r.edges) for r in relations), dtype=np.int64, count=M)
     rows = np.repeat(np.arange(M, dtype=np.int64), lens)
     cols = np.concatenate([np.asarray(r.edges, dtype=np.int64) for r in relations])
-    vals = np.concatenate([np.asarray(r.coefficients, dtype=np.float64) for r in relations])
+    vals = np.concatenate([np.asarray(r.coefficients, dtype=np.float64)
+                           for r in relations])
     meta_list = []
     for r in relations:
         if r.sense not in (SENSE_EQ, SENSE_LE):
             raise ValueError(f"Relation {r.type}/{r.variant}: unknown sense {r.sense!r}")
         meta = empty_row_meta_dict()
         meta.update({
-            "constraint_id": build_constraint_id(r.type, r.variant, *r.specs, year=r.time),
+            "constraint_id": build_constraint_id(
+                                r.type, r.variant, *r.specs, year=r.time),
             "type":          r.type,
             "variant":       r.variant,
             "is_hard":       bool(r.hard),

@@ -53,7 +53,8 @@ class TestEmit:
     def test_relation_emits_row_c_sigma_and_id(self):
         block = emit([_balance()], n_edges=10)
         assert block.G_rows.shape == (1, 10)
-        np.testing.assert_array_equal(block.G_rows.toarray()[0, [1, 3, 7]], [1.0, 1.0, -1.0])
+        row = block.G_rows.toarray()[0]
+        np.testing.assert_array_equal(row[[1, 3, 7]], [1.0, 1.0, -1.0])
         assert block.G_rows.nnz == 3
         assert block.c.tolist() == [0.0]
         assert block.sigma_c.tolist() == [0.0]
@@ -73,7 +74,8 @@ class TestEmit:
         assert not bool(block.row_meta.loc[0, "is_hard"])
 
     def test_hard_row_has_zero_sigma_whatever_sigma_says(self):
-        assert emit([_balance(hard=True, sigma=9.0)], n_edges=10).sigma_c.tolist() == [0.0]
+        block = emit([_balance(hard=True, sigma=9.0)], n_edges=10)
+        assert block.sigma_c.tolist() == [0.0]
 
     def test_le_sense_is_carried_to_row_meta(self):
         rel = _balance()
@@ -82,7 +84,8 @@ class TestEmit:
 
     def test_empty_is_an_empty_block(self):
         block = emit([], n_edges=10)
-        assert block.G_rows.shape == (0, 10) and list(block.row_meta.columns) == ROW_META_COLS
+        assert block.G_rows.shape == (0, 10)
+        assert list(block.row_meta.columns) == ROW_META_COLS
 
     def test_row_order_follows_relation_order(self):
         block = emit([_ratio(0.5, 0.1, "2021"), _ratio(0.5, 0.1, "2020")], n_edges=10)
