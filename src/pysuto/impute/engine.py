@@ -37,14 +37,18 @@ class ImputationLog:
     Each entry is a dict with keys:
         edge_id, step, method, source_edges, coefficients,
         f_before, f_after, sigma_before, sigma_after,
-        description, param_id
+        description, param_id, relaxed, assumed_absent
+
+    ``relaxed`` marks a NetworkImputer relaxed recipe close (ADR 0010) and
+    ``assumed_absent`` lists the primary edges (int64 ids) that close counted as 0;
+    every other row carries ``False`` and ``[]``.
     """
 
     _COLS = [
         "edge_id", "step", "imputer_id", "pass", "method",
         "source_edges", "coefficients",
         "f_before", "f_after", "sigma_before", "sigma_after",
-        "description", "param_id",
+        "description", "param_id", "relaxed", "assumed_absent",
     ]
 
     def __init__(self) -> None:

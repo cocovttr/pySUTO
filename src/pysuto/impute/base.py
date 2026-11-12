@@ -39,6 +39,7 @@ def _log(
     source_edges: list[int], coefficients: list[float],
     f_after: float, sigma_after: float,
     description: str, param_id: Optional[str],
+    relaxed: bool = False, assumed_absent: Optional[list[int]] = None,
 ) -> dict:
     return {
         "edge_id":      edge_id,
@@ -52,6 +53,8 @@ def _log(
         "sigma_after":  float(sigma_after),
         "description":  description,
         "param_id":     param_id,
+        "relaxed":        bool(relaxed),
+        "assumed_absent": [int(i) for i in (assumed_absent or [])],
     }
 
 

@@ -110,9 +110,10 @@ def _equal(a, b) -> bool:
     return bool(np.array_equal(a, b))
 
 
-def compare_dirs(new: str, ref: str) -> list:
+def compare_dirs(new: str, ref: str, ignore_columns=()) -> list:
     """(relative path, key, equal) for every stored array under ``ref``; a file or key
-    missing on either side is unequal."""
+    missing on either side is unequal. ``ignore_columns`` are dropped from both sides of
+    a parquet comparison first (#150: the log's ``relaxed`` / ``assumed_absent``)."""
     rows = []
     for root, dirs, files in os.walk(ref):
         dirs[:] = sorted(d for d in dirs if d not in SKIP)
@@ -132,7 +133,10 @@ def compare_dirs(new: str, ref: str) -> list:
                 rows.append((rel, "", _equal(np.load(p, allow_pickle=True),
                                              np.load(q, allow_pickle=True))))
             elif f.endswith(".parquet"):
-                rows.append((rel, "", pd.read_parquet(p).equals(pd.read_parquet(q))))
+                drop = list(ignore_columns)
+                rows.append((rel, "", pd.read_parquet(p).drop(columns=drop, errors="ignore")
+                             .equals(pd.read_parquet(q).drop(columns=drop,
+                                                             errors="ignore"))))
             else:
                 with open(p, "rb") as fa, open(q, "rb") as fb:
                     rows.append((rel, "<bytes>", fa.read() == fb.read()))

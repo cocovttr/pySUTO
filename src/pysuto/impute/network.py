@@ -387,12 +387,13 @@ class NetworkImputer(BaseImputer):
 
         # ---- product = eff·S ----
         relaxed_close = bool(relax_primaries and miss_PR and S_src == "inputs")
+        tag = dict(relaxed=relaxed_close, assumed_absent=miss_PR if relaxed_close else ())
         if P is not None and np.isnan(f[P]):
             f_P = eff * S
             s_P = lp_combine([eff * sig_S, eff_term, eps * abs(f_P)], p)
             self._w(P, f_P, s_P, ledger, step,
                     "network_forward", known_PR if S_src == "inputs" else [P], [eff],
-                    rec.eff_param_id)
+                    rec.eff_param_id, **tag)
             if relaxed_close:
                 self._relaxed_fills.add(P)
 
@@ -425,7 +426,8 @@ class NetworkImputer(BaseImputer):
             if rec.eff_param_id is None and self._lower[w] < 0.0:   # eff-less stock leg
                 s_w = max(s_w, self.effless_stock_sigma)
             self._w(w, f_w, s_w, ledger, step, method,
-                    known_PR if S_src == "inputs" else [P], [1.0 - eff], rec.eff_param_id)
+                    known_PR if S_src == "inputs" else [P], [1.0 - eff], rec.eff_param_id,
+                    **tag)
             if relaxed_close:
                 self._relaxed_fills.add(w)
 
@@ -494,7 +496,8 @@ class NetworkImputer(BaseImputer):
     # -- write helper -------------------------------------------------------
 
     def _w(self, e, val, sig, ledger, step, method,
-           sources, coeffs, param_id, desc="", uncapped=False) -> bool:
+           sources, coeffs, param_id, desc="", uncapped=False,
+           relaxed=False, assumed_absent=()) -> bool:
         """Write a fill through the ledger, behind the imputer's own scope gate.
 
         The value is clipped to the edge's ``[lower, upper]`` bounds *before* it is
@@ -520,6 +523,7 @@ class NetworkImputer(BaseImputer):
             e, val, float(sig), step,
             method + ("_clipped" if was_clipped else "") + ("_capped" if capped else ""),
             [int(s) for s in sources], [float(c) for c in coeffs], desc, param_id,
+            relaxed, assumed_absent,
         ):
             return False
         self._n_written += 1
