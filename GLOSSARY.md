@@ -1029,9 +1029,10 @@ in `feedprep.trade_shares.baci_observed_regions()` from the BACI `F_root`. _Avoi
 sum as evidence without checking observability — that is how a 100 %-domestic pattern gets fabricated at
 the observation's confidence.
 
-**Trade-seed** — the `TradeImputer` fill (method `trade_seed`) that sets the **CC** value of a
-*cross-region* `Flow→Process` import leg from its already-aggregated BACI **Mass** twin
-(`f_CC = conc·f_Mass`), reusing the shared `conc_twin_map`. It is the imputation-time complement of the
+**Trade-seed** — the trade `Fill` (a forward fill of the conc relation source in the cross-region
+`Flow→Process` content scope; method `trade_seed`) that sets the **CC** value of a
+*cross-region* import leg from its already-aggregated BACI **Mass** twin
+(`f_CC = conc·f_Mass`), through the source's twin reading. It is the imputation-time complement of the
 trade-share fan: the fan distributes ICSG-CC by BACI geography at *feed* time, whereas trade-seed reads
 the BACI-Mass observation directly at *imputation* time so the network recipe gate can pool the covered
 import legs. Trade-seed's **writer scope** (below) is the cross-region `Flow→Process` CC edges; the

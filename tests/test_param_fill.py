@@ -1,20 +1,22 @@
 """
 test_trade_imputer.py
 =====================
-Unit suite for pysuto.impute.trade.TradeImputer + the trade→network handoff
+Unit suite for the trade fill (a forward ``Fill`` of the conc relation source, scope
+cross-region Flow→Process content edges) + the trade→network handoff
 that revives the deep refining chain (ADR 0010).
 
 A minimal **two-region** copper chain ``Matte→CFR→Anode→ER→CER→CP→Cathode``
 (region A), with a cross-region anode **import** ``Anode(B)→ER(A)`` and a
 cross-region anode **export** ``Anode(A)→ER(B)``, exercises:
 
-  * TradeImputer seeds the import CC leg from its BACI Mass twin (``trade_seed``);
+  * the trade fill seeds the import CC leg from its BACI Mass twin (``trade_seed``);
   * with the import seeded, the NetworkImputer recipe gate opens, the Anode
     flow-balance closes the lone domestic ``Anode(A)→ER(A)`` leg (the export
     route is uncovered → treated as 0), and ``ER→CER→CP`` fill via the recipe /
     flow-balance instead of falling to flat-prior;
   * the trade-seed σ matches the inverted conc twin;
-  * no conc row ⇒ TradeImputer is a no-op.
+  * no conc row ⇒ the trade fill is a no-op;
+  * the source's twin and pair readings, and the parametric σ rule's both directions.
 """
 from __future__ import annotations
 
@@ -23,8 +25,9 @@ import pandas as pd
 import pytest
 
 from pysuto.acc import ValuationRoles
-from pysuto.impute import NetworkImputer, TradeImputer, run_imputer
+from pysuto.impute import FillImputer, NetworkImputer, run_imputer
 from pysuto.lp import lp_combine
+from pysuto.relation.sources import Fill, ParamSource, trade_scope
 
 
 # =============================================================================
@@ -186,9 +189,12 @@ def _build(tmp_path, with_anode_conc=True):
     conc = tmp_path / "conc.csv"
     write_eff(eff)
     write_conc(conc, with_anode=with_anode_conc)
-    trade = TradeImputer(str(conc), p=1.3, cv_cap=float("inf"))
+    trade = FillImputer(
+        Fill(ParamSource.from_params(str(conc), acc, twin=True), "forward",
+             trade_scope(acc), id="trade"),
+        "trade", p=1.3,
+    )
     network = NetworkImputer(str(eff), str(conc), p=1.3, cv_cap=float("inf"))
-    trade.prepare(acc)
     network.prepare(acc)
     return acc, trade, network
 
@@ -258,7 +264,7 @@ def test_chain_revives_after_trade_seed(tmp_path):
 
 
 def test_no_conc_row_is_noop(tmp_path):
-    # Drop the Anode conc rows → no twin for the import leg → TradeImputer no-op.
+    # Drop the Anode conc rows → no twin for the import leg → trade fill no-op.
     acc, trade, network = _build(tmp_path, with_anode_conc=False)
     f = np.full(acc.n_edges, np.nan)
     sigma = np.full(acc.n_edges, np.nan)
@@ -296,3 +302,63 @@ def test_chain_runs_strict_and_every_write_is_in_scope(tmp_path):
     derived = run_imputer(network, f, sigma, 1, acc)
     assert {e["edge_id"] for e in seeded} <= set(np.flatnonzero(trade.writer_scope(acc)))
     assert {e["edge_id"] for e in derived} <= set(np.flatnonzero(network.writer_scope(acc)))
+
+
+# =============================================================================
+# The params relation source and the parametric σ rule
+# =============================================================================
+
+def _conc_csv(tmp_path, anode=0.94):
+    conc = tmp_path / "conc.csv"
+    write_conc(conc)
+    df = pd.read_csv(conc, sep=";", dtype=str)
+    df.loc[df["param_id"].str.startswith("conc_anode"), "value_nominal"] = str(anode)
+    df.to_csv(conc, sep=";", index=False)
+    return str(conc)
+
+
+def test_a_source_relation_is_the_conc_twin_with_the_rows_sigma(tmp_path):
+    acc = _ChainAcc()
+    src = ParamSource.from_params(_conc_csv(tmp_path), acc, twin=True)
+    imp = acc.eid("Anode", "B", "ER", "A", "CC")
+    rel = next(r for r in src.relations if r.edges[0] == imp)
+    assert rel.edges.tolist() == [imp, acc.eid("Anode", "B", "ER", "A", "Mass")]
+    assert np.array_equal(rel.coefficients, [1.0, -0.94])
+    assert rel.meta["sigma_param"] == 0.001 and rel.sigma == 0.001 / 0.94
+
+
+def test_the_twin_reading_drops_a_zero_ratio_the_pair_reading_keeps(tmp_path):
+    acc = _ChainAcc()
+    csv = _conc_csv(tmp_path, anode=0.0)
+    cc = acc.eid("Anode", "B", "ER", "A", "CC")
+    twin = ParamSource.from_params(csv, acc, twin=True)
+    pair = ParamSource.from_params(csv, acc)
+    assert cc not in {int(r.edges[0]) for r in twin.relations}
+    assert cc in {int(r.edges[0]) for r in pair.relations}
+
+
+def test_a_both_fill_writes_either_side_and_a_forward_one_only_the_cc(tmp_path):
+    acc = _ChainAcc()
+    src = ParamSource.from_params(_conc_csv(tmp_path), acc)
+    m, cc = (acc.eid("Anode", "B", "ER", "A", v) for v in ("Mass", "CC"))
+    for rule, seeds, target in (("both", {cc: 18.8}, m), ("forward", {m: 20.0}, cc)):
+        f = np.full(acc.n_edges, np.nan)
+        sigma = np.full(acc.n_edges, np.nan)
+        for e, val in seeds.items():
+            f[e], sigma[e] = val, 0.01 * val
+        imp = FillImputer(Fill(src, rule, id="conc"), "parametric")
+        (entry,) = [e for e in run_imputer(imp, f, sigma, 0, acc)
+                    if e["edge_id"] == target]
+        assert entry["method"] == "parametric" and entry["param_id"].startswith("conc_")
+        assert f[target] == pytest.approx(20.0 if rule == "both" else 18.8)
+    f = np.full(acc.n_edges, np.nan)
+    sigma = np.full(acc.n_edges, np.nan)
+    f[cc], sigma[cc] = 18.8, 0.1
+    assert run_imputer(FillImputer(Fill(src, "forward", id="conc")), f, sigma, 0, acc) == []
+
+
+def test_the_trade_sigma_rule_is_forward_only(tmp_path):
+    acc = _ChainAcc()
+    src = ParamSource.from_params(_conc_csv(tmp_path), acc, twin=True)
+    with pytest.raises(ValueError, match="forward"):
+        FillImputer(Fill(src, "both"), "trade")

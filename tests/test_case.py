@@ -107,7 +107,7 @@ class TestSetOverride:
 
     def test_a_tuple_override_reaches_the_spec_field(self):
         knobs = CASE.imp.knobs()
-        order = ("network", "trade", "conc", "ore_grade", "eff")
+        order = ("network", "trade", "conc", "ore_grade")
         ov = parse_overrides([f"CASCADE_ORDER={order!r}"], knobs, knobs)
         assert CASE.with_knobs("imp", ov).imp.CASCADE_ORDER == order
 

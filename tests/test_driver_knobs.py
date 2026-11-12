@@ -117,30 +117,30 @@ def test_a_knob_of_the_wrong_type_fails_before_anything_is_loaded(stage, pair, k
 
 class TestCascadeOrder:
     """#104: the Stage 2 cascade order is a knob; it must stay a permutation of the
-    five cascade imputers, and the terminal pass (time, share, flat) stays fixed."""
+    four cascade imputers, and the terminal pass (time, share, flat) stays fixed."""
 
     def test_the_default_order_is_todays_cascade(self):
-        assert CASE.imp.CASCADE_ORDER == ("trade", "network", "conc", "ore_grade", "eff")
+        assert CASE.imp.CASCADE_ORDER == ("trade", "network", "conc", "ore_grade")
         assert CASE.imp.cascade_ids == CASE.imp.CASCADE_ORDER
         knobs, _ = _surface("imp")
         assert "CASCADE_ORDER" in knobs and "cascade_ids" not in knobs
 
     def test_the_cascade_is_built_in_the_given_order(self):
         by_id = {k: object() for k in CASE.imp.CASCADE_ORDER}
-        order = ("network", "trade", "eff", "conc", "ore_grade")
+        order = ("network", "trade", "ore_grade", "conc")
         assert cascade_in_order(by_id, order) == [by_id[k] for k in order]
 
     @pytest.mark.parametrize("order", [
         ("trade", "network", "conc", "ore_grade", "time"),        # unknown
-        ("trade", "trade", "conc", "ore_grade", "eff"),           # repeated
-        ("trade", "network", "conc", "ore_grade"),                # missing
+        ("trade", "trade", "conc", "ore_grade"),                  # repeated
+        ("trade", "network", "conc"),                             # missing
     ])
     def test_an_order_that_is_not_a_permutation_is_refused(self, order):
         with pytest.raises(ValueError, match="permutation"):
             cascade_in_order({k: object() for k in CASE.imp.CASCADE_ORDER}, order)
 
     def test_a_bad_order_fails_on_the_command_line_before_anything_is_loaded(self):
-        r = _run("imp", "--set", 'CASCADE_ORDER=("trade","trade","conc","ore_grade","eff")')
+        r = _run("imp", "--set", 'CASCADE_ORDER=("trade","trade","conc","ore_grade")')
         assert r.returncode != 0 and "permutation" in r.stderr
         assert "Traceback" not in r.stderr
 
