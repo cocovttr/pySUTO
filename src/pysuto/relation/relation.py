@@ -25,6 +25,13 @@ from typing import Optional
 
 import numpy as np
 
+# The relation types the network imputer also builds, and the two senses (the
+# ``constraint_id`` / ``row_meta`` vocabulary of :mod:`pysuto.constraints.naming`).
+TYPE_MASSBAL = "massbal"
+TYPE_RATIO   = "ratio"
+SENSE_EQ     = "eq"
+SENSE_LE     = "le"
+
 
 @dataclass
 class Relation:

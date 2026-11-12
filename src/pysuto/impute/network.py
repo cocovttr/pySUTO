@@ -28,6 +28,14 @@ observed zero (#76) is covered, so it is never written either. eff/conc are reso
 the same :class:`~pysuto.relation.param_relation.ParamRelationResolver` the constraint
 builders use, so the emitted CC/Mass twins satisfy ``conc_*_supply``/``_use`` by
 construction (generalising ADR 0002 option D to the whole chain).
+
+The relations are the objects Stage 3 emits (#134): a Flow balance is a
+:func:`~pysuto.relation.balance.node_balance_relations` row and a CC→Mass twin a
+:func:`~pysuto.relation.ratio_relation.conc_twin_relation`, each solved for its lone
+unknown by :func:`~pysuto.relation.prior.solve_lone_unknown`; a recipe's structure and
+efficiency are its :func:`~pysuto.relation.ratio_relation.recipe_relation`, which raises
+when an ``agg=true`` eff row pools a different input set than the recipe's. σ stays the
+imputer's own rule.
 """
 
 from __future__ import annotations
@@ -39,13 +47,21 @@ import numpy as np
 from pysuto.acc import BoundaryRole, boundary_role_values
 from pysuto.logging import get_logger
 from pysuto.lp import lp_combine
+from pysuto.relation.balance import node_balance_relations
 from pysuto.relation.param_relation import (
     ParamRelationResolver,
     conc_twin_map,
     get_edge_cache,
 )
 from pysuto.relation.params import read_params
-from pysuto.relation.structure import node_balances, process_recipes
+from pysuto.relation.prior import solve_lone_unknown
+from pysuto.relation.ratio_relation import (
+    conc_twin_relation,
+    pooled_input_sets,
+    recipe_relation,
+)
+from pysuto.relation.relation import Relation
+from pysuto.relation.structure import process_recipes
 
 from .base import BaseImputer, _apply_cv_cap
 from .parametric import _reg_sensitivity
@@ -78,6 +94,7 @@ class _RRecipe:
     eff_sig: float
     eff_eps: float
     eff_param_id: str | None
+    relation: Relation                 # Σ products − eff·Σ inputs = 0 (the pooled-eff row)
 
 
 @dataclass(frozen=True)
@@ -141,7 +158,9 @@ class NetworkImputer(BaseImputer):
         self._stripping: list[_Stripping] = []
         self._recipes: list[_RRecipe] = []
         self._relaxed_fills: set[int] = set()
-        self._flow_nodes: list[tuple[tuple[int, ...], tuple[int, ...]]] = []
+        self._flow_nodes: list[tuple[Relation, np.ndarray]] = []  # (CC balance, uses)
+        self._edge_time: np.ndarray | None = None
+        self._content: str = ""
         self._cc_to_mass: dict[int, tuple[int, float, float]] = {}
         self._same_region: np.ndarray | None = None
         self._stock_target: np.ndarray | None = None
@@ -177,6 +196,9 @@ class NetworkImputer(BaseImputer):
             is_stock = em["to_sector"].isin(self._stock_sectors).to_numpy()
             self._stock_target[em["edge_id"].to_numpy()] = is_stock
         self._writable_mask = self._same_region & ~self._stock_target
+        self._edge_time = np.empty(acc.n_edges, dtype=object)
+        self._edge_time[em["edge_id"].to_numpy()] = em["time"].astype(str).to_numpy()
+        self._content = acc.valuation_roles.content
 
         # per-edge bounds: clip fills to [l, u] inside _w so a negative residual
         # (e.g. Ore→SXEW = Mining→Ore − Ore→MF) cannot propagate through the
@@ -205,17 +227,31 @@ class NetworkImputer(BaseImputer):
 
         # attach eff to each structural recipe
         self._recipes = []
+        pooled_sets: dict = {}  # id(agg eff row) -> {(region, time): input edge set}
         for rec in process_recipes(acc):
             # One pooled efficiency per process: Σ products = eff · Σ inputs (#130). The
             # eff map is keyed by product edge, so co-products must resolve to one row.
-            effs = [product_eff.get(e, (1.0, 0.0, 0.0, None)) for e in rec.products]
+            effs = [product_eff.get(e, (1.0, 0.0, 0.0, None, None)) for e in rec.products]
             if len({e[3] for e in effs}) > 1:
                 raise ValueError(
                     f"process {rec.process!r} ({rec.region}, {rec.time}) has "
                     f"{len(rec.products)} Flow products {rec.products} with different "
                     "efficiency rows; co-products close by the sum, one pooled row"
                 )
-            eff, eff_sig, eff_eps, pid = effs[0] if effs else (1.0, 0.0, 0.0, None)
+            eff, eff_sig, eff_eps, pid, eff_row = (
+                effs[0] if effs else (1.0, 0.0, 0.0, None, None))
+            # the agg=true row declares the pooling: its input set must be the recipe's
+            pooled = None
+            if eff_row is not None and eff_row.agg:
+                if id(eff_row) not in pooled_sets:
+                    pooled_sets[id(eff_row)] = pooled_input_sets(
+                        eff_row, acc, self._content)
+                pooled = pooled_sets[id(eff_row)]
+            relation = recipe_relation(
+                rec, float(eff), valuation=self._content, variant=pid or "ratioeq",
+                sigma=float(eff_sig) / abs(eff) if eff else 0.0, hard=pid is None,
+                pooled=pooled, row_id=pid or "",
+            )
             secondary = tuple(i for i in rec.inputs if role_from.get(i) == _SECONDARY)
             non_sem = [i for i in rec.inputs if role_from.get(i) != _SECONDARY]
             # same-region non-SEM inputs block the forward gate; cross-region imports
@@ -225,21 +261,20 @@ class NetworkImputer(BaseImputer):
             self._recipes.append(
                 _RRecipe(rec.inputs, primary, secondary, bilateral_import,
                          rec.products, rec.wastes,
-                         float(eff), float(eff_sig), float(eff_eps), pid)
+                         float(eff), float(eff_sig), float(eff_eps), pid, relation)
             )
 
-        # Flow-node CC balances: (incoming supply edges, outgoing use edges)
+        # Flow-node CC balances (relation, its use edges): Σ(supply in) − Σ(uses out) = 0
         self._flow_nodes = [
-            (b.incoming, b.outgoing)
-            for b in node_balances(acc, acc.valuation_roles.content)
-            if b.entity == "Flow"
+            (rel, rel.edges[rel.coefficients < 0])
+            for rel in node_balance_relations(acc, self._content, entities={"Flow"})
         ]
 
     def _load_eff_map(self, path, resolver) -> dict:
         # Recovery-efficiency rows only: any other process ratio (the stripping
         # ratio, a Mass output ratio with its own file since ADR 0038) must not
         # pollute the eff map. Filtered by declared param_type, not by a magic param_id.
-        best: dict[int, tuple] = {}  # product_cc -> (eff, σ, ε, param_id, specificity)
+        best: dict[int, tuple] = {}  # product_cc -> (eff, σ, ε, param_id, row, specificity)
         for row in read_params(path, EFF_ACCEPTS):
             nominal = row.require_nominal()
             sig = row.sigma()
@@ -247,9 +282,9 @@ class NetworkImputer(BaseImputer):
             pid = row.param_id
             for rr in resolver.resolve_row(row):
                 prod = rr.b_edge_id  # B-side = process→product (the recovered output)
-                if prod not in best or rr.specificity > best[prod][4]:
-                    best[prod] = (nominal, sig, eps, pid, rr.specificity)
-        return {k: v[:4] for k, v in best.items()}
+                if prod not in best or rr.specificity > best[prod][5]:
+                    best[prod] = (nominal, sig, eps, pid, row, rr.specificity)
+        return {k: v[:5] for k, v in best.items()}
 
     def _load_stripping(self, path, resolver) -> list[_Stripping]:
         best: dict[int, tuple[_Stripping, int]] = {}  # WR Mass edge -> (rel, specificity)
@@ -296,8 +331,8 @@ class NetworkImputer(BaseImputer):
                 n_before = self._n_written
                 for rec in self._recipes:
                     self._do_recipe(rec, f, sigma, ledger, step)
-                for inc, out in self._flow_nodes:
-                    self._do_flow_balance(inc, out, f, sigma, ledger, step)
+                for rel, out in self._flow_nodes:
+                    self._do_flow_balance(rel, out, f, sigma, ledger, step)
                 if self._n_written == n_before:
                     break
             n_before = self._n_written
@@ -452,30 +487,36 @@ class NetworkImputer(BaseImputer):
         self._emit_twins(rec, f, sigma, ledger, step)
 
     def _emit_twins(self, rec, f, sigma, ledger, step) -> None:
-        p = self.p
         cc_edges = list(rec.inputs) + list(rec.products) + list(rec.wastes)
         for cc in cc_edges:
             if np.isnan(f[cc]):
                 continue
-            twin = self._cc_to_mass.get(cc)
-            if twin is None:
-                continue  # WR (conc=0) has no conc twin — its Mass is k·Ore (_do_stripping)
-            m, conc, conc_sig = twin
-            if np.isnan(f[m]):
-                f_m = float(f[cc] / conc)
-                s_m = lp_combine([sigma[cc] / conc, abs(f_m) * conc_sig / conc], p)
-                self._w(m, f_m, s_m, ledger, step,
-                        "network_mass_twin", [cc], [1.0 / conc], None)
+            # WR (conc=0) has no conc twin — its Mass is k·Ore (_do_stripping)
+            self._mass_twin(cc, f, sigma, ledger, step)
 
-    def _do_flow_balance(self, inc, out, f, sigma, ledger, step) -> None:
-        """Flow-node CC balance: Σ(supply in) = Σ(uses out); fill a lone gap."""
-        p = self.p
-        edges = list(inc) + list(out)
-        missing = [e for e in edges if np.isnan(f[e]) and self._writable(e)]
-        # only act if exactly one *writable* (same-region, non-stock) edge is unknown
-        if len(missing) != 1:
+    def _mass_twin(self, cc, f, sigma, ledger, step) -> None:
+        """Mass twin of a known CC edge: solve its concentration relation for the Mass."""
+        twin = self._cc_to_mass.get(cc)
+        if twin is None or np.isnan(f[cc]):
             return
-        e = missing[0]
+        m, conc, conc_sig = twin
+        if not np.isnan(f[m]):
+            return
+        rel = conc_twin_relation(cc, m, conc, conc_sig, time=self._edge_time[cc],
+                                 valuation=self._content)
+        fill = solve_lone_unknown(rel, f)
+        f_m = fill.value
+        s_m = lp_combine([sigma[cc] / conc, abs(f_m) * conc_sig / conc], self.p)
+        self._w(m, f_m, s_m, ledger, step,
+                "network_mass_twin", fill.sources, fill.coefficients, None)
+
+    def _do_flow_balance(self, rel, out, f, sigma, ledger, step) -> None:
+        """Flow-node CC balance: Σ(supply in) = Σ(uses out); fill a lone gap."""
+        # only act if exactly one *writable* (same-region, non-stock) edge is unknown
+        fill = solve_lone_unknown(rel, f, self._writable_mask)
+        if fill is None:
+            return
+        e = fill.edge
         # every other *writable* edge is therefore known; missing cross-region legs
         # and missing stock-change legs (non-writable) are treated as 0 (no trade on
         # that route / no stock change) — symmetric with the recipe's
@@ -490,24 +531,14 @@ class NetworkImputer(BaseImputer):
         # Production stays the recipe's; only a lone missing USE may be closed here.
         # Once every stock leg among the uses is reported, the use total is observed
         # and the supply closes from it as for any node (#38).
-        if e in inc and any(self._stock_target[x] and np.isnan(f[x]) for x in out):
+        if fill.edge_coefficient > 0 and (self._stock_target[out] & np.isnan(f[out])).any():
             return
-        in_sum = float(sum(f[x] for x in inc if x != e and not np.isnan(f[x])))
-        out_sum = float(sum(f[x] for x in out if x != e and not np.isnan(f[x])))
-        f_e = (in_sum - out_sum) if e in out else (out_sum - in_sum)
-        others = [x for x in edges if x != e and not np.isnan(f[x])]
-        s_e = lp_combine([sigma[x] for x in others], p)
-        self._w(e, f_e, s_e, ledger, step,
-                "network_balance", others, [1.0] * len(others), None)
+        s_e = lp_combine([sigma[x] for x in fill.sources], self.p)
+        # the logged coefficients are the magnitudes: a balance's ±1 are one shared weight
+        self._w(e, fill.value, s_e, ledger, step,
+                "network_balance", fill.sources, np.abs(fill.coefficients), None)
         # emit the Mass twin for the freshly-balanced CC edge
-        twin = self._cc_to_mass.get(e)
-        if twin is not None and not np.isnan(f[e]):
-            m, conc, conc_sig = twin
-            if np.isnan(f[m]):
-                f_m = float(f[e] / conc)
-                s_m = lp_combine([sigma[e] / conc, abs(f_m) * conc_sig / conc], p)
-                self._w(m, f_m, s_m, ledger, step,
-                        "network_mass_twin", [e], [1.0 / conc], None)
+        self._mass_twin(e, f, sigma, ledger, step)
 
     # -- write helper -------------------------------------------------------
 

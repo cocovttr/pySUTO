@@ -650,7 +650,7 @@ from pysuto.impute import NetworkImputer
 acc = MockAcc(times=("2020", "2021", "2022", "2023"))
 imp = NetworkImputer(*sys.argv[2:5], p=1.3, cv_cap=float("inf"))
 imp.prepare(acc)
-print(imp._flow_nodes)
+print([(r.edges.tolist(), r.coefficients.tolist()) for r, _ in imp._flow_nodes])
 """
 
 

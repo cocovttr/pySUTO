@@ -20,9 +20,9 @@ from pysuto.logging import get_logger
 from pysuto.relation.param_relation import (
     ParamRelationResolver,
     expand_edge_index,
-    get_edge_cache,
 )
-from pysuto.relation.params import A_FIELDS, B_FIELDS, WILDCARD, read_params
+from pysuto.relation.params import read_params
+from pysuto.relation.ratio_relation import agg_buckets, ratio_relation
 from pysuto.relation.relation import Relation
 
 from .base import BaseConstraintBuilder, ConstraintBlock, _empty_block
@@ -92,61 +92,6 @@ def _relative_sigma(sigma: float, r: float, param_id: str | None) -> float:
             f"σ = {sigma} — a zero ratio has no relative σ."
         )
     return sigma / abs(r)
-
-
-def _match_side_edges(row, prefix: str, acc_struct) -> np.ndarray:
-    """Return edge_ids matching the ``{a_|b_}``-prefixed selectors on `row` (a ParamRow).
-
-    Wildcards / "same" are treated as 'match any value' — `agg` rows do not
-    pair sides per-edge, so the cross-side "same" constraint has no meaning
-    here. Time and valuation are returned alongside the edge ids by callers
-    via ``acc_struct.edge_index`` for bucketing.
-    """
-    ei_exp, _el, _itt, _fv, _mc, edge_ids_arr = get_edge_cache(acc_struct)
-    fields = A_FIELDS if prefix == "a" else B_FIELDS
-    mask = np.ones(len(ei_exp), dtype=bool)
-    for col_key, ei_col, _ in fields:
-        val = row.selectors[col_key]
-        if val in WILDCARD or val == "same":
-            continue
-        mask &= (ei_exp[ei_col].astype(str).to_numpy() == val)
-    return edge_ids_arr[mask]
-
-
-def _agg_buckets(row, acc_struct, scope):
-    """Match a/b selectors and bucket both sides by ``(region_to, time, valuation)``.
-
-    Returns ``(buckets, a_size, b_size)`` where each bucket is
-    ``{"region", "time", "valuation", "a_edges": [...], "b_edges": [...]}`` for
-    every key present on *both* sides. Bucketing on ``region_to`` scopes the
-    pool per process region: input use-edges carry ``region_to = process region``
-    and the product supply-edge carries ``region_to = product region`` (the
-    same-region recipe makes the two equal), so cross-region pooling cannot leak.
-    For stock-bounds rows ``region_to`` is pinned by the selector, so adding it to
-    the key leaves their bucketing unchanged.
-    """
-    ei_exp = get_edge_cache(acc_struct)[0]
-    r_all = ei_exp["region_to"].astype(str).to_numpy()
-    t_all = ei_exp["time"].astype(str).to_numpy()
-    v_all = ei_exp["valuation"].astype(str).to_numpy()
-    a_edges = _match_side_edges(row, "a", acc_struct)
-    b_edges = _match_side_edges(row, "b", acc_struct)
-    if scope is not None:
-        a_edges = a_edges[scope[a_edges]]
-        b_edges = b_edges[scope[b_edges]]
-    asz, bsz = int(a_edges.size), int(b_edges.size)
-    if asz == 0 or bsz == 0:
-        return [], asz, bsz
-    ra, ta, va = r_all[a_edges], t_all[a_edges], v_all[a_edges]
-    rb, tb, vb = r_all[b_edges], t_all[b_edges], v_all[b_edges]
-    keys = sorted(set(zip(ra, ta, va)) & set(zip(rb, tb, vb)))
-    buckets = []
-    for r, t, v in keys:
-        a_sub = a_edges[(ra == r) & (ta == t) & (va == v)]
-        b_sub = b_edges[(rb == r) & (tb == t) & (vb == v)]
-        buckets.append({"region": r, "time": t, "valuation": v,
-                        "a_edges": a_sub.tolist(), "b_edges": b_sub.tolist()})
-    return buckets, asz, bsz
 
 
 class RatioConstraintBuilder(BaseConstraintBuilder):
@@ -257,7 +202,7 @@ class RatioConstraintBuilder(BaseConstraintBuilder):
             # b-side edge per (region_to, time, valuation) bucket → one soft row
             #   Σ b − r·Σ a = ε   (pooled denominator; set-scoped).
             if row.agg:
-                buckets, asz, bsz = _agg_buckets(row, acc_struct, scope)
+                buckets, asz, bsz = agg_buckets(row, acc_struct, scope)
                 if not buckets:
                     _log.warning(
                         "RatioConstraintBuilder %s: agg row had no overlapping "
@@ -272,11 +217,8 @@ class RatioConstraintBuilder(BaseConstraintBuilder):
                     # num_*/denom_* stay None (no single numerator/denominator edge).
                     # The bucket's region is the row's group key and is carried as a
                     # column, so the cross-year identity never needs the id.
-                    n_b, n_a = len(bk["b_edges"]), len(bk["a_edges"])
-                    pairs.append(Relation(
-                        edges        = np.array(bk["b_edges"] + bk["a_edges"], dtype=np.int64),
-                        coefficients = np.array([1.0] * n_b + [-nominal] * n_a),
-                        type         = TYPE_RATIO,
+                    pairs.append(ratio_relation(
+                        bk["b_edges"], bk["a_edges"], nominal,
                         variant      = variant,
                         specs        = (_safe(bk["region"], field="region"), bk["valuation"]),
                         time         = bk["time"],
@@ -284,7 +226,6 @@ class RatioConstraintBuilder(BaseConstraintBuilder):
                         hard         = hard,
                         sigma        = sigma,
                         scale_mode   = scale_mode,
-                        n_num        = n_b,
                         meta         = {"region": bk["region"]},
                         agg          = True,
                         source       = param_id or "",
@@ -299,10 +240,8 @@ class RatioConstraintBuilder(BaseConstraintBuilder):
                 # edge b (coeff +1) is the numerator; edge a (coeff −r) the denom.
                 num   = _decode_edge(ei_idx, r.b_edge_id)
                 denom = _decode_edge(ei_idx, r.a_edge_id)
-                pairs.append(Relation(
-                    edges        = np.array([r.b_edge_id, r.a_edge_id], dtype=np.int64),
-                    coefficients = np.array([1.0, -nominal]),
-                    type         = TYPE_RATIO,
+                pairs.append(ratio_relation(
+                    [r.b_edge_id], [r.a_edge_id], nominal,
                     variant      = variant,
                     specs        = (
                         render_edge(num["sector_from"], num["region_from"],
@@ -316,7 +255,6 @@ class RatioConstraintBuilder(BaseConstraintBuilder):
                     hard         = hard,
                     sigma        = sigma,
                     scale_mode   = scale_mode,
-                    n_num        = 1,
                     meta         = _ratio_struct_cols(num, denom),
                     source       = param_id or "",
                 ))
@@ -429,7 +367,7 @@ class RatioBoundBuilder(BaseConstraintBuilder):
             variant  = _safe(param_id, field="param_id") if param_id else "bound"
 
             if row.agg:
-                buckets, asz, bsz = _agg_buckets(row, acc_struct, scope)
+                buckets, asz, bsz = agg_buckets(row, acc_struct, scope)
                 if asz == 0 or bsz == 0:
                     _log.warning(
                         "RatioBoundBuilder %s: agg row matched no edges (a=%d b=%d) — skipped",

@@ -28,16 +28,17 @@ from __future__ import annotations
 
 import numpy as np
 
-TYPE_MASSBAL = "massbal"
+from pysuto.relation.relation import (  # noqa: F401  (re-exported)
+    SENSE_EQ, SENSE_LE, TYPE_MASSBAL, TYPE_RATIO,
+)
+
 TYPE_SUM     = "sum"
-TYPE_RATIO   = "ratio"
 TYPE_BOUND   = "bound"
 
 # ``row_meta["sense"]`` is the row's mathematical sense, solver-neutral. ``G`` is
 # pre-flipped so every inequality reads ``G·a ≤ c`` (``bound_dir`` keeps the
 # original direction for audit); hardness is the separate ``is_hard`` column.
-SENSE_EQ = "eq"
-SENSE_LE = "le"
+# (``SENSE_EQ`` / ``SENSE_LE`` are defined with :class:`~pysuto.relation.relation.Relation`.)
 # Const runs persisted before #11 carry Clarabel's cone name as ``cone_type``.
 _LEGACY_CONE_TYPE_TO_SENSE = {"zero": SENSE_EQ, "free": SENSE_EQ, "nonneg": SENSE_LE}
 
