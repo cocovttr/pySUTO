@@ -27,7 +27,7 @@ import numpy as np
 
 from pysuto.logging import get_logger
 
-from .base import _log
+from .base import BaseImputer, _log
 
 logger = get_logger(__name__)
 
@@ -94,12 +94,12 @@ class PriorLedger:
     ) -> bool:
         """
         Write one edge; True when written, False when the edge already held a value
-        or (non-strict) lay outside scope.
+        (checked first, as no-overwrite) or (non-strict) lay outside scope.
         """
+        if not np.isnan(self.f[e]):
+            return False
         if not self._scope[e]:
             self._reject(1, e)
-            return False
-        if not np.isnan(self.f[e]):
             return False
         self.f[e] = val
         self.sigma[e] = sig
@@ -122,10 +122,12 @@ class PriorLedger:
         edges = np.asarray(edges, dtype=np.int64)
         vals = np.asarray(vals, dtype=np.float64)
         sigs = np.asarray(sigs, dtype=np.float64)
+        free = np.isnan(self.f[edges])
         ok = self._scope[edges]
-        if not ok.all():
-            self._reject(int((~ok).sum()), int(edges[~ok][0]))
-        keep = ok & np.isnan(self.f[edges])
+        if not (ok | ~free).all():
+            bad = free & ~ok
+            self._reject(int(bad.sum()), int(edges[bad][0]))
+        keep = ok & free
         if not keep.all():
             edges, vals, sigs = edges[keep], vals[keep], sigs[keep]
             if sources is not None:
@@ -159,11 +161,28 @@ class PriorLedger:
         logger.warning("%s; dropped", msg)
 
 
-def run_imputer(imputer, f, sigma, step, acc, pass_no=None, strict_scope=True):
+def run_imputer(imputer: BaseImputer, f: np.ndarray, sigma: np.ndarray, step: int,
+                acc, pass_no: int | None = None,
+                strict_scope: bool = True) -> list[dict]:
     """
-    Run one prepared imputer once on ``f`` / ``sigma`` (filled in place); return its
-    log entries. The single-imputer entry point of tests and one-off scripts; the
-    engine shares one ledger across all its steps instead.
+    Run one prepared imputer once on ``f`` / ``sigma``; return its log entries.
+
+    The single-imputer entry point of tests and one-off scripts (the engine shares
+    one ledger across its steps). Strict by default, unlike the engine: a script
+    that runs one imputer wants a scope breach to stop it.
+
+    Parameters
+    ----------
+    imputer : BaseImputer
+        Already prepared (and attached, where it needs the aggregation).
+    f, sigma : numpy.ndarray
+        The prior, filled in place.
+    step, pass_no : int
+        Logged on each entry.
+    acc : AccountingStructure
+        Passed to ``imputer.writer_scope`` and ``imputer.impute``.
+    strict_scope : bool
+        Raise :class:`ScopeError` instead of dropping an out-of-scope write.
     """
     ledger = PriorLedger(f, sigma, strict_scope=strict_scope)
     ledger.open(imputer.id, pass_no, imputer.writer_scope(acc))

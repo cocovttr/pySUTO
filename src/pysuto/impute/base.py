@@ -91,7 +91,7 @@ class BaseImputer(ABC):
 
     @abstractmethod
     def impute(self, ledger, step: int, acc_struct) -> None:
-        """Fill edges through ``ledger`` (``ledger.f`` / ``ledger.sigma`` are the prior)."""
+        """Fill edges through ``ledger`` (its ``f`` and ``sigma`` are the prior)."""
 
     @property
     def source_paths(self) -> list[str]:

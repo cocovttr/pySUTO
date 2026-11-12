@@ -210,7 +210,7 @@ class ImputationEngine:
     def _run_one(
         self, imputer, pass_no, ledger, agg_result, log, meta, n_total, run_ts,
     ) -> None:
-        """Run one imputer once: impute, clip, log + record (the ledger stamps provenance)."""
+        """Run one imputer once: impute, clip, log + record."""
         step = self._step
         f = ledger.f
         missing = np.isnan(f)
