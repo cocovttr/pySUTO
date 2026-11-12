@@ -5,7 +5,8 @@ inputs the feed-side algorithms of ``pysuto.feedprep`` are bound to, the raw-ICS
 (usage, intake, production), the observed-zero stamping of the ICSG feed (#76–#97), and the
 **complete ICSG FeedSpec**, ``ICSG_SPEC`` (#147): ``ICSG_FEED`` plus the BACI-trade-share
 weights (ADR 0002 option D; #53's refusal of stale weights) and the observed-zero hook.
-``scripts/icsg_feed.py`` is ``run_feed(ICSG_SPEC)``; so is copper's Stage-1 hook (#109).
+``scripts/icsg_feed.py`` is ``run_feed(ICSG_SPEC)``; copper's Stage-1 hook,
+:func:`run_stage1` (#109), runs the feed builds in their load-bearing order.
 
 Every reader takes the ``InputRegistries`` it resolves from, read-only (#93); nothing here
 reads the working directory.
@@ -13,6 +14,7 @@ reads the working directory.
 Public API
 ----------
 ICSG_SPEC                                         The complete copper ICSG feed
+run_stage1                                        Copper's Stage-1 hook (#109)
 TRADED_SECTORS, SIGNED_SECTORS_TO, ...            The labels the algorithms are bound to
 ORE_GRADE_LABELS                                  The ore-grade triangle's labels
 icsg_raw_usage, icsg_intake_production, icsg_raw_production, production_recipes
@@ -27,12 +29,17 @@ from __future__ import annotations
 import dataclasses
 import glob
 import os
+import subprocess
+import sys
+from datetime import datetime
+from pathlib import Path
 
 import numpy as np
 import pandas as pd
 
-from pysuto.cases.copper import ICSG_FEED, icsg_sector_key
+from pysuto.cases.copper import BACI_FEED, CRUDE_ORE_FEED, ICSG_FEED, icsg_sector_key
 from pysuto.conc import ConcordanceTable
+from pysuto.feedpipe import run_feed
 from pysuto.feedprep.ore_grade import OreGradeLabels
 from pysuto.feedprep.trade_shares import (check_parents_record, decoded_edges,
                                           trade_share_parents as _trade_share_parents)
@@ -633,3 +640,70 @@ def _stamp_feed_observed_zeros(build) -> None:
 # (user_weights) and the observed-zero stamping (post_propagate).
 ICSG_SPEC = dataclasses.replace(ICSG_FEED, user_weights=_trade_share_weights,
                                 post_propagate=_stamp_feed_observed_zeros)
+
+
+# =============================================================================
+# Stage 1 — the hook (#109)
+# =============================================================================
+
+# The registered gross BACI version the re-export netting reads (ADR 0027); the same
+# default as ``scripts/build_baci_reexport.py --source-version``, which refuses an ICSG
+# input parsed against another one (#63).
+BACI_SOURCE_VERSION = 5
+
+_SCRIPTS_DIR = Path(__file__).resolve().parents[3] / "scripts"
+
+
+def _run_script(script: str, *args: str) -> None:
+    """Run ``scripts/<script>`` as a subprocess from the working directory, its output
+    appended to ``logs/<script>.log``; raise ``RuntimeError`` with its tail if it fails."""
+    cmd = [sys.executable, str(_SCRIPTS_DIR / script), *args]
+    os.makedirs("logs", exist_ok=True)
+    log_path = os.path.join("logs", f"{Path(script).stem}.log")
+    _log.info("stage 1: %s", " ".join(cmd[1:]))
+    with open(log_path, "a", encoding="utf-8") as log:
+        rc = subprocess.run(cmd, stdout=log, stderr=subprocess.STDOUT).returncode
+    if rc != 0:
+        with open(log_path, encoding="utf-8", errors="replace") as f:
+            tail = "".join(f.readlines()[-30:])
+        raise RuntimeError(f"stage 1: {script} exited {rc} (log {log_path}):\n{tail}")
+
+
+def run_stage1(data_dir: str) -> "dict[str, str]":
+    """Copper's Stage 1: the feed builds in their load-bearing order (ADR 0024, 0027,
+    0030), from the *registered* inputs of ``data_dir``.
+
+    ``build_baci_reexport --source-version N`` (the gross BACI snapshot vN, never the
+    raw data) -> ``baci_feed`` -> ``build_trade_shares`` -> ``icsg_feed`` ->
+    ``crude_ore_feed``. The BACI parse, the gross registration and ``icsg_clean
+    --to-feed`` read ``data/input/raw`` and stay manual; ``build_ore_grade`` reads the
+    finished feed runs and stays a separate step (the ICSG feed reads its params, so
+    rerunning it here would make them stale against the run). A byte-identical rebuild
+    bumps no input version: the registries version a ``current/`` by its sha256 only.
+    The one input that does change is ``trade_shares``, whose ``parents.json`` names the
+    BACI feed run, so every run of this hook registers a new ``trade_shares`` version.
+
+    The caller holds the stage lock (the pipeline's ``feed`` step does), so the drivers
+    run one at a time. The two ``build_*`` scripts run as subprocesses (their ``main``
+    takes no lock) and the feeds in-process through ``run_feed`` (no lock either); the
+    feed scripts' own ``__main__`` locks would refuse while the caller holds it.
+
+    Returns
+    -------
+    dict
+        ``{feed_id: feed_run_id}`` for ``baci``, ``icsg`` and ``crude_ore``.
+    """
+    data_dir = str(data_dir)
+    _run_script("build_baci_reexport.py", "--source-version", str(BACI_SOURCE_VERSION),
+                "--data-dir", data_dir)
+    run_ids = {}
+
+    def feed(spec) -> None:
+        run_log = os.path.join("logs", f"{spec.feed_id}_{datetime.now():%Y%m%d_%H%M%S}.log")
+        run_ids[spec.feed_id] = run_feed(spec, data_dir=data_dir, run_log=run_log).run_id
+
+    feed(BACI_FEED)
+    _run_script("build_trade_shares.py", "--data-dir", data_dir)
+    feed(ICSG_SPEC)
+    feed(CRUDE_ORE_FEED)
+    return run_ids

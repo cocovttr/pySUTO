@@ -134,6 +134,13 @@ FEED_ID       = BACI_ID
 OUT_DIR       = os.path.join(_INPUT_ROOT, "feed", FEED_ID, "current")
 
 
+def set_data_dir(data_dir: str) -> None:
+    """Point the script at ``data_dir`` instead of ``data`` (the Stage 1 hook, #109)."""
+    global _INPUT_ROOT, OUT_DIR
+    _INPUT_ROOT = os.path.join(data_dir, "input")
+    OUT_DIR     = os.path.join(_INPUT_ROOT, "feed", FEED_ID, "current")
+
+
 # ---------------------------------------------------------------------------
 # I/O helpers
 # ---------------------------------------------------------------------------
@@ -287,4 +294,8 @@ if __name__ == "__main__":
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[1])
     ap.add_argument("--source-version", type=int, default=SOURCE_VERSION,
                     help="registered baci input version to net (default: %(default)s)")
-    main(ap.parse_args().source_version)
+    ap.add_argument("--data-dir", default="data",
+                    help="data root holding input/ (default: %(default)s)")
+    args = ap.parse_args()
+    set_data_dir(args.data_dir)
+    main(args.source_version)

@@ -70,7 +70,7 @@ def main(argv=None) -> int:
                             scripts_dir=str(Path(REPO_ROOT) / "scripts"), case=case.id,
                             data_dir=args.data_dir, config=args.config,
                             stage1=case.stage1)
-    except ValueError as exc:                   # e.g. copper's missing Stage 1 hook (#109)
+    except ValueError as exc:                   # e.g. a case without a Stage 1 hook
         parser.error(str(exc))
     chain = pipeline.run({}, label=args.label or case.id)
     if chain.feed_run_ids:

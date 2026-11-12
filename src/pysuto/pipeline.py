@@ -63,7 +63,7 @@ _log = get_logger("pysuto.pipeline")
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
 # The stages a pipeline sweeps by default, in order (a sweep varies imp, const and opt
-# knobs only), and every step a pipeline can run (#125); a copper feed step is #109.
+# knobs only), and every step a pipeline can run (#125).
 STEPS     = ("imp", "const", "opt")
 ALL_STEPS = ("feed", "imp", "const", "opt", "uncprop", "psut")
 
@@ -172,7 +172,7 @@ class Pipeline:
             raise ValueError("a pipeline needs a base chain for its first step's upstream")
         if "feed" in steps and stage1 is None:
             raise ValueError(f"the feed step is the case's Stage 1 hook, and case "
-                             f"{case or 'copper'!r} declares none yet (#109)")
+                             f"{case or 'copper'!r} declares none")
         if "feed" in steps and data_dir is None:
             raise ValueError("the feed step writes into a data dir; pass data_dir")
         self.steps       = steps
