@@ -65,7 +65,7 @@ SELECTOR_KEYS = tuple(k for k, _, _ in A_FIELDS) + tuple(k for k, _, _ in B_FIEL
 _A_SPEC_KEYS = tuple(k for k, _, _ in A_FIELDS)
 _AGG_TRUE    = {"true", "1", "yes", "y", "t"}
 
-# unc_type → the value columns its σ rule reads
+# the unc_type values with a σ rule (ParamRow.sigma)
 _SIGMA_RULES = ("sd", "min_max", "pedigree")
 _PEDIGREE_COLS = (
     "pedigree_reliability", "pedigree_completeness", "pedigree_temporal_correlation",
