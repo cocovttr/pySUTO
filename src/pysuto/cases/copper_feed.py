@@ -28,6 +28,7 @@ from __future__ import annotations
 
 import dataclasses
 import glob
+import json
 import os
 import subprocess
 import sys
@@ -646,10 +647,26 @@ ICSG_SPEC = dataclasses.replace(ICSG_FEED, user_weights=_trade_share_weights,
 # Stage 1 — the hook (#109)
 # =============================================================================
 
-# The registered gross BACI version the re-export netting reads (ADR 0027); the same
-# default as ``scripts/build_baci_reexport.py --source-version``, which refuses an ICSG
-# input parsed against another one (#63).
-BACI_SOURCE_VERSION = 5
+def baci_source_version(data_dir: str) -> int:
+    """The registered gross BACI version the re-export netting reads (ADR 0027): the one
+    the ICSG input of ``data_dir`` was parsed against, as its ``parents.json`` records it
+    (``icsg_clean --baci-version N --to-feed``). ``build_baci_reexport`` refuses any
+    other (#63), so the hook reads the record instead of pinning a number.
+
+    Raises
+    ------
+    ValueError
+        If the ICSG input records no BACI version.
+    """
+    path = os.path.join(str(data_dir), "input", "feed", "icsg", "current", "parents.json")
+    if not os.path.isfile(path):
+        raise ValueError(f"stage 1: {path} is missing — the ICSG input records no BACI "
+                         "version; run icsg_clean --baci-version N --to-feed first")
+    with open(path, encoding="utf-8") as f:
+        version = json.load(f).get("inputs", {}).get("feed", {}).get("baci")
+    if version is None:
+        raise ValueError(f"stage 1: {path} names no baci version")
+    return int(version)
 
 _SCRIPTS_DIR = Path(__file__).resolve().parents[3] / "scripts"
 
@@ -673,8 +690,8 @@ def run_stage1(data_dir: str) -> "dict[str, str]":
     """Copper's Stage 1: the feed builds in their load-bearing order (ADR 0024, 0027,
     0030), from the *registered* inputs of ``data_dir``.
 
-    ``build_baci_reexport --source-version N`` (the gross BACI snapshot vN, never the
-    raw data) -> ``baci_feed`` -> ``build_trade_shares`` -> ``icsg_feed`` ->
+    ``build_baci_reexport --source-version N`` (the gross BACI snapshot vN the ICSG input
+    was parsed against, never the raw data) -> ``baci_feed`` -> ``build_trade_shares`` -> ``icsg_feed`` ->
     ``crude_ore_feed``. The BACI parse, the gross registration and ``icsg_clean
     --to-feed`` read ``data/input/raw`` and stay manual; ``build_ore_grade`` reads the
     finished feed runs and stays a separate step (the ICSG feed reads its params, so
@@ -694,8 +711,8 @@ def run_stage1(data_dir: str) -> "dict[str, str]":
         ``{feed_id: feed_run_id}`` for ``baci``, ``icsg`` and ``crude_ore``.
     """
     data_dir = str(data_dir)
-    _run_script("build_baci_reexport.py", "--source-version", str(BACI_SOURCE_VERSION),
-                "--data-dir", data_dir)
+    _run_script("build_baci_reexport.py", "--source-version",
+                str(baci_source_version(data_dir)), "--data-dir", data_dir)
     run_ids = {}
 
     def feed(spec) -> None:

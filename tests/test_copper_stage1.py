@@ -6,6 +6,7 @@ leave every input version alone, is checked on a toy feed input.
 """
 from __future__ import annotations
 
+import json
 import os
 from types import SimpleNamespace
 
@@ -29,12 +30,18 @@ def calls(monkeypatch):
     return log
 
 
+def _icsg_parents(root, baci_version):
+    d = root / "input" / "feed" / "icsg" / "current"
+    d.mkdir(parents=True, exist_ok=True)
+    (d / "parents.json").write_text(json.dumps({"inputs": {"feed": {"baci": baci_version}}}))
+
+
 def test_the_hook_runs_the_load_bearing_order_on_the_given_data_dir(calls, tmp_path):
+    _icsg_parents(tmp_path, 28)
     ids = copper_feed.run_stage1(str(tmp_path))
     d = str(tmp_path)
     assert calls == [
-        ("script", "build_baci_reexport.py",
-         ("--source-version", str(copper_feed.BACI_SOURCE_VERSION), "--data-dir", d)),
+        ("script", "build_baci_reexport.py", ("--source-version", "28", "--data-dir", d)),
         ("feed", "baci", d),
         ("script", "build_trade_shares.py", ("--data-dir", d)),
         ("feed", "icsg", d),
@@ -46,6 +53,7 @@ def test_the_hook_runs_the_load_bearing_order_on_the_given_data_dir(calls, tmp_p
 
 def test_copper_declares_the_hook_and_feed_start_reaches_it(calls, tmp_path, capsys):
     from pysuto.__main__ import main
+    _icsg_parents(tmp_path, 28)
     assert copper.CASE.stage1 is not None
     assert main(["run", "--case", "copper", "--from", "feed", "--to", "feed",
                  "--data-dir", str(tmp_path)]) == 0
@@ -76,10 +84,14 @@ def test_the_build_scripts_take_a_data_dir(tmp_path, monkeypatch):
     assert T.ACC_DIR == str(tmp_path / "proc" / "acc")
 
 
-def test_the_hook_nets_the_same_baci_version_as_the_script_default(monkeypatch):
-    monkeypatch.syspath_prepend(os.path.join(os.path.dirname(__file__), "..", "scripts"))
-    import build_baci_reexport as R
-    assert copper_feed.BACI_SOURCE_VERSION == R.SOURCE_VERSION
+def test_the_hook_nets_the_baci_version_the_icsg_input_was_parsed_against(tmp_path):
+    _icsg_parents(tmp_path, 28)
+    assert copper_feed.baci_source_version(str(tmp_path)) == 28
+
+
+def test_the_hook_refuses_an_icsg_input_that_records_no_baci_version(tmp_path):
+    with pytest.raises(ValueError, match="records no BACI version"):
+        copper_feed.baci_source_version(str(tmp_path))
 
 
 def test_a_byte_identical_rebuild_of_a_feed_input_bumps_no_version(tmp_path):
