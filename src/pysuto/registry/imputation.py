@@ -17,6 +17,10 @@ import pandas as pd
 from ._sidecar import _now_iso, build_sidecar
 from .base import BaseOutputRegistry
 
+# The imputer id the last-resort filler carried in every run written before #137 stored
+# the flat_prior flag; ``load`` derives the flag from those log rows.
+LEGACY_FLAT_PRIOR_ID = "flat_prior"
+
 
 class ImputationRunRegistry(BaseOutputRegistry):
     """Stage-2 registry.
@@ -180,6 +184,14 @@ class ImputationRunRegistry(BaseOutputRegistry):
         )
         if "flat_prior" in data.files:
             result.flat_prior = data["flat_prior"].astype(bool)
+        elif os.path.exists(log_path) and LEGACY_FLAT_PRIOR_ID in set(df["imputer_id"]):
+            # A run written before #137 stores no flag; its log records which edges the
+            # last-resort filler wrote, which is exactly what the flag means. Every such
+            # run (copper, toy) gave that filler the id "flat_prior".
+            flat = np.zeros(len(result.f_agg), dtype=bool)
+            flat[df.loc[df["imputer_id"] == LEGACY_FLAT_PRIOR_ID, "edge_id"]
+                 .to_numpy(dtype=np.int64)] = True
+            result.flat_prior = flat
         result.imputation_log = log_obj
         result._imp_run_id    = run_id
         return result
