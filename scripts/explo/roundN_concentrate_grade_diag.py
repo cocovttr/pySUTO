@@ -42,7 +42,7 @@ sys.path.insert(0, "scripts")
 from pysuto.acc import AccountingStructure                      # noqa: E402
 from pysuto.config import load_config                           # noqa: E402
 from pysuto.input_registry import InputRegistries               # noqa: E402
-from pysuto.param_relation import expand_edge_index             # noqa: E402
+from pysuto.relation.param_relation import expand_edge_index             # noqa: E402
 from build_baci_reexport import (                               # noqa: E402
     HUB_EXCLUDE, _conc_lookup, _source_dir, icsg_intake_production,
     load_root_trade, screened_origins,

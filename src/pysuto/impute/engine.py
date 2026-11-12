@@ -18,7 +18,7 @@ import pandas as pd
 
 from pysuto.agg import AggregationResult
 from pysuto.logging import get_logger
-from pysuto.param_relation import get_edge_cache
+from pysuto.relation.param_relation import get_edge_cache
 
 from .base import BaseImputer
 

@@ -4,7 +4,7 @@ The project's single glossary. Glossary only — no implementation details.
 
 Pick the bold term; the listed `_Avoid_` aliases are ambiguous and should not be used.
 Definitions are code-verified against [acc.py](src/pysuto/acc.py),
-[conc.py](src/pysuto/conc.py), [param_relation.py](src/pysuto/param_relation.py), and
+[conc.py](src/pysuto/conc.py), [relation/](src/pysuto/relation/), and
 [constraints/](src/pysuto/constraints/).
 
 ## Domain vocabulary
@@ -897,7 +897,7 @@ tonnage and returns values (0.6–0.9, and negatives elsewhere) that are not gra
 **Grade band vs grade σ.** A `conc`-family params row's `value_min`/`value_max` are read **twice**:
 as a **hard cone** by `RatioBoundBuilder` (`value_min·Mass ≤ CC ≤ value_max·Mass`, per edge per
 year — a physical plausibility limit, no slack) and, when `unc_type = "min_max"`, as the **σ** of the
-*soft* ratio row via `sigma_from_row` — which also sets the `ParametricImputer` prior and the
+*soft* ratio row via `ParamRow.sigma` — which also sets the `ParametricImputer` prior and the
 `NetworkImputer` twin-map σ. Those are two different statements, and conflating them means changing
 a limit silently re-prices three things. The `ore_grade` grade rows therefore carry
 `unc_type = "sd"` with an explicit `value_sd` (ADR 0028); tailings rows still use `min_max`. The

@@ -469,7 +469,7 @@ def main(argv: list) -> None:
     E = {lab: e[e.valuation == "CC"] for lab, e in E.items()}
     from pysuto.acc import AccountingStructure
     from pysuto.config import load_config
-    from pysuto.param_relation import expand_edge_index
+    from pysuto.relation.param_relation import expand_edge_index
     acc = AccountingStructure.load(id=load_config().pipeline.acc_id, storage_dir=ROOT / "acc")
     ei = expand_edge_index(acc.edge_index, acc.node_index)
     stage2_attribution(runs, ei)

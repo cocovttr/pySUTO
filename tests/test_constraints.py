@@ -716,7 +716,7 @@ class TestRatioConstraintBuilder:
         path = tmp_path / "params.csv"
         with open(path, "w", newline="") as f:
             w = csv.DictWriter(f, fieldnames=[
-                "param_id",
+                "param_id", "param_type",
                 "a_sector_from", "a_entity_from", "a_region_from",
                 "a_sector_to",   "a_entity_to",   "a_region_to",
                 "a_time",        "a_valuation",
@@ -729,7 +729,7 @@ class TestRatioConstraintBuilder:
             ])
             w.writeheader()
             w.writerow({
-                "param_id":       "testratio",
+                "param_type": "concentration", "param_id":       "testratio",
                 "a_sector_from":  "Mining", "a_entity_from": "Process", "a_region_from": "A",
                 "a_sector_to":    "Ore",    "a_entity_to":   "Flow",    "a_region_to":   "A",
                 "a_time":         "2020",   "a_valuation":   "Mass",
@@ -778,7 +778,7 @@ class TestRatioConstraintBuilder:
         path = str(tmp_path / "p2.csv")
         with open(path, "w", newline="") as f:
             w = csv.DictWriter(f, fieldnames=[
-                "param_id",
+                "param_id", "param_type",
                 "a_sector_from", "a_entity_from", "a_region_from",
                 "a_sector_to",   "a_entity_to",   "a_region_to",
                 "a_time",        "a_valuation",
@@ -791,7 +791,7 @@ class TestRatioConstraintBuilder:
             ])
             w.writeheader()
             w.writerow({
-                "param_id":       "mmratio",
+                "param_type": "concentration", "param_id":       "mmratio",
                 "a_sector_from":  "Mining", "a_entity_from": "Process", "a_region_from": "A",
                 "a_sector_to":    "Ore",    "a_entity_to":   "Flow",    "a_region_to":   "A",
                 "a_time":         "2020",   "a_valuation":   "Mass",
@@ -830,7 +830,7 @@ class TestRatioConstraintBuilder:
         path = tmp_path / "agg.csv"
         with open(path, "w", newline="") as f:
             w = csv.DictWriter(f, fieldnames=[
-                "param_id", "agg",
+                "param_id", "param_type", "agg",
                 "a_sector_from", "a_entity_from", "a_region_from",
                 "a_sector_to",   "a_entity_to",   "a_region_to", "a_time", "a_valuation",
                 "b_sector_from", "b_entity_from", "b_region_from",
@@ -840,7 +840,7 @@ class TestRatioConstraintBuilder:
             ])
             w.writeheader()
             w.writerow({
-                "param_id": "aggeff", "agg": "true",
+                "param_type": "efficiency", "param_id": "aggeff", "agg": "true",
                 "a_sector_from": "*", "a_entity_from": "*", "a_region_from": "*",
                 "a_sector_to": "Mining", "a_entity_to": "Process", "a_region_to": "*",
                 "a_time": "*", "a_valuation": "Mass",
@@ -1201,7 +1201,7 @@ class TestRatioBoundBuilder:
         path = tmp_path / "bound_params.csv"
         with open(path, "w", newline="") as f:
             w = csv.DictWriter(f, fieldnames=[
-                "param_id",
+                "param_id", "param_type",
                 "a_sector_from", "a_entity_from", "a_region_from",
                 "a_sector_to",   "a_entity_to",   "a_region_to",
                 "a_time",        "a_valuation",
@@ -1214,7 +1214,7 @@ class TestRatioBoundBuilder:
             ])
             w.writeheader()
             w.writerow({
-                "param_id":       "boundtest",
+                "param_type": "concentration", "param_id":       "boundtest",
                 "a_sector_from":  "Mining", "a_entity_from": "Process", "a_region_from": "A",
                 "a_sector_to":    "Ore",    "a_entity_to":   "Flow",    "a_region_to":   "A",
                 "a_time":         "2020",   "a_valuation":   "Mass",
@@ -1325,7 +1325,7 @@ class TestRatioBoundBuilder:
         path = tmp_path / "two_bound_params.csv"
         with open(path, "w", newline="") as f:
             w = csv.DictWriter(f, fieldnames=[
-                "param_id",
+                "param_id", "param_type",
                 "a_sector_from", "a_entity_from", "a_region_from",
                 "a_sector_to",   "a_entity_to",   "a_region_to",
                 "a_time",        "a_valuation",
@@ -1337,7 +1337,7 @@ class TestRatioBoundBuilder:
             w.writeheader()
             for pid, (bl, bu) in (("classlo", b1), ("classhi", b2)):
                 w.writerow({
-                    "param_id":      pid,
+                    "param_type": "concentration", "param_id":      pid,
                     "a_sector_from": "Mining", "a_entity_from": "Process", "a_region_from": "A",
                     "a_sector_to":   "Ore",    "a_entity_to":   "Flow",    "a_region_to":   "A",
                     "a_time":        "2020",   "a_valuation":   "Mass",
@@ -1393,7 +1393,7 @@ class TestRatioBoundBuilder:
         path = tmp_path / "stock_bound.csv"
         with open(path, "w", newline="") as f:
             w = csv.DictWriter(f, fieldnames=[
-                "param_id", "agg",
+                "param_id", "param_type", "agg",
                 "a_sector_from", "a_entity_from", "a_region_from",
                 "a_sector_to", "a_entity_to", "a_region_to", "a_time", "a_valuation",
                 "b_sector_from", "b_entity_from", "b_region_from",
@@ -1402,7 +1402,7 @@ class TestRatioBoundBuilder:
             ])
             w.writeheader()
             w.writerow({
-                "param_id": "netstockboundtest", "agg": "true",
+                "param_type": "stock_bound", "param_id": "netstockboundtest", "agg": "true",
                 # a-side = DENOMINATOR (Mining→Ore)
                 "a_sector_from": "Mining", "a_entity_from": "Process", "a_region_from": "A",
                 "a_sector_to": "Ore", "a_entity_to": "Flow", "a_region_to": "A",
@@ -1687,7 +1687,7 @@ class TestConstraintEngine:
         csv_path = "/tmp/test_multi_bound.csv"
         with open(csv_path, "w", newline="") as f:
             w = csv.DictWriter(f, fieldnames=[
-                "param_id",
+                "param_id", "param_type",
                 "a_sector_from", "a_entity_from", "a_region_from",
                 "a_sector_to",   "a_entity_to",   "a_region_to",
                 "a_time",        "a_valuation",
@@ -1699,7 +1699,7 @@ class TestConstraintEngine:
             ])
             w.writeheader()
             w.writerow({
-                "param_id": "mb",
+                "param_type": "concentration", "param_id": "mb",
                 "a_sector_from": "Mining", "a_entity_from": "Process", "a_region_from": "A",
                 "a_sector_to":   "Ore",    "a_entity_to":   "Flow",    "a_region_to":   "A",
                 "a_time": "2020", "a_valuation": "Mass",
@@ -1789,7 +1789,7 @@ class TestRatioPerTimestepDeactivation:
         path = tmp_path / name
         with open(path, "w", newline="") as f:
             w = csv.DictWriter(f, fieldnames=[
-                "param_id",
+                "param_id", "param_type",
                 "a_sector_from", "a_entity_from", "a_region_from",
                 "a_sector_to",   "a_entity_to",   "a_region_to",
                 "a_time",        "a_valuation",
@@ -1802,7 +1802,7 @@ class TestRatioPerTimestepDeactivation:
             ])
             w.writeheader()
             w.writerow({
-                "param_id":       "test",
+                "param_type": "concentration", "param_id":       "test",
                 "a_sector_from":  "Mining", "a_entity_from": "Process", "a_region_from": "A",
                 "a_sector_to":    "Ore",    "a_entity_to":   "Flow",    "a_region_to":   "A",
                 "a_time":         "*",      "a_valuation":   "Mass",
@@ -2246,7 +2246,7 @@ class TestSupplyUseScaleTotal:
 
     @staticmethod
     def _masks(acc):
-        from pysuto.param_relation import expand_edge_index
+        from pysuto.relation.param_relation import expand_edge_index
         ei = expand_edge_index(acc.edge_index, acc.node_index)
         supply = (ei["entity_from"].eq("Process") & ei["entity_to"].eq("Flow")).to_numpy()
         use    = ei["entity_from"].eq("Flow").to_numpy()
@@ -2307,7 +2307,7 @@ class TestSupplyUseScaleTotal:
         """A flow used by a process AND by final demand → one row whose c sums
         BOTH outgoing edges (use + flow→SB final demand)."""
         from pysuto.constraints import SumConstraintBuilder
-        from pysuto.param_relation import expand_edge_index
+        from pysuto.relation.param_relation import expand_edge_index
         acc   = _make_fd_acc()
         f_agg = np.array([10.0, 6.0, 4.0])     # supply, use, final demand
         ei    = expand_edge_index(acc.edge_index, acc.node_index)
@@ -2452,7 +2452,7 @@ class TestScrapLevelAnchor:
     @staticmethod
     def _masks(acc, cov):
         """Rebuild the driver's two masks so this test tracks constraints.py."""
-        from pysuto.param_relation import expand_edge_index
+        from pysuto.relation.param_relation import expand_edge_index
         ei = expand_edge_index(acc.edge_index, acc.node_index)
         scrap_cc = ((ei["sector_from"].eq("Scrap")
                      & ei["valuation"].eq("CC")).to_numpy() & cov)

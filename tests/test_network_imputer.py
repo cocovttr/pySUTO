@@ -185,7 +185,7 @@ _COLS = [
 
 def _row(**kw):
     r = {c: "*" for c in _COLS}
-    r.update(param_type="x", description="", unc_type="sd", value_sd="0.001",
+    r.update(param_type="concentration", description="", unc_type="sd", value_sd="0.001",
              value_min="", value_max="", epsilon="0")
     r.update(kw)
     return r
@@ -864,7 +864,7 @@ def test_region_resolved_grade_overlay_twin_map(tmp_path):
     """Region/time-resolved ore_grade rows overlay the global conc twin map
     per edge (most-specific wins), leaving un-overlaid sectors on the global
     value — the mechanism that makes CO/Ore Mass twins region×year-aware."""
-    from pysuto.param_relation import (
+    from pysuto.relation.param_relation import (
         ParamRelationResolver, conc_twin_map, get_edge_cache,
     )
 

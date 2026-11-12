@@ -38,7 +38,7 @@ from pysuto.impute import (
 )
 
 # Lp combiner unit tests live in tests/test_lp.py.
-# sigma_from_row unit tests live in tests/test_param_relation.py.
+# ParamRow.sigma unit tests live in tests/test_relation_params.py.
 
 
 # =============================================================================
@@ -69,32 +69,6 @@ class TestRegSensitivity:
 
     def test_zero_alpha_returns_zero(self):
         assert _reg_sensitivity(0.0, q=3.0, alpha_min=0.05) == 0.0
-
-
-# =============================================================================
-# ParametricImputer consumed-set selection
-# =============================================================================
-
-class TestParametricConsumes:
-    """ParametricImputer must not build per-pair fills from pooled (agg) rows
-    or the stripping_ratio family — those are owned by NetworkImputer + the
-    ratio constraint builders. Guards against a spurious Scrap = Matte/eff fill
-    once Smelting/CFR eff rows are broadened to a_sector_from=*."""
-
-    def test_skips_agg_rows(self):
-        from pysuto.impute.parametric import _parametric_consumes
-        for v in ("true", "True", "1", "yes", "y", "t"):
-            assert _parametric_consumes({"agg": v}) is False
-
-    def test_skips_stripping_ratio(self):
-        from pysuto.impute.parametric import _parametric_consumes
-        assert _parametric_consumes({"param_type": "stripping_ratio"}) is False
-
-    def test_consumes_plain_efficiency_and_concentration(self):
-        from pysuto.impute.parametric import _parametric_consumes
-        assert _parametric_consumes({"agg": "", "param_type": "efficiency"}) is True
-        assert _parametric_consumes({"param_type": "concentration"}) is True
-        assert _parametric_consumes({}) is True
 
 
 # =============================================================================
@@ -1225,7 +1199,7 @@ class TestTimeImputer:
         assert "time_linear" in methods
 
 
-# sigma_from_row unit tests live in tests/test_param_relation.py.
+# ParamRow.sigma unit tests live in tests/test_relation_params.py.
 
 
 # =============================================================================
@@ -1870,7 +1844,7 @@ class _TradeAcc:
 
 def _same_region_scope(acc):
     """The mask the Stage-2 driver builds for TIME_SCOPE_SAME_REGION."""
-    from pysuto.param_relation import expand_edge_index
+    from pysuto.relation.param_relation import expand_edge_index
     ei = expand_edge_index(acc.edge_index, acc.node_index)
     return (ei["region_from"].to_numpy() == ei["region_to"].to_numpy())
 
@@ -1915,7 +1889,7 @@ class TestTimeInterpScopeExcludesStockLegs:
              "region": ["A",       "A",  "A"]},
             index=[0, 1, 2],
         )
-        from pysuto.param_relation import expand_edge_index
+        from pysuto.relation.param_relation import expand_edge_index
         ei = expand_edge_index(acc.edge_index, acc.node_index)
         scope = _load_driver().time_interp_scope(ei, True, ("MESC", "USC"),
                                                   logging.getLogger("test"))

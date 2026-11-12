@@ -578,7 +578,7 @@ _PARAM_COLUMNS = [
     "value_nominal", "unc_type", "value_sd", "value_min", "value_max",
     "pedigree_reliability", "pedigree_completeness", "pedigree_temporal_correlation",
     "pedigree_geographical_correlation", "pedigree_other_correlation",
-    "epsilon", "bound_lower", "bound_upper", "source", "comment",
+    "epsilon", "source", "comment",
 ]
 _SOURCE = "pysuto.cases.toy: a synthetic case; its ground truth uses this nominal value"
 
@@ -635,8 +635,8 @@ def write_params(params_dir: PathLike) -> "dict[str, Path]":
             description=f"orium content of {sector} ({entity}) on the edges "
                         f"{'into' if edges == 'into' else 'out of'} it, "
                         f"{'every region' if region == '*' else region}",
-            value_nominal=value, unc_type="sd", value_sd=sd, bound_lower=0,
-            bound_upper=1, **_a_b(a, same_content)))
+            value_nominal=value, unc_type="sd", value_sd=sd,
+            **_a_b(a, same_content)))
     eff = []
     for pid, agg, inp, process, product, value, lo, hi in _EFF_ROWS:
         entity = "*" if inp == "*" else _ENTITY[inp]
@@ -645,7 +645,6 @@ def write_params(params_dir: PathLike) -> "dict[str, Path]":
             description=f"orium recovery of {process}: {inp} in, {product} out"
                         + (" (pooled inputs, scrap included)" if agg else ""),
             value_nominal=value, unc_type="min_max", value_min=lo, value_max=hi,
-            bound_lower=0, bound_upper=1,
             **_a_b((inp, entity, "*", process, "Process", "same", "*", CONTENT),
                    (process, "Process", "same", product, "Flow", "same", "same",
                     "same"))))

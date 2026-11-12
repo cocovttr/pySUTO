@@ -25,7 +25,7 @@ cross-region traded imports are read as boundary terms but never written (BACI /
 ICSG own those — see ADR 0002). The flow balance may close a same-region final-demand
 leg no feed covers (ADR 0040); it never writes a stock-change leg, and a fan's
 observed zero (#76) is covered, so it is never written either. eff/conc are resolved with
-the same :class:`~pysuto.param_relation.ParamRelationResolver` the constraint
+the same :class:`~pysuto.relation.param_relation.ParamRelationResolver` the constraint
 builders use, so the emitted CC/Mass twins satisfy ``conc_*_supply``/``_use`` by
 construction (generalising ADR 0002 option D to the whole chain).
 """
@@ -35,23 +35,26 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 import numpy as np
-import pandas as pd
 
 from pysuto.acc import BoundaryRole, boundary_role_values
 from pysuto.logging import get_logger
 from pysuto.lp import lp_combine
-from pysuto.param_relation import (
+from pysuto.relation.param_relation import (
     ParamRelationResolver,
     conc_twin_map,
-    float_or,
     get_edge_cache,
-    sigma_from_row,
 )
+from pysuto.relation.params import read_params
 
 from .base import BaseImputer, _apply_cv_cap, _log
 from .parametric import _reg_sensitivity
 
 logger = get_logger(__name__)
+
+# The param_types NetworkImputer reads from its eff and stripping_ratio files; the conc
+# and ore_grade files are read by conc_twin_map (concentration).
+EFF_ACCEPTS       = frozenset({"efficiency"})
+STRIPPING_ACCEPTS = frozenset({"stripping_ratio"})
 
 _EPS = 1e-12  # guard for divisions by (1−eff) when eff≈1
 _SECONDARY = BoundaryRole.SECONDARY.value  # the residual-output / secondary-input role
@@ -278,30 +281,16 @@ class NetworkImputer(BaseImputer):
         # Flow-node CC balances: (incoming supply edges, outgoing use edges)
         self._flow_nodes = self._build_flow_balances(acc)
 
-    @staticmethod
-    def _read_params(path, param_type) -> pd.DataFrame:
-        """The rows of one ``param_type`` from a params CSV, comment rows dropped."""
-        df = pd.read_csv(path, sep=None, engine="python", comment="#", dtype=str)
-        df = df.dropna(subset=["param_id"])
-        df = df[~df["param_id"].str.startswith("#")]
-        return df[df["param_type"].astype(str).str.strip() == param_type]
-
     def _load_eff_map(self, path, resolver) -> dict:
         # Recovery-efficiency rows only: any other process ratio (the stripping
         # ratio, a Mass output ratio with its own file since ADR 0038) must not
-        # pollute the eff map. Filter by param_type, not by a magic param_id.
-        df = self._read_params(path, "efficiency")
+        # pollute the eff map. Filtered by declared param_type, not by a magic param_id.
         best: dict[int, tuple] = {}  # product_cc -> (eff, σ, ε, param_id, specificity)
-        for _, row in df.iterrows():
-            try:
-                nominal = float(row["value_nominal"])
-                sig = sigma_from_row(row, nominal)
-            except Exception as exc:  # noqa: BLE001
-                logger.warning("eff map %s: row %s skipped (%s)",
-                               path, row.get("param_id"), exc)
-                continue
-            eps = float_or(row.get("epsilon"), 0.0)
-            pid = str(row["param_id"])
+        for row in read_params(path, EFF_ACCEPTS):
+            nominal = row.require_nominal()
+            sig = row.sigma()
+            eps = row.epsilon
+            pid = row.param_id
             for rr in resolver.resolve_row(row):
                 prod = rr.b_edge_id  # B-side = process→product (the recovered output)
                 if prod not in best or rr.specificity > best[prod][4]:
@@ -310,8 +299,8 @@ class NetworkImputer(BaseImputer):
 
     def _load_stripping(self, path, resolver) -> list[_Stripping]:
         best: dict[int, tuple[_Stripping, int]] = {}  # WR Mass edge -> (rel, specificity)
-        for _, row in self._read_params(path, "stripping_ratio").iterrows():
-            k, pid = float(row["value_nominal"]), str(row["param_id"])
+        for row in read_params(path, STRIPPING_ACCEPTS):
+            k, pid = row.require_nominal(), row.param_id
             for rr in resolver.resolve_row(row):
                 wr = rr.b_edge_id  # B-side = Mining→WR Mass, A-side = Mining→Ore Mass
                 if wr not in best or rr.specificity > best[wr][1]:

@@ -168,7 +168,7 @@ LAYERED MODULE STACK   (imports flow downward only — never upward)
        │
        ▼  imports
 ┌────────────────────────────────────────────────────────────────┐
-│  domain  ·  acc → conc → unc (mixin) · masks · param_relation  │
+│  domain  ·  acc → conc → unc (mixin) · masks · relation        │
 │          ·  flow_node_balance (St2–St3 prior check)            │
 └──────┬─────────────────────────────────────────────────────────┘
        │
@@ -943,7 +943,8 @@ world.to_piot().sankey("2020").write_html("copper_process_network_2020.html")
 | [config.py](src/pysuto/config.py) | `load_config`, `Config`, `PipelineConfig` | Typed loader for `config/config.yaml` (`pipeline.acc_id` only). |
 | [lp.py](src/pysuto/lp.py) | `lp_combine` | The Lp / power-mean σ combiner `(Σ \|x_i\|^p)^(1/p)`, one source of truth for Stages 1–3. |
 | [masks.py](src/pysuto/masks.py) | `MaskRuleSet`, `coerce_mask`, `load_masks_csv` | Named boolean edge masks over an `AccountingStructure` (flat-prior CV ranges, builder scope, feed `edge_scope_mask`). |
-| [param_relation.py](src/pysuto/param_relation.py) | `ParamRelationResolver`, `ResolvedRelation`, `expand_edge_index`, `sigma_from_row` | The params-CSV A→B relation resolver (selectors, `*` / `same` wildcards, σ from a row), shared by Stage 2 (`ParametricImputer.from_csv`) and Stage 3 (`RatioConstraintBuilder` / `RatioBoundBuilder.from_csv`). |
+| [relation/params.py](src/pysuto/relation/params.py) | `ParamRow`, `read_params`, `WILDCARD`, `A_FIELDS`, `B_FIELDS` | The one reader of the params CSVs (#128): `read_params(path, accepts)` parses with a single policy (sniffed delimiter, `dtype=str`, `#` comments) into frozen, typed `ParamRow`s (`agg` as a bool, `sigma()` from `unc_type`, `specificity`); each consumer declares an `ACCEPTS` set of `param_type`s, other rows are filtered and counted in the log, a malformed accepted row raises, and a soft row with no σ rule raises. `constraints/sum.py` reads another schema and stays. |
+| [relation/param_relation.py](src/pysuto/relation/param_relation.py) | `ParamRelationResolver`, `ResolvedRelation`, `expand_edge_index`, `conc_twin_map`, `conc_nominal_lookup` | The A→B relation resolver over a `ParamRow` (selectors, `*` / `same` wildcards), shared by Stage 2 (`ParametricImputer.from_csv`) and Stage 3 (`RatioConstraintBuilder` / `RatioBoundBuilder.from_csv`). |
 | [flow_node_balance.py](src/pysuto/flow_node_balance.py) | `flow_node_balance`, `contradicted_flow_nodes` | Detects a contradicted flow node — inflow and outflow priors that disagree — for the Stage 2 and Stage 3 drivers; detection only, the policy is the caller's ([ADR 0019](docs/adr/0019-contradicted-flow-nodes-lose-anchor-authority.md)). |
 | [collector.py](src/pysuto/collector.py) | `FeedCollector` | Select feeds, align onto common edge index, produce `AggregationResult`. |
 | [agg.py](src/pysuto/agg.py) | `AggregationMath`, `AggregationResult` | Build `Ω`, compute `f_agg`, `σ_agg`, coverage. |
@@ -1384,7 +1385,8 @@ pysuto/
 ├── config.py              load_config  (config.yaml: pipeline.acc_id)      │
 ├── lp.py                  lp_combine  (Lp / power-mean σ combiner)         │
 ├── masks.py               MaskRuleSet · coerce_mask · load_masks_csv       │
-├── param_relation.py      ParamRelationResolver · expand_edge_index        │
+├── relation/              params.py (ParamRow · read_params)               │
+│                          param_relation.py (ParamRelationResolver)        │
 ├── flow_node_balance.py   contradicted_flow_nodes  (St2–St3 check)         │
 ├── utils.py               _NpEncoder · io helpers                          │
 ├── logging.py             structured run logging                          ─┘
@@ -1451,6 +1453,7 @@ acc  →  conc  →  feed  →  feedpipe
 input_registry ←  acc, solver, psut        (imports nothing from acc; acc.py holds the version checks)
 unc  ───────────────────────────────  (mixin, no upward imports)
 meta  →  registry
+acc  →  relation  →  impute  →  constraints   (relation: the params reader `read_params` and the A→B resolver; imports only logging and unc)
 collector  →  agg  →  impute  →  constraints  →  solver  →  uncprop
 _conditioning  ←  solver, uncprop          (shared σ-conditioning helper)
 knobs          ←  the stage drivers        (the --set / --run-id-file protocol)
@@ -1489,6 +1492,8 @@ Each layer has a dedicated test file in `tests/`. There is no `conftest.py`: fix
 | [test_imputation.py](tests/test_imputation.py) | ParametricImputer, TimeImputer, FlatPriorImputer; log completeness; σ propagation; pipeline chaining |
 | [test_network_imputer.py](tests/test_network_imputer.py) | NetworkImputer recipe closure, flow-balance, Ore split, stripping ratio, conc-by-construction twins; bilateral_import gate + flow-balance cross-region-as-0 ([ADR 0010](docs/adr/0010-trade-first-seeding-of-bilateral-flow-process-inputs.md)) |
 | [test_trade_imputer.py](tests/test_trade_imputer.py) | TradeImputer cross-region CC trade-seed + trade→network handoff reviving ER→CER→CP; ownership-partition diagnostic |
+| [test_relation_params.py](tests/test_relation_params.py) | The one params reader (#128): `;` and `,` files parse equal, comment rows skipped, foreign `param_type` filtered by declaration, malformed value raises, a soft row without a σ rule raises |
+| [test_param_relation.py](tests/test_param_relation.py) | `ParamRelationResolver` over `ParamRow`s: specificity, wildcards, `same`, edge cache, conc lookup |
 | [test_constraints.py](tests/test_constraints.py) | All five constraint builders; `G` time-invariance; `ConstraintRunRegistry` round-trip |
 | [test_solver.py](tests/test_solver.py) | Clarabel transform, feasibility pre-check, warm-start, per-timestep solve |
 | [test_solver_diag.py](tests/test_solver_diag.py) | `SolverDiag` 12-figure portfolio smoke test (toy placeholders + block run with real edges), `regions=` filter, `compare()`, worst-Σz² year |

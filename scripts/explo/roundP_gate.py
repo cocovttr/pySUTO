@@ -28,7 +28,7 @@ def main(const: str) -> int:
     sys.path.insert(0, "src")
     from pysuto.acc import AccountingStructure
     from pysuto.config import load_config
-    from pysuto.param_relation import expand_edge_index
+    from pysuto.relation.param_relation import expand_edge_index
     acc = AccountingStructure.load(id=load_config().pipeline.acc_id,
                                    storage_dir=str(ROOT / "acc"))
     ei = expand_edge_index(acc.edge_index, acc.node_index)

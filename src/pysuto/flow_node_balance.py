@@ -29,7 +29,7 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 
-from .param_relation import expand_edge_index
+from .relation.param_relation import expand_edge_index
 
 # Outflow below this fraction of inflow ⇒ the node's priors are contradicted.
 K_CLOSE = 0.5

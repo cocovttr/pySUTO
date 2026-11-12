@@ -35,7 +35,7 @@ sys.path.insert(0, "src")
 sys.path.insert(0, "scripts/explo")
 from pysuto.acc import AccountingStructure               # noqa: E402
 from pysuto.config import load_config                    # noqa: E402
-from pysuto.param_relation import expand_edge_index      # noqa: E402
+from pysuto.relation.param_relation import expand_edge_index      # noqa: E402
 import india_concentrate_diag as D                       # noqa: E402
 import roundL_reexport_diag as L                         # noqa: E402
 

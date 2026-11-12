@@ -41,14 +41,17 @@ import bisect
 from typing import Optional
 
 import numpy as np
-import pandas as pd
 
 from pysuto.logging import get_logger
-from pysuto.param_relation import expand_edge_index, float_or
+from pysuto.relation.param_relation import expand_edge_index
+from pysuto.relation.params import WILDCARD, read_params
 
 from .base import BaseImputer, _log
 
 logger = get_logger(__name__)
+
+#: The param_types read from the stock_bounds file.
+ACCEPTS = frozenset({"stock_bound"})
 
 #: p95 ≈ Z95·σ — read the symmetric ±p95 half-band as the ratio-space σ (matches
 #: Z95_STOCK in constraints/ratio.py so the imputed prior and the soft bound agree).
@@ -103,15 +106,12 @@ class ShareImputer(BaseImputer):
         params CSV — the same file that defines the Part-A soft bounds, so the
         imputed PSC band and the constraint band are the same number. The MESC/USC
         seed does not use p95 (see ``seed_cv`` / ``seed_abs_floor``)."""
-        df = pd.read_csv(path, sep=None, engine="python", dtype=str).fillna("")
         p95: dict = {}
-        for _, row in df.iterrows():
-            if str(row.get("param_type", "")).strip() != "stock_bound":
-                continue
-            pid    = str(row.get("param_id", "")).lower()
-            region = str(row.get("b_region_to", "")).strip()
-            vmax   = float_or(row.get("value_max", "nan"), np.nan)
-            if np.isnan(vmax) or not region:
+        for row in read_params(path, ACCEPTS):
+            pid    = row.param_id.lower()
+            region = row.selectors["b_region_to"]
+            vmax   = row.value_max
+            if np.isnan(vmax) or region in WILDCARD:
                 continue
             for ind in ("mesc", "usc", "psc"):     # mesc/usc before psc (substring safety)
                 if f"bound{ind}" in pid:
