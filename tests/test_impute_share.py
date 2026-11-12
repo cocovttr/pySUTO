@@ -110,7 +110,8 @@ def test_seed_sigma_is_one_percent_of_the_fu_leg_floored_at_0_3_kt():
     sigma = np.full(8, np.nan)
     f[7] = 200.0                       # Cathode→FU 1995 (the co-located base)
     missing = np.isnan(f)
-    imp = ShareImputer(p95={}, legs=_LEGS, scale_abs_floor=100.0, seed_cv=0.01, seed_abs_floor=0.3)
+    imp = ShareImputer(p95={}, legs=_LEGS, scale_abs_floor=100.0, seed_cv=0.01,
+                       seed_abs_floor=0.3)
     entries = run_imputer(imp, f, sigma, 0, acc)
     assert f[6] == 0.0
     assert sigma[6] == pytest.approx(0.01 * 200.0)     # 1 % of the leg, not p95·100
@@ -147,7 +148,8 @@ _RELABEL = {"CP": "Mill", "PSC": "Hoard", "CSXEW": "Raw", "CER": "Scrap2",
 _TOY_LEGS = [
     StockLeg("transfer", ("Mill", "Process", "Hoard", "SB"),
              (("Raw", "Flow", "Mill", "Process"), ("Scrap2", "Flow", "Mill", "Process"))),
-    StockLeg("seed", ("Ingot", "Flow", "Vault", "SB"), (("Ingot", "Flow", "Demand", "SB"),)),
+    StockLeg("seed", ("Ingot", "Flow", "Vault", "SB"),
+             (("Ingot", "Flow", "Demand", "SB"),)),
 ]
 
 

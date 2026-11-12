@@ -98,8 +98,16 @@ class StockLeg:
 
 class ShareImputer(BaseImputer):
     """Impute Δstock edges, per declared ``StockLeg``, as share×base (transfer) or a
-    zero-mean throughput-scaled seed (seed). Runs late in the cascade (after time interpolation, before
-    the flat-prior fallback) so the base flows are already covered."""
+    zero-mean throughput-scaled seed (seed). Runs late in the cascade (after time
+    interpolation, before the flat-prior fallback) so the base flows are already
+    covered.
+
+    Parameters
+    ----------
+    p95 : dict
+        `(stock sector, region_to)` -> p95, read by the transfer legs.
+    legs : sequence of StockLeg
+        The stock-change indicators, imputed in this order."""
 
     def __init__(
         self,
@@ -112,11 +120,11 @@ class ShareImputer(BaseImputer):
         seed_abs_floor: float = 0.3,
     ) -> None:
         self.id              = id or "share"
-        self._p95            = p95           # dict[(sector, region_to)] -> p95 (transfer legs)
+        self._p95            = p95           # (sector, region_to) -> p95, transfer legs
         self.legs            = tuple(legs)
         self.scale_abs_floor = float(scale_abs_floor)
         self.p               = float(p)
-        # MESC/USC seed σ = max(seed_cv·|FU leg|, seed_abs_floor) — kt (ADR 0040).
+        # Seed σ = max(seed_cv·|base leg|, seed_abs_floor) — kt (ADR 0040).
         self.seed_cv         = float(seed_cv)
         self.seed_abs_floor  = float(seed_abs_floor)
 
@@ -142,7 +150,8 @@ class ShareImputer(BaseImputer):
             if np.isnan(vmax) or region in WILDCARD or sector not in sectors:
                 continue
             p95[(sector, region)] = abs(vmax)
-        logger.info("ShareImputer.from_stock_bounds_csv: %d (sector,region) p95 entries", len(p95))
+        logger.info("ShareImputer.from_stock_bounds_csv: %d (sector,region) p95 entries",
+                    len(p95))
         return cls(p95, legs, scale_abs_floor=scale_abs_floor, p=p, id=id,
                    seed_cv=seed_cv, seed_abs_floor=seed_abs_floor)
 
