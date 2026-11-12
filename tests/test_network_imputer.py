@@ -118,7 +118,7 @@ class MockAcc:
     """Minimal AccountingStructure stand-in for the synthetic chain."""
 
     def __init__(self, times=("2020",), nodes=None, edges=None):
-        nodes = NODES if nodes is None else nodes     # looked up at call time: tests patch them
+        nodes = NODES if nodes is None else nodes   # looked up at call time (patched)
         edges = EDGES if edges is None else edges
         self.node_index = pd.DataFrame(
             [(s, e, "A", sub) for s, e, sub in nodes],

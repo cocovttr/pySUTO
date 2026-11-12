@@ -252,8 +252,7 @@ _C_CONC    = 0.28                                               # concentrate gr
 _C_METAL   = 0.99                                               # metal grade
 _C_SCRAP   = 0.70                                               # scrap grade
 _C_DUST    = 0.20                                               # dust grade (co-product)
-_DUST_SHARE = 0.25                                              # dust's share of the
-                                                                # smelter's product content
+_DUST_SHARE = 0.25                                             # dust's share of products
 _K_STRIP   = 2.0                                                # waste rock per ore
 # where each region's concentrate goes (shares of its output; Portua mills nothing)
 _SHARES    = {"Montara": {"Montara": 0.20, "Portua": 0.70, "Isla": 0.10},

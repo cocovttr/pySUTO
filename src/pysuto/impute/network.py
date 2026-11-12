@@ -72,7 +72,7 @@ class _RRecipe:
     secondary: tuple[int, ...]         # SB-SEM inputs (Scrap): treated as 0 when missing
     bilateral_import: tuple[int, ...]  # cross-region Flow→Process imports: pooled when known,
                                        # treated as 0 when missing, non-blocking (ADR 0010)
-    products: tuple[int, ...]          # Flow outputs; co-products close by their sum (#130)
+    products: tuple[int, ...]          # Flow outputs; co-products close by sum (#130)
     wastes: tuple[int, ...]
     eff: float
     eff_sig: float
@@ -443,8 +443,8 @@ class NetworkImputer(BaseImputer):
             if rec.eff_param_id is None and self._lower[w] < 0.0:   # eff-less stock leg
                 s_w = max(s_w, self.effless_stock_sigma)
             self._w(w, f_w, s_w, ledger, step, method,
-                    known_PR if S_src == "inputs" else src_P, [1.0 - eff], rec.eff_param_id,
-                    **tag)
+                    known_PR if S_src == "inputs" else src_P, [1.0 - eff],
+                    rec.eff_param_id, **tag)
             if relaxed_close:
                 self._relaxed_fills.add(w)
 

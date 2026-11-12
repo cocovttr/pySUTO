@@ -66,7 +66,8 @@ def test_the_truth_balances_every_node_with_dust_and_leaves_the_toy_alone():
     pooled = frame[(frame["from_sector"] == "Smelting")
                    & frame["to_sector"].isin(["Metal", "Dust"])
                    & (frame["valuation"] == toy.CONTENT)]
-    inputs = frame[(frame["to_sector"] == "Smelting") & (frame["valuation"] == toy.CONTENT)]
+    inputs = frame[(frame["to_sector"] == "Smelting")
+                   & (frame["valuation"] == toy.CONTENT)]
     ratio = (pooled.groupby(["time", "from_region"])["value"].sum()
              / inputs.groupby(["time", "to_region"])["value"].sum().rename_axis(
                  ["time", "from_region"]))
