@@ -4,8 +4,9 @@ copper.py
 The copper case (GLOSSARY.md "Case", #26 §3, #120): the Stage 2 and Stage 3 model of
 the copper application as one :class:`pysuto.case.CaseSpec`, ``CASE``.
 
-- :class:`CopperImp` — every Stage 2 knob at its shipped value; :func:`imputers` builds
-  the imputer cascade ``scripts/collect_aggregate_impute.py`` registers.
+- :class:`CopperImp` — every Stage 2 knob at its shipped value; ``CASCADE`` declares the
+  fixpoint cascade as :class:`~pysuto.case.FillEntry` data and :func:`terminal` builds the
+  terminal imputers ``scripts/collect_aggregate_impute.py`` registers.
 - :class:`CopperConst` — every Stage 3 knob at its shipped value;
   :func:`nodata_anchor_exempt` selects the no-data anchor's exemption and
   :func:`builders` builds the constraint builders ``scripts/constraints.py`` registers.
@@ -14,9 +15,9 @@ the copper application as one :class:`pysuto.case.CaseSpec`, ``CASE``.
 
 The knob values, their notes and the construction steps moved here unchanged from the
 two drivers' ``# USER CONFIGURATION`` blocks and ``main()``s (#120), and so did the
-script-level algorithms (#121): the cascade order check stays here, the Stage 3 anchor
-families moved into ``pysuto.constraints.anchors`` (#145); leg-σ damping, the outlier
-and contradicted-node screens and the time interpolator's scope moved into
+script-level algorithms (#121): the Stage 3 anchor families moved into
+``pysuto.constraints.anchors`` (#145); leg-σ damping, the outlier and contradicted-node
+screens and the time interpolator's scope moved into
 ``pysuto.impute`` with their labels as parameters (#144), and this case passes its own.
 The hooks ``pre_impute`` and ``post_impute`` and the builders reach them through the
 :class:`CaseContext`.
@@ -31,7 +32,7 @@ from typing import Optional
 import numpy as np
 import pandas as pd
 
-from pysuto.case import Cascade, CaseSpec, ConstSection, ImpSection
+from pysuto.case import CascadeStep, CaseSpec, ConstSection, FillEntry, ImpSection
 from pysuto.constraints import (
     FlowBoundsBuilder,
     MassBalanceBuilder,
@@ -40,7 +41,6 @@ from pysuto.constraints import (
     anchors,
 )
 from pysuto.impute import (
-    FillImputer,
     FlatPriorImputer,
     NetworkImputer,
     ShareImputer,
@@ -54,7 +54,7 @@ from pysuto.impute import (
 from pysuto.feedpipe import FeedSpec, check_file
 from pysuto.flow_node_balance import K_CLOSE as UNCLOSED_K
 from pysuto.relation.param_relation import expand_edge_index
-from pysuto.relation.sources import Fill, ParamSource, trade_scope
+from pysuto.relation.sources import trade_scope
 from pysuto.unc import PedigreeScores
 from pysuto.logging import get_logger
 
@@ -75,7 +75,7 @@ CV_GEO4 = PedigreeScores._cv_other(4, "medium_sensitive")
 @dataclass(frozen=True)
 class CopperImp(ImpSection):
     """The copper case's Stage 2 section. Its UPPER_CASE fields are the knobs a
-    pipeline step may override with ``--set`` (#100); ``cascade_ids`` and
+    pipeline step may override with ``--set`` (#100); ``cascade`` and
     ``stock_sectors`` are not knobs."""
 
     # Note: P_PROP must match CopperConst's P_PROP (pysuto.pipeline TIED); Stage 3
@@ -91,13 +91,12 @@ class CopperImp(ImpSection):
     CASCADE_MAX_ITER: int = 10
     # Cascade order (#104): imputers are write-once, so where two writer scopes overlap
     # the earlier imputer writes the edge (GLOSSARY "Writer scope"). A knob, so a sweep
-    # can run named alternative orders; it must stay a permutation of cascade_ids. The
+    # can run named alternative orders; it must stay a permutation of the CASCADE ids. The
     # terminal pass (time → share → flat) is fixed: flat must be last and only share may
     # write the stock legs (ADR 0040).
     # (No `eff` entry: the per-pair efficiency ParametricImputer wrote 0 edges in every
     # run — imp_20261022_111102_1b49a2b3, imp_20261102_095209_86454f46,
     # imp_20261112_154659_f4ec08ae — the network's pooled recipe owns the eff rows.)
-    cascade_ids:   tuple = ("trade", "network", "conc", "ore_grade")
     CASCADE_ORDER: tuple = ("trade", "network", "conc", "ore_grade")
 
     # NetworkImputer — waste rock is a satellite mass flow outside the Mining balance
@@ -263,23 +262,6 @@ class CopperImp(ImpSection):
 # no export subtracted; the network writes those legs at 8,845 kt.
 
 
-def cascade_in_order(by_id: dict, order) -> list:
-    """The cascade imputers of ``by_id`` in ``order``, which must be a permutation of
-    ``by_id``'s ids (#104); anything else — an unknown, repeated or missing id —
-    raises ``ValueError``."""
-    order = tuple(order)
-    if sorted(order) != sorted(by_id):
-        raise ValueError(f"CASCADE_ORDER {order} must be a permutation of "
-                         f"{tuple(by_id)}")
-    return [by_id[k] for k in order]
-
-
-def validate_imp(spec) -> None:
-    """Raise ``ValueError`` unless ``spec.CASCADE_ORDER`` is a permutation of
-    ``spec.cascade_ids``."""
-    cascade_in_order(dict.fromkeys(spec.cascade_ids), spec.CASCADE_ORDER)
-
-
 def pre_impute(ctx) -> None:
     """After aggregation, before imputation: size-damped leg σ (ADR 0017), then the
     plausibility screen — the screen's cv-5 inflation overrides damping on flagged
@@ -342,77 +324,53 @@ def imp_stage_config(ctx) -> dict:
     }
 
 
-def imputers(ctx) -> list:
-    """The copper imputer cascade, in order: the fixpoint :class:`Cascade` (trade,
-    network, conc, ore_grade in ``CASCADE_ORDER``), then the terminal time
-    interpolator, net-stock share imputer and flat prior. Appends the params entries
-    it reads to ``ctx.param_refs``."""
-    spec, inputs, acc, logger = ctx.case.imp, ctx.inputs, ctx.acc, ctx.logger
-    param_refs = ctx.param_refs
-
-    # The conc/network imputers form a metallurgical cascade: a value
-    # derived at one stage (e.g. Smelting→Matte CC via eff) only feeds the next
-    # stage's fill (Matte→CFR Mass via conc/formula) on a *subsequent* pass.
-    # They are registered as a fixpoint cascade — re-run together until a full
-    # sweep fills no new edges — so the chain saturates instead of dying after
-    # one hop (see docs/rep/analysis_imp_…_conc-after-eff-mass-gap.md).
-    # TimeImputer/FlatPrior run once afterwards (terminal).
-
-    def _build_parametric(params_id: str, imp_id: str) -> FillImputer:
-        csv_path = inputs.params.resolve(params_id) / "params.csv"
-        source = ParamSource.from_params(str(csv_path), acc)
-        imp = FillImputer(
-            Fill(source, "both", id=imp_id), "parametric", p=spec.P_PROP,
-            q=spec.Q_REG, alpha_min=spec.ALPHA_MIN_REG,
-        )
-        param_refs.append(inputs.params.entry(params_id))
-        logger.info("C  built FillImputer id=%s (params=%s v%d)",
-                    imp_id, params_id, inputs.params.entry(params_id)["version"])
-        return imp
-
-    # Cascade group (iterated to fixpoint): trade seeds → network closure →
-    # concentration ratios → ore-grade ratios. (The domestic-use FormulaImputer is
-    # retired — see the note above.)
-    # The trade fill runs FIRST: it seeds cross-region Flow→Process import CC legs
-    # from the BACI Mass twin (f_CC = conc·f_Mass), so the NetworkImputer recipe
-    # gate can pool them and the flow-balance can close the lone domestic leg
-    # (ADR 0010). It owns only cross-region edges — the complement of the
-    # network's same-region territory.
-    trade = FillImputer(
-        Fill(ParamSource.from_params(str(inputs.params.resolve("conc") / "params.csv"),
-                                     acc, twin=True),
-             "forward", trade_scope(acc), id="trade"),
-        "trade", p=spec.P_PROP,
-    )
+def build_network(ctx) -> NetworkImputer:
+    """The cascade's network step: process-recipe closure on CC, the Mass twins and the
+    satellite waste rock, reading the eff, conc, ore_grade and stripping_ratio params."""
+    spec = ctx.case.imp
     # NetworkImputer is the sole writer of process-incident, same-region chain
     # edges (recipe closure on CC + Mass twins + SEM waste). The conc/ore_grade
     # parametric fills are demoted to a fallback on whatever the network
     # leaves undetermined; chain-edge provenance shows network_*.
-    network = NetworkImputer(
-        eff_csv       = str(inputs.params.resolve("eff")       / "params.csv"),
-        conc_csv      = str(inputs.params.resolve("conc")      / "params.csv"),
-        ore_grade_csv = str(inputs.params.resolve("ore_grade") / "params.csv"),
-        stripping_ratio_csv = str(inputs.params.resolve("stripping_ratio")
-                                  / "params.csv"),
+    return NetworkImputer(
+        eff_csv       = ctx.use_params("eff"),
+        conc_csv      = ctx.use_params("conc"),
+        ore_grade_csv = ctx.use_params("ore_grade"),
+        stripping_ratio_csv = ctx.use_params("stripping_ratio"),
         stripping_sigma     = spec.FLAT_SIGMA_HIGH,
         p=spec.P_PROP, q=spec.Q_REG, alpha_min=spec.ALPHA_MIN_REG, cv_cap=1.5,
         id="network",
         stock_sectors=spec.stock_sectors,
         effless_stock_sigma=spec.EFFLESS_STOCK_SIGMA_KT,
     )
-    param_refs.append(inputs.params.entry("stripping_ratio"))
-    cascade = Cascade(
-        imputers = cascade_in_order({
-            "trade":     trade,
-            "network":   network,
-            "conc":      _build_parametric("conc",      "conc"),
-            "ore_grade": _build_parametric("ore_grade", "ore_grade"),
-        }, spec.CASCADE_ORDER),
-        max_iter = spec.CASCADE_MAX_ITER,
-    )
-    # The network reads the eff rows; the lineage records them as it did when an eff
-    # ParametricImputer was built here.
-    param_refs.append(inputs.params.entry("eff"))
+
+
+# The conc/network imputers form a metallurgical cascade: a value derived at one stage
+# (e.g. Smelting→Matte CC via eff) only feeds the next stage's fill (Matte→CFR Mass via
+# conc) on a *subsequent* pass. The entries are re-run together until a full sweep fills
+# no new edges (see docs/rep/analysis_imp_…_conc-after-eff-mass-gap.md); the time, share
+# and flat-prior imputers run once afterwards (:func:`terminal`). Trade seeds → network
+# closure → concentration ratios → ore-grade ratios. (The domestic-use FormulaImputer is
+# retired — see the note above.)
+# The trade fill runs FIRST: it seeds cross-region Flow→Process import CC legs from the
+# BACI Mass twin (f_CC = conc·f_Mass), so the NetworkImputer recipe gate can pool them
+# and the flow-balance can close the lone domestic leg (ADR 0010). Its scope is the
+# cross-region edges, the complement of the network's same-region territory.
+CASCADE = (
+    FillEntry("trade", "conc", "forward", sigma_rule="trade", twin=True,
+              scope=trade_scope),
+    CascadeStep("network", build_network),
+    FillEntry("conc", "conc", "both"),
+    FillEntry("ore_grade", "ore_grade", "both"),
+)
+
+
+def terminal(ctx) -> list:
+    """The copper terminal imputers, in order: the time interpolator, the net-stock
+    share imputer and the flat prior. Appends the params entries it reads to
+    ``ctx.param_refs``."""
+    spec, inputs, acc, logger = ctx.case.imp, ctx.inputs, ctx.acc, ctx.logger
+    param_refs = ctx.param_refs
 
     # 5. Temporal interpolation, no extrapolation (terminal).
     #    Scoped to same-region edges (ADR 0026) — see TIME_SCOPE_SAME_REGION.
@@ -511,7 +469,7 @@ def imputers(ctx) -> list:
             id         = "flat_prior",
         )
 
-    return [cascade, time_interp, share, flat]
+    return [time_interp, share, flat]
 
 
 # =============================================================================
@@ -1248,9 +1206,9 @@ def stage1(data_dir: str) -> dict:
 CASE = CaseSpec(
     id     = "copper",
     acc_id = "copper",
-    imp    = CopperImp(imputers=imputers, pre_impute=pre_impute,
+    imp    = CopperImp(cascade=CASCADE, terminal=terminal, pre_impute=pre_impute,
                        post_impute=post_impute, stage_config=imp_stage_config,
-                       diag_year="1995", validate=validate_imp),
+                       diag_year="1995"),
     const  = CopperConst(builders=builders, nodata_anchor_exempt=nodata_anchor_exempt,
                          stage_config=const_stage_config, diag_year="1995"),
     # Stage 6's primary valuation is the acc's content valuation unless named; copper's

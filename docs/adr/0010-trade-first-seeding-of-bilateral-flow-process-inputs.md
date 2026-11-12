@@ -5,6 +5,17 @@
 option-C "a single upstream gap blocks everything below" case). Verified in
 [analysis_imp_…trade-seed-er-cer-revival.md](../rep/analysis_imp_20260616_074410_9b387727_trade-seed-er-cer-revival.md).
 
+**Amended 2026-11-12 (#135, #136) — the partition is two writer scopes; `trade.py` is gone.**
+`TradeImputer` is the trade `Fill` of the conc relation source (`FillImputer`, forward, σ rule
+`trade`, method `trade_seed`), and the trade/network partition is no longer a rule the code
+follows but two declared scopes: the trade fill's is the cross-region `Flow→Process` content edges
+(`pysuto.relation.sources.trade_scope`), the `NetworkImputer`'s the same-region ones, and
+`PriorLedger` rejects a write outside them (GLOSSARY "Writer scope"). A case declares the fill as
+data (`FillEntry("trade", "conc", "forward", sigma_rule="trade", twin=True, scope=trade_scope)`),
+first in its cascade order; the order is a swept knob, so the scopes' precedence, not their
+disjointness, is what the declaration states. Measured unchanged on copper (194,580 trade pairs
+and a 194,580-edge scope, #135) and on the toy.
+
 **Amended 2026-09-02 — pooled primaries relax at fixpoint convergence.** "Domestic (X==Y) legs
 stay blocking `primary`" (below) is relaxed for recipes with **several** same-region primaries —
 parallel technology routes such as CP's `CER`+`CSXEW`. The NetworkImputer now runs a two-phase

@@ -95,7 +95,7 @@ _Avoid_: "anchor", "coherence soft-sum" (both removed mechanisms).
 The four parameter kinds, split **extensive** vs **intensive**. *Extensive* (kt magnitudes):
 **flows** (individual edges) and **totals of flows** (aggregates, e.g. scale totals).
 *Intensive* (per-unit ratios relating flows): **concentration** (category 3) and **efficiency**
-(category 4) — these two are the `ParametricImputer` edge-pair relations.
+(category 4) — these two are the pair readings of the params **relation source**.
 
 **Prior `a₀`**:
 The best-estimate flow vector the QP stays close to: the year's conditioned `f_agg` slice
@@ -135,8 +135,10 @@ Stage 2 — filling root edges that **no feed covered**, via an engine of impute
 every fill is recorded in the `ImputationLog`.
 
 **Imputer**:
-One fill method — `Trade`, `Network`, `Parametric`, `Time`, `Share` or `FlatPrior`; a `BaseImputer`
-subclass. `Formula` is retired.
+One fill method, a `BaseImputer` subclass: a `FillImputer` (one **Fill**), the `NetworkImputer`,
+or a terminal `Time`, `Share` or `FlatPrior` imputer. A case declares the first two as its cascade
+entries and the last three as its terminal fillers. `Trade`, `Parametric` and `Formula` are
+retired as classes.
 
 **Constraint building**:
 Stage 3 — compiling `f_agg` / `σ_agg` into the sparse constraint matrix `G` plus per-timestep
@@ -902,7 +904,7 @@ tonnage and returns values (0.6–0.9, and negatives elsewhere) that are not gra
 **Grade band vs grade σ.** A `conc`-family params row's `value_min`/`value_max` are read **twice**:
 as a **hard cone** by `RatioBoundBuilder` (`value_min·Mass ≤ CC ≤ value_max·Mass`, per edge per
 year — a physical plausibility limit, no slack) and, when `unc_type = "min_max"`, as the **σ** of the
-*soft* ratio row via `ParamRow.sigma` — which also sets the `ParametricImputer` prior and the
+*soft* ratio row via `ParamRow.sigma` — which also sets the parametric fill's prior and the
 `NetworkImputer` twin-map σ. Those are two different statements, and conflating them means changing
 a limit silently re-prices three things. The `ore_grade` grade rows therefore carry
 `unc_type = "sd"` with an explicit `value_sd` (ADR 0028); tailings rows still use `min_max`. The
@@ -1296,16 +1298,27 @@ framework's; "entity kind" for a role.
 before either stage consumes it, one object (`pysuto.relation.relation.Relation`) carrying its
 `sense` (`eq` / `le`, see **Sense**): a **constraint row** is a relation *emitted* into `G`
 (`pysuto.constraints.emit`); an imputation fill is a relation *solved* for its lone unknown. A
-**process recipe**, a Flow-node balance and a `conc`/`eff` params row are relation *sources*, not
-relations (a recipe references its Process node's balance and carries the pooled `eff` ratio; the
-Mass twin is the per-edge `conc` ratio). **Scale totals** and hard bounds are *emit-only*
+**process recipe**, a Flow-node balance and a `conc`/`eff` params row are **relation sources**
+(below), not relations (a recipe references its Process node's balance and carries the pooled
+`eff` ratio; the Mass twin is the per-edge `conc` ratio). **Scale totals** and hard bounds are *emit-only*
 relations — never solved for a prior. _Avoid_: "constraint row" for the pre-stage object;
 "recipe" for a single relation.
 
 **Writer scope** — the set of edges a relation source is *permitted* to write. Scopes may overlap;
 **cascade order** decides precedence among sources whose scope contains an edge; a write outside
-scope is rejected. _Avoid_: "ownership" — it implied an exclusivity the `conc`/`eff` fallback
-imputers never respected.
+scope is rejected (`PriorLedger`: an error in tests, logged and dropped in production). _Avoid_:
+"ownership", "sole writer" — they implied an exclusivity the `conc` fallback never respected
+(it wrote 852 same-region `Cathode→FU` Mass edges of `imp_20261112_133434_22fc54b3`).
+
+**Relation source** — what yields a case's relations: a params file (`ParamSource`, its per-pair or
+conc-twin reading), the structure of the acc (recipes, Flow-node balances). A source is declared
+once and consumed by both stages. _Avoid_: "relation" for the source; "parameter set".
+
+**Fill** — one entry of a cascade: a relation source, a **rule** (`forward`: `b` from `a`;
+`backward`: `a` from `b`; `both`), a **writer scope** and an imputer id
+(`pysuto.relation.sources.Fill`), run by a `FillImputer` under a σ rule (`trade` or `parametric`).
+A case declares it as data, a `FillEntry`; copper's are `trade`, `conc` and `ore_grade`. _Avoid_:
+"imputer" for the entry (the imputer is what runs it).
 
 **Case** — one metal's complete declaration: an accounting structure (referenced by registry id),
 its feeds, param families, relation sources and cascade, anchor families and σ policies, run by the

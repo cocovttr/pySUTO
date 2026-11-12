@@ -53,8 +53,7 @@ def run_imp(case: CaseSpec, feed_ids: list, label: str,
     :class:`~pysuto.impute.ScopeError`; by default it is logged and dropped.
     """
     spec   = case.imp
-    if spec.validate is not None:
-        spec.validate(spec)
+    spec.validate()
     logger = logger or get_logger("stages")
     acc_id = case.acc_id
     proc         = os.path.join(data_dir, "proc")
@@ -113,8 +112,8 @@ def run_imp(case: CaseSpec, feed_ids: list, label: str,
     agg_diag.summary()
 
     # ── C  Imputation pipeline ────────────────────────────────────────────────
-    # The case's cascade (spec.imputers): its fixpoint group in the group's order, then
-    # each terminal imputer, registered in the order listed.
+    # The case's cascade (spec.imputers): its entries as a fixpoint group in
+    # CASCADE_ORDER, then each terminal imputer, registered in the order listed.
     logger.info("C  Building imputation engine")
     engine = ImputationEngine(acc_struct=acc, strict_scope=strict_scope)
 

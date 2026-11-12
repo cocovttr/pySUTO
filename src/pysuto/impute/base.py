@@ -3,7 +3,10 @@ base.py
 =======
 ``BaseImputer`` + the two helpers shared across every imputer:
 
-* :func:`_apply_cv_cap` — σ-cap to cv_cap × |f| (4 callers across 3 imputers).
+* :func:`_apply_cv_cap` — σ-cap to cv_cap × |f| (callers across the fill and the
+  network imputers).
+* :func:`_reg_sensitivity` — bounded σ sensitivity of an inverted coefficient (the fill's
+  backward branch, the network's recipe inversion).
 * :func:`_log`           — one dict per filled edge (built by the ledger).
 """
 
@@ -32,6 +35,23 @@ def _apply_cv_cap(sigma_val: float, f_val: float, cv_cap: float) -> tuple[float,
     if sigma_val > cap:
         return cap, True
     return sigma_val, False
+
+
+def _reg_sensitivity(coeff: float, q: float, alpha_min: float) -> float:
+    """
+    Bounded effective sensitivity used in the σ propagation of an inverted coefficient.
+
+        s(α) = |α| / (|α|^q + α_min^q)^(1/q)
+
+    Asymptotes to 1 for |α| >> α_min (caps coefficient amplification of σ),
+    and to |α|/α_min for |α| << α_min (linearly damps very small coefficients).
+    q controls the knee sharpness (q=3 is a moderate default).
+    """
+    a = abs(float(coeff))
+    am = abs(float(alpha_min))
+    if a == 0.0 and am == 0.0:
+        return 0.0
+    return a / (a ** q + am ** q) ** (1.0 / q)
 
 
 def _log(

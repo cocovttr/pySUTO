@@ -296,7 +296,7 @@ CONST_KEYS = {
 }
 
 
-def _toy_imputers(ctx):
+def _toy_terminal(ctx):
     from pysuto.impute import FlatPriorImputer
     spec = ctx.case.imp
     return [FlatPriorImputer(acc_struct=ctx.acc, mode="noisy_zero",
@@ -325,8 +325,9 @@ def _toy_case():
     from dataclasses import replace
     from pysuto.cases.copper import CASE
     return replace(CASE, id="toy", acc_id="toy",
-                   imp=replace(CASE.imp, imputers=_toy_imputers,
-                               pre_impute=_toy_pre_impute, post_impute=_toy_post_impute),
+                   imp=replace(CASE.imp, cascade=(), CASCADE_ORDER=(),
+                               terminal=_toy_terminal, pre_impute=_toy_pre_impute,
+                               post_impute=_toy_post_impute),
                    const=replace(CASE.const, builders=_toy_builders,
                                  nodata_anchor_exempt=None))
 
@@ -426,7 +427,7 @@ def test_stage_2_builds_from_the_case_and_records_it(case, driver, monkeypatch):
     assert set(cfg) == IMP_KEYS | {"case"}
     assert cfg["case"] == _as_json(toy.describe("imp"))
     assert cfg["case"]["id"] == "toy"
-    assert cfg["case"]["imp"]["imputers"] == _qualname(_toy_imputers)
+    assert cfg["case"]["imp"]["terminal"] == _qualname(_toy_terminal)
     assert cfg["case"]["imp"]["pre_impute"] == _qualname(_toy_pre_impute)
     assert cfg["case"]["imp"]["TIME_WINDOW"] == cfg["time"]["window"] == 5
     assert cfg["overrides"] == {"TIME_WINDOW": 5}

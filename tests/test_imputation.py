@@ -6,8 +6,7 @@ pytest suite for pysuto/impute.py
 Covers:
     ImputationLog           — basic operations, as_dataframe, for_edge
     ImputationEngine        — pipeline ordering, early stop, log attachment
-    ParametricImputer       — CSV bidirectional pairs, lambda directed fills
-    FormulaImputer          — balance equations, region binding, clipping
+    FillImputer             — the params source's pair fills, both directions (#136)
     TimeImputer             — linear, locf, nocb, gap inflation, window
 """
 from __future__ import annotations
@@ -26,12 +25,7 @@ from pysuto.impute import (
     ImputationLog,
     ImputationEngine,
     BaseImputer,
-    ParametricRelation,
-    ParametricImputer,
-    ParamRef,
-    SourceTerm,
-    FormulaRelation,
-    FormulaImputer,
+    FillImputer,
     TimeImputer,
     FlatPriorImputer,
     PriorLedger,
@@ -39,13 +33,15 @@ from pysuto.impute import (
     run_imputer,
     _reg_sensitivity,
 )
+from pysuto.relation.ratio_relation import ratio_relation
+from pysuto.relation.sources import Fill, ParamSource
 
 # Lp combiner unit tests live in tests/test_lp.py.
 # ParamRow.sigma unit tests live in tests/test_relation_params.py.
 
 
 # =============================================================================
-# Regularized sensitivity s(α) — used in ParametricImputer σ propagation
+# Regularized sensitivity s(α) — used in the fill's backward σ propagation
 # =============================================================================
 
 class TestRegSensitivity:
@@ -171,6 +167,28 @@ def _agg_result(f_values, sigma_values=None, n_feeds=1):
     )
 
 
+def _fill(pairs, id="", q=3.0, alpha_min=0.05):
+    """A both-direction parametric :class:`FillImputer` over ``(a_id, b_id, coeff,
+    sigma_param, epsilon, param_id, description)`` pairs, as the params source builds them."""
+    rels = [ratio_relation([b], [a], r, variant="pair", specs=(), time="2020",
+                           valuation="Mass", sigma=sig / abs(r) if r else 0.0, source=pid,
+                           meta={"sigma_param": sig, "epsilon": eps, "description": desc})
+            for a, b, r, sig, eps, pid, desc in pairs]
+    return FillImputer(Fill(ParamSource(rels), "both", id=id), "parametric", q=q,
+                       alpha_min=alpha_min)
+
+
+def _from_csv(path, acc):
+    """The both-direction parametric fill of the params file at ``path``."""
+    return FillImputer(Fill(ParamSource.from_params(str(path), acc), "both"), "parametric")
+
+
+def _pairs(imp):
+    """``(a_id, b_id, coeff, sigma_param)`` of a fill's relations."""
+    return [(int(r.edges[1]), int(r.edges[0]), float(-r.coefficients[1]),
+             r.meta["sigma_param"]) for r in imp.fill.source.relations]
+
+
 # =============================================================================
 # 1. ImputationLog
 # =============================================================================
@@ -236,14 +254,14 @@ class TestImputationEngine:
         assert isinstance(result.imputation_log, ImputationLog)
 
     def test_engine_updates_f_agg(self, acc):
-        # Edge 0 known (f=10), edge 2 missing — ParametricImputer fills 2 from 0
+        # Edge 0 known (f=10), edge 2 missing — the fill fills 2 from 0
         f = [10.0, np.nan, np.nan, np.nan, np.nan, np.nan,
              np.nan, np.nan, np.nan, np.nan]
         ar = _agg_result(f, [1.0, np.nan, np.nan, np.nan, np.nan, np.nan,
                               np.nan, np.nan, np.nan, np.nan])
 
         # CSV-based pair: edge 0 ↔ edge 2, coeff=0.5
-        imputer = ParametricImputer(_csv_pairs=[
+        imputer = _fill([
             (0, 2, 0.5, 0.05, 0.0, "test", "desc")
         ])
         engine = ImputationEngine(acc_struct=acc)
@@ -259,9 +277,9 @@ class TestImputationEngine:
         ar = _agg_result(f, [1.0]+[np.nan]*9)
 
         # First imputer: edge 0 → edge 1 (f_1 = 2 * f_0 = 20)
-        imp1 = ParametricImputer(_csv_pairs=[(0, 1, 2.0, 0.1, 0.0, "p1", "")])
+        imp1 = _fill([(0, 1, 2.0, 0.1, 0.0, "p1", "")])
         # Second imputer: edge 1 → edge 3 (f_3 = 3 * f_1 — edge 1 filled by imp1)
-        imp2 = ParametricImputer(_csv_pairs=[(1, 3, 3.0, 0.1, 0.0, "p2", "")])
+        imp2 = _fill([(1, 3, 3.0, 0.1, 0.0, "p2", "")])
 
         engine = ImputationEngine(acc_struct=acc)
         engine.register(imp1)
@@ -302,8 +320,8 @@ class TestImputationCascade:
         # edge 0 known; A fills 2 from 0 (f2 = 2·f0); B fills 3 from 2 (f3 = 3·f2).
         # Registering B before A means B can only succeed on a *second* pass.
         ar = _agg_result([10.0] + [np.nan] * 9, [1.0] + [np.nan] * 9)
-        imp_A = ParametricImputer(_csv_pairs=[(0, 2, 2.0, 0.1, 0.0, "A", "")], id="A")
-        imp_B = ParametricImputer(_csv_pairs=[(2, 3, 3.0, 0.1, 0.0, "B", "")], id="B")
+        imp_A = _fill([(0, 2, 2.0, 0.1, 0.0, "A", "")], id="A")
+        imp_B = _fill([(2, 3, 3.0, 0.1, 0.0, "B", "")], id="B")
         return ar, imp_A, imp_B
 
     def test_single_pass_leaves_chain_incomplete(self, acc):
@@ -365,7 +383,7 @@ class TestImputationCascade:
 
     def test_terminal_imputer_has_null_pass(self, acc):
         ar, imp_A, imp_B = self._two_hop()
-        imp_C = ParametricImputer(_csv_pairs=[(0, 4, 1.0, 0.1, 0.0, "C", "")], id="C")
+        imp_C = _fill([(0, 4, 1.0, 0.1, 0.0, "C", "")], id="C")
         engine = ImputationEngine(acc_struct=acc)
         engine.register_cascade([imp_B, imp_A], max_iter=10)
         engine.register(imp_C)                            # terminal
@@ -377,13 +395,13 @@ class TestImputationCascade:
         assert pd.isna(rowC["pass"])
 
     def test_default_id_is_class_name(self):
-        assert ParametricImputer(_csv_pairs=[]).id == "ParametricImputer"
+        assert _fill([]).id == "FillImputer"
 
     def test_backward_compat_terminal_only(self, acc):
         """No cascade → old single-pass behaviour: steps 0,1 and null pass."""
         ar = _agg_result([10.0] + [np.nan] * 9, [1.0] + [np.nan] * 9)
-        imp1 = ParametricImputer(_csv_pairs=[(0, 1, 2.0, 0.1, 0.0, "p1", "")], id="one")
-        imp2 = ParametricImputer(_csv_pairs=[(1, 3, 3.0, 0.1, 0.0, "p2", "")], id="two")
+        imp1 = _fill([(0, 1, 2.0, 0.1, 0.0, "p1", "")], id="one")
+        imp2 = _fill([(1, 3, 3.0, 0.1, 0.0, "p2", "")], id="two")
         engine = ImputationEngine(acc_struct=acc)
         engine.register(imp1)
         engine.register(imp2)
@@ -396,10 +414,10 @@ class TestImputationCascade:
 
 
 # =============================================================================
-# 3. ParametricImputer — CSV bidirectional pairs
+# 3. FillImputer — bidirectional pairs
 # =============================================================================
 
-class TestParametricImputerCSV:
+class TestFillImputerPairs:
 
     def test_fill_b_from_a(self, acc):
         """A known, B missing (forward) → f_b = coeff × f_a; σ uses bare coeff."""
@@ -407,7 +425,7 @@ class TestParametricImputerCSV:
         sigma = np.full(10, np.nan)
         f[0]  = 100.0;  sigma[0] = 5.0
         missing = np.isnan(f)
-        imp = ParametricImputer(_csv_pairs=[(0, 2, 0.3, 0.0, 0.0, "p", "d")])
+        imp = _fill([(0, 2, 0.3, 0.0, 0.0, "p", "d")])
         run_imputer(imp, f, sigma, 0, acc)
         assert f[2] == pytest.approx(30.0)
         # Forward branch uses bare coeff: σ_b = |coeff| · σ_a
@@ -419,7 +437,7 @@ class TestParametricImputerCSV:
         sigma = np.full(10, np.nan)
         f[2]  = 30.0;  sigma[2] = 1.5
         missing = np.isnan(f)
-        imp = ParametricImputer(_csv_pairs=[(0, 2, 0.3, 0.0, 0.0, "p", "d")])
+        imp = _fill([(0, 2, 0.3, 0.0, 0.0, "p", "d")])
         run_imputer(imp, f, sigma, 0, acc)
         assert f[0] == pytest.approx(100.0)
         # Backward branch is regularized: σ_a = s(1/coeff) · σ_b
@@ -432,8 +450,7 @@ class TestParametricImputerCSV:
         f     = np.full(10, np.nan);  f[0]     = 1.0
         sigma = np.full(10, np.nan);  sigma[0] = 1.0
         missing = np.isnan(f)
-        imp = ParametricImputer(
-            _csv_pairs=[(0, 2, 1e-3, 0.0, 0.0, "p", "d")],
+        imp = _fill([(0, 2, 1e-3, 0.0, 0.0, "p", "d")],
             q=3.0, alpha_min=0.05,
         )
         run_imputer(imp, f, sigma, 0, acc)
@@ -447,8 +464,7 @@ class TestParametricImputerCSV:
         f     = np.full(10, np.nan);  f[0]     = 1.0
         sigma = np.full(10, np.nan);  sigma[0] = 1.0
         missing = np.isnan(f)
-        imp = ParametricImputer(
-            _csv_pairs=[(0, 2, 100.0, 0.0, 0.0, "p", "d")],
+        imp = _fill([(0, 2, 100.0, 0.0, 0.0, "p", "d")],
             q=3.0, alpha_min=0.05,
         )
         run_imputer(imp, f, sigma, 0, acc)
@@ -461,7 +477,7 @@ class TestParametricImputerCSV:
         f = np.array([10.0, 20.0] + [np.nan]*8)
         sigma = np.array([1.0, 2.0] + [np.nan]*8)
         missing = np.isnan(f)
-        imp = ParametricImputer(_csv_pairs=[(0, 1, 2.0, 0.0, 0.0, "p", "d")])
+        imp = _fill([(0, 1, 2.0, 0.0, 0.0, "p", "d")])
         run_imputer(imp, f, sigma, 0, acc)
         assert f[0] == pytest.approx(10.0)
         assert f[1] == pytest.approx(20.0)
@@ -470,7 +486,7 @@ class TestParametricImputerCSV:
         f = np.full(10, np.nan)
         sigma = np.full(10, np.nan)
         missing = np.isnan(f)
-        imp = ParametricImputer(_csv_pairs=[(0, 2, 0.5, 0.0, 0.0, "p", "d")])
+        imp = _fill([(0, 2, 0.5, 0.0, 0.0, "p", "d")])
         run_imputer(imp, f, sigma, 0, acc)
         assert np.isnan(f[0]) and np.isnan(f[2])
 
@@ -479,7 +495,7 @@ class TestParametricImputerCSV:
         f     = np.full(10, np.nan);  f[0]     = 10.0
         sigma = np.full(10, np.nan);  sigma[0] = 0.0
         missing = np.isnan(f)
-        imp = ParametricImputer(_csv_pairs=[(0, 2, 2.0, 3.0, 0.0, "p", "d")])
+        imp = _fill([(0, 2, 2.0, 3.0, 0.0, "p", "d")])
         run_imputer(imp, f, sigma, 0, acc)
         # σ_b = |a|·σ_r = 10 · 3 = 30 kt (was σ_r = 3, a ratio unit added to kt)
         assert sigma[2] == pytest.approx(30.0, rel=1e-12)
@@ -490,7 +506,7 @@ class TestParametricImputerCSV:
         r, sig_r = 0.28, 0.0375
         f     = np.full(10, np.nan);  f[0]     = size
         sigma = np.full(10, np.nan);  sigma[0] = 0.0
-        imp = ParametricImputer(_csv_pairs=[(0, 2, r, sig_r, 0.0, "p", "d")])
+        imp = _fill([(0, 2, r, sig_r, 0.0, "p", "d")])
         run_imputer(imp, f, sigma, 0, acc)
         assert sigma[2] == pytest.approx(size * sig_r, rel=1e-12)
         assert sigma[2] / abs(f[2]) == pytest.approx(sig_r / r, rel=1e-12)
@@ -501,7 +517,7 @@ class TestParametricImputerCSV:
         r, sig_r = 0.28, 0.0375
         f     = np.full(10, np.nan);  f[2]     = size
         sigma = np.full(10, np.nan);  sigma[2] = 0.0
-        imp = ParametricImputer(_csv_pairs=[(0, 2, r, sig_r, 0.0, "p", "d")])
+        imp = _fill([(0, 2, r, sig_r, 0.0, "p", "d")])
         run_imputer(imp, f, sigma, 0, acc)
         assert sigma[0] == pytest.approx(size * sig_r / r ** 2, rel=1e-12)
         assert sigma[0] / abs(f[0]) == pytest.approx(sig_r / r, rel=1e-12)
@@ -510,7 +526,7 @@ class TestParametricImputerCSV:
         """A zero ratio (WR is copperless) fills 0 with σ = |a|·σ_r, not a σ-0 pin."""
         f     = np.full(10, np.nan);  f[0]     = 500.0
         sigma = np.full(10, np.nan);  sigma[0] = 0.0
-        imp = ParametricImputer(_csv_pairs=[(0, 2, 0.0, 0.001, 0.0, "p", "d")])
+        imp = _fill([(0, 2, 0.0, 0.001, 0.0, "p", "d")])
         run_imputer(imp, f, sigma, 0, acc)
         assert f[2] == 0.0
         assert sigma[2] == pytest.approx(500.0 * 0.001, rel=1e-12)
@@ -519,20 +535,20 @@ class TestParametricImputerCSV:
         f     = np.full(10, np.nan);  f[0]     = 10.0
         sigma = np.full(10, np.nan);  sigma[0] = 0.0
         missing = np.isnan(f)
-        imp = ParametricImputer(_csv_pairs=[(0, 2, 1.0, 0.0, 0.1, "p", "d")])
+        imp = _fill([(0, 2, 1.0, 0.0, 0.1, "p", "d")])
         run_imputer(imp, f, sigma, 0, acc)
         # f_b = 10, sigma_b = sqrt(0 + (0.1*10)²) = 1.0
         assert f[2] == pytest.approx(10.0)
         assert sigma[2] == pytest.approx(1.0)
 
     def test_csv_bounds_not_applied_in_imputer(self, acc):
-        """ParametricImputer ignores per-row CSV bounds (they are *ratio* bounds
+        """FillImputer ignores per-row CSV bounds (they are *ratio* bounds
         consumed by RatioBoundBuilder, not absolute caps on the target flow)."""
         f     = np.full(10, np.nan);  f[0]     = 100.0
         sigma = np.full(10, np.nan);  sigma[0] = 1.0
         missing = np.isnan(f)
         # coeff=2 → natural fill 200; the imputer no longer reads bound_upper.
-        imp = ParametricImputer(_csv_pairs=[(0, 2, 2.0, 0.0, 0.0, "p", "d")])
+        imp = _fill([(0, 2, 2.0, 0.0, 0.0, "p", "d")])
         run_imputer(imp, f, sigma, 0, acc)
         assert f[2] == pytest.approx(200.0)
 
@@ -540,7 +556,7 @@ class TestParametricImputerCSV:
         f     = np.full(10, np.nan);  f[0]     = 5.0
         sigma = np.full(10, np.nan);  sigma[0] = 0.5
         missing = np.isnan(f)
-        imp = ParametricImputer(_csv_pairs=[(0, 2, 1.0, 0.0, 0.0, "pid", "desc")])
+        imp = _fill([(0, 2, 1.0, 0.0, 0.0, "pid", "desc")])
         entries = run_imputer(imp, f, sigma, 3, acc)
         assert len(entries) == 1
         e = entries[0]
@@ -556,8 +572,7 @@ class TestParametricImputerCSV:
         sigma = np.full(10, np.nan);  sigma[2] = 1.0
         missing = np.isnan(f)
         # coeff = 0.01 → inv = 100 (large); s(100) ≈ 1, so σ_a is capped at σ_b.
-        imp = ParametricImputer(
-            _csv_pairs=[(0, 2, 0.01, 0.0, 0.0, "p", "d")],
+        imp = _fill([(0, 2, 0.01, 0.0, 0.0, "p", "d")],
             q=3.0, alpha_min=0.05,
         )
         run_imputer(imp, f, sigma, 0, acc)
@@ -572,8 +587,7 @@ class TestParametricImputerCSV:
         sigma = np.full(10, np.nan);  sigma[2] = 1.0
         missing = np.isnan(f)
         # coeff = 1000 → inv = 1e-3; s(1e-3) ≈ 1e-3 / α_min = 0.02
-        imp = ParametricImputer(
-            _csv_pairs=[(0, 2, 1000.0, 0.0, 0.0, "p", "d")],
+        imp = _fill([(0, 2, 1000.0, 0.0, 0.0, "p", "d")],
             q=3.0, alpha_min=0.05,
         )
         run_imputer(imp, f, sigma, 0, acc)
@@ -583,7 +597,7 @@ class TestParametricImputerCSV:
         assert sigma[0] < 1.0
 
 
-class TestParametricImputerFromCSV:
+class TestParamSourceFromCSV:
 
     def _write_csv(self, content: str, tmp_path) -> str:
         p = tmp_path / "params.csv"
@@ -618,13 +632,13 @@ class TestParametricImputerFromCSV:
         path = tmp_path / "p.csv"
         path.write_text(csv)
 
-        imp = ParametricImputer.from_csv(str(path), acc)
+        imp = _from_csv(path, acc)
         # Edges 0 and 1 have to_node = Ore/Flow; each should pair with CC counterpart
-        a_ids = {pair[0] for pair in imp._csv_pairs}
-        b_ids = {pair[1] for pair in imp._csv_pairs}
+        a_ids = {pair[0] for pair in _pairs(imp)}
+        b_ids = {pair[1] for pair in _pairs(imp)}
         # edge 0 (Mass) should pair with edge 2 (CC); edge 1 (Mass) with edge 3 (CC)
         assert 0 in a_ids or 2 in a_ids   # one of the two valuations is A
-        assert len(imp._csv_pairs) >= 2    # at least 2 pairs (one per region)
+        assert len(_pairs(imp)) >= 2    # at least 2 pairs (one per region)
 
     def test_from_csv_skips_comment_rows(self, acc, tmp_path):
         csv = (
@@ -644,8 +658,8 @@ class TestParametricImputerFromCSV:
         )
         path = tmp_path / "p.csv"
         path.write_text(csv)
-        imp = ParametricImputer.from_csv(str(path), acc)
-        assert imp._csv_pairs == []
+        imp = _from_csv(path, acc)
+        assert _pairs(imp) == []
 
     def test_from_csv_pedigree_sigma(self, acc, tmp_path):
         """unc_type=pedigree produces non-zero sigma from scores."""
@@ -671,9 +685,9 @@ class TestParametricImputerFromCSV:
         )
         path = tmp_path / "p.csv"
         path.write_text(csv)
-        imp = ParametricImputer.from_csv(str(path), acc)
+        imp = _from_csv(path, acc)
         # Each pair should have a positive sigma_param
-        assert all(pair[3] > 0 for pair in imp._csv_pairs)
+        assert all(pair[3] > 0 for pair in _pairs(imp))
 
     def test_from_csv_same_region_constraint(self, acc, tmp_path):
         """
@@ -702,340 +716,9 @@ class TestParametricImputerFromCSV:
         )
         path = tmp_path / "p.csv"
         path.write_text(csv)
-        imp = ParametricImputer.from_csv(str(path), acc)
+        imp = _from_csv(path, acc)
         # Should have pairs for regions A and B (and times 2020, 2021, 2022)
-        assert len(imp._csv_pairs) >= 2
-
-
-# =============================================================================
-# 4. ParametricImputer — lambda relations
-# =============================================================================
-
-class TestParametricImputerLambda:
-
-    def test_directed_fill_from_source(self, acc):
-        """target filled from source in the same region and time."""
-        f     = np.full(10, np.nan);  f[4]     = 50.0   # Ore_A→Mining_A, Mass
-        sigma = np.full(10, np.nan);  sigma[4] = 5.0
-        missing = np.isnan(f)
-
-        rel = ParametricRelation(
-            description="test",
-            target =lambda ei: (ei["sector_from"] == "Mining") & (ei["valuation"] == "Mass")
-                               & (ei["edge_id"].isin([0, 1])),
-            sources=lambda ei: (ei["sector_from"] == "Ore") & (ei["valuation"] == "Mass")
-                               & (ei["edge_id"].isin([4, 5])),
-            coefficients=[0.1],
-        )
-        imp = ParametricImputer(relations=[rel])
-        run_imputer(imp, f, sigma, 0, acc)
-
-        # target 0 (Mining_A→Ore_A) should be filled from source 4 (Ore_A→Mining_A)
-        # same region A, same time 2020
-        assert f[0] == pytest.approx(5.0)
-
-    def test_missing_source_skips_target(self, acc):
-        f     = np.full(10, np.nan)
-        sigma = np.full(10, np.nan)
-        missing = np.isnan(f)
-
-        rel = ParametricRelation(
-            description="test",
-            target =lambda ei: ei["edge_id"] == 0,
-            sources=lambda ei: ei["edge_id"] == 4,  # source also NaN
-            coefficients=[1.0],
-        )
-        imp = ParametricImputer(relations=[rel])
-        run_imputer(imp, f, sigma, 0, acc)
-        assert np.isnan(f[0])
-
-    def test_log_entry_contains_description(self, acc):
-        f     = np.full(10, np.nan);  f[4]     = 10.0
-        sigma = np.full(10, np.nan);  sigma[4] = 1.0
-        missing = np.isnan(f)
-
-        rel = ParametricRelation(
-            description="my description",
-            target =lambda ei: ei["edge_id"] == 0,
-            sources=lambda ei: ei["edge_id"] == 4,
-            coefficients=[1.0],
-        )
-        imp = ParametricImputer(relations=[rel])
-        entries = run_imputer(imp, f, sigma, 0, acc)
-        assert len(entries) == 1
-        assert entries[0]["description"] == "my description"
-
-
-# =============================================================================
-# 5. FormulaImputer
-# =============================================================================
-
-class TestFormulaImputer:
-
-    def test_single_term_no_region_binding(self, acc):
-        """f_target = 1.0 * f_source (no region filter needed: only one match)."""
-        f     = np.full(10, np.nan);  f[0]     = 80.0   # Mining_A→Ore_A, Mass
-        sigma = np.full(10, np.nan);  sigma[0] = 8.0
-        missing = np.isnan(f)
-
-        rel = FormulaRelation(
-            description="copy",
-            target=lambda ei: ei["edge_id"] == 4,  # Ore_A→Mining_A, Mass
-            terms=[
-                SourceTerm(
-                    selector=lambda ei: ei["edge_id"] == 0,
-                    coefficient=1.0,
-                    region_binding="none",
-                    time_binding=False,
-                    aggregate="single",
-                )
-            ],
-            clip_lower=None,
-        )
-        imp = FormulaImputer(relations=[rel])
-        run_imputer(imp, f, sigma, 0, acc)
-        assert f[4] == pytest.approx(80.0)
-        assert sigma[4] == pytest.approx(8.0)
-
-    def test_multi_term_supply_minus_export(self, acc):
-        """
-        f_target = f_supply - f_export (two terms, one positive, one negative).
-        Supply edge 0 (f=100), export edge 4 (f=30) → target = 70.
-        """
-        f     = np.full(10, np.nan)
-        sigma = np.full(10, np.nan)
-        f[0]     = 100.0;  sigma[0] = 0.0
-        f[4]     = 30.0;   sigma[4] = 0.0
-        missing = np.isnan(f)
-
-        rel = FormulaRelation(
-            description="balance",
-            target=lambda ei: ei["edge_id"] == 1,   # Mining_B→Ore_B, Mass (target to fill)
-            terms=[
-                SourceTerm(
-                    selector=lambda ei: ei["edge_id"] == 0,
-                    coefficient=1.0,
-                    region_binding="none",
-                    time_binding=False,
-                    aggregate="single",
-                ),
-                SourceTerm(
-                    selector=lambda ei: ei["edge_id"] == 4,
-                    coefficient=-1.0,
-                    region_binding="none",
-                    time_binding=False,
-                    aggregate="single",
-                ),
-            ],
-            clip_lower=None,
-        )
-        imp = FormulaImputer(relations=[rel])
-        run_imputer(imp, f, sigma, 0, acc)
-        assert f[1] == pytest.approx(70.0)
-
-    def test_missing_zero_counts_nan_source_as_zero(self, acc):
-        """missing="zero": a NaN subtract term contributes 0 instead of blocking
-        the fill (GLOSSARY.md "missing counts as 0"); the default "block" on the
-        same shape still aborts."""
-        def _rel(missing):
-            return FormulaRelation(
-                description="balance",
-                target=lambda ei: ei["edge_id"] == 1,
-                terms=[
-                    SourceTerm(selector=lambda ei: ei["edge_id"] == 0,
-                               coefficient=1.0, region_binding="none",
-                               time_binding=False, aggregate="single"),
-                    SourceTerm(selector=lambda ei: ei["edge_id"] == 4,
-                               coefficient=-1.0, region_binding="none",
-                               time_binding=False, aggregate="single",
-                               missing=missing),
-                ],
-                clip_lower=None,
-            )
-        # subtract source (edge 4) left NaN
-        f     = np.full(10, np.nan);  f[0] = 100.0
-        sigma = np.full(10, np.nan);  sigma[0] = 5.0
-        run_imputer(FormulaImputer(relations=[_rel("zero")]), f, sigma, 0, acc)
-        assert f[1] == pytest.approx(100.0), "NaN subtract term must count as 0"
-        # default "block" semantics unchanged
-        f     = np.full(10, np.nan);  f[0] = 100.0
-        sigma = np.full(10, np.nan);  sigma[0] = 5.0
-        run_imputer(FormulaImputer(relations=[_rel("block")]), f, sigma, 0, acc)
-        assert np.isnan(f[1]), "default must still block on a NaN source"
-
-    def test_clip_lower_zero(self, acc):
-        """Negative result is clipped to clip_lower=0."""
-        f     = np.full(10, np.nan)
-        sigma = np.full(10, np.nan)
-        f[0]  = 10.0;  sigma[0] = 1.0
-        f[4]  = 50.0;  sigma[4] = 1.0
-        missing = np.isnan(f)
-
-        rel = FormulaRelation(
-            description="clip test",
-            target=lambda ei: ei["edge_id"] == 1,
-            terms=[
-                SourceTerm(lambda ei: ei["edge_id"] == 0,  1.0, "none", False, "single"),
-                SourceTerm(lambda ei: ei["edge_id"] == 4, -1.0, "none", False, "single"),
-            ],
-            clip_lower=0.0,
-        )
-        imp = FormulaImputer(relations=[rel])
-        entries = run_imputer(imp, f, sigma, 0, acc)
-        assert f[1] == pytest.approx(0.0)
-        assert entries[0]["method"] == "formula_clipped"
-
-    def test_no_clip_when_positive(self, acc):
-        """Positive result not clipped; method is 'formula' not 'formula_clipped'."""
-        f     = np.full(10, np.nan)
-        sigma = np.full(10, np.nan)
-        f[0]  = 80.0;  sigma[0] = 0.0
-        f[4]  = 30.0;  sigma[4] = 0.0
-        missing = np.isnan(f)
-
-        rel = FormulaRelation(
-            description="no clip",
-            target=lambda ei: ei["edge_id"] == 1,
-            terms=[
-                SourceTerm(lambda ei: ei["edge_id"] == 0,  1.0, "none", False, "single"),
-                SourceTerm(lambda ei: ei["edge_id"] == 4, -1.0, "none", False, "single"),
-            ],
-            clip_lower=0.0,
-        )
-        imp = FormulaImputer(relations=[rel])
-        entries = run_imputer(imp, f, sigma, 0, acc)
-        assert entries[0]["method"] == "formula"
-        assert f[1] == pytest.approx(50.0)
-
-    def test_region_binding_from_matches_target_from(self, acc):
-        """
-        Supply edges 0 (region A) and 1 (region B) both known.
-        Target edges 4 (region A) and 5 (region B).
-        region_binding='to_matches_target_from' selects supply edge whose
-        to-region matches target's from-region.
-        """
-        f     = np.full(10, np.nan)
-        sigma = np.full(10, np.nan)
-        f[0] = 100.0;  sigma[0] = 10.0   # Mining_A→Ore_A
-        f[1] = 200.0;  sigma[1] = 20.0   # Mining_B→Ore_B
-        missing = np.isnan(f)
-
-        # Target: use edges 4 (Ore_A→Mining_A) and 5 (Ore_B→Mining_B)
-        # Source: supply edges 0 and 1 — bound by "to_region == target's from_region"
-        # Edge 4's from_region = A; edge 0's to_region = A → should use edge 0
-        rel = FormulaRelation(
-            description="regional",
-            target=lambda ei: (ei["sector_from"] == "Ore") & (ei["valuation"] == "Mass")
-                              & (ei["time"] == "2020"),
-            terms=[
-                SourceTerm(
-                    selector=lambda ei: (ei["sector_from"] == "Mining")
-                                       & (ei["valuation"] == "Mass")
-                                       & (ei["time"] == "2020"),
-                    coefficient=1.0,
-                    region_binding="to_matches_target_from",
-                    time_binding=True,
-                    aggregate="single",
-                ),
-            ],
-            clip_lower=None,
-        )
-        imp = FormulaImputer(relations=[rel])
-        run_imputer(imp, f, sigma, 0, acc)
-
-        # Edge 4 (Ore_A→Mining_A): from_region=A → source should be edge 0 (to_region=A)
-        assert f[4] == pytest.approx(100.0)
-        # Edge 5 (Ore_B→Mining_B): from_region=B → source should be edge 1 (to_region=B)
-        assert f[5] == pytest.approx(200.0)
-
-    def test_missing_source_skips_target(self, acc):
-        f     = np.full(10, np.nan)
-        sigma = np.full(10, np.nan)
-        missing = np.isnan(f)  # everything NaN
-
-        rel = FormulaRelation(
-            description="skip",
-            target=lambda ei: ei["edge_id"] == 0,
-            terms=[SourceTerm(lambda ei: ei["edge_id"] == 4, 1.0, "none", False, "single")],
-            clip_lower=0.0,
-        )
-        imp = FormulaImputer(relations=[rel])
-        run_imputer(imp, f, sigma, 0, acc)
-        assert np.isnan(f[0])
-
-    def test_aggregate_sum_over_multiple_sources(self, acc):
-        """aggregate='sum' sums all matching edges (no 'single' constraint)."""
-        f     = np.full(10, np.nan)
-        sigma = np.full(10, np.nan)
-        f[0]  = 10.0;  sigma[0] = 0.0   # source 1
-        f[1]  = 20.0;  sigma[1] = 0.0   # source 2
-        missing = np.isnan(f)
-
-        rel = FormulaRelation(
-            description="sum",
-            target=lambda ei: ei["edge_id"] == 4,
-            terms=[
-                SourceTerm(
-                    selector=lambda ei: ei["edge_id"].isin([0, 1]),
-                    coefficient=1.0,
-                    region_binding="none",
-                    time_binding=False,
-                    aggregate="sum",
-                ),
-            ],
-            clip_lower=None,
-        )
-        imp = FormulaImputer(relations=[rel])
-        run_imputer(imp, f, sigma, 0, acc)
-        assert f[4] == pytest.approx(30.0)
-
-    def test_param_ref_identity(self, acc):
-        """ParamRef with transform='identity' uses value_nominal directly."""
-        f     = np.full(10, np.nan);  f[0]     = 10.0
-        sigma = np.full(10, np.nan);  sigma[0] = 0.0
-        missing = np.isnan(f)
-
-        rel = FormulaRelation(
-            description="param_ref",
-            target=lambda ei: ei["edge_id"] == 4,
-            terms=[
-                SourceTerm(
-                    selector=lambda ei: ei["edge_id"] == 0,
-                    coefficient=ParamRef("eff_mine", "identity"),
-                    region_binding="none",
-                    time_binding=False,
-                    aggregate="single",
-                )
-            ],
-            clip_lower=None,
-        )
-        imp = FormulaImputer(relations=[rel], params={"eff_mine": 0.9})
-        run_imputer(imp, f, sigma, 0, acc)
-        assert f[4] == pytest.approx(9.0)
-
-    def test_param_ref_inverse(self, acc):
-        """ParamRef with transform='inverse' uses 1/value_nominal."""
-        f     = np.full(10, np.nan);  f[0]     = 10.0
-        sigma = np.full(10, np.nan);  sigma[0] = 0.0
-        missing = np.isnan(f)
-
-        rel = FormulaRelation(
-            description="inverse",
-            target=lambda ei: ei["edge_id"] == 4,
-            terms=[
-                SourceTerm(
-                    selector=lambda ei: ei["edge_id"] == 0,
-                    coefficient=ParamRef("eff_mine", "inverse"),
-                    region_binding="none",
-                    time_binding=False,
-                    aggregate="single",
-                )
-            ],
-            clip_lower=None,
-        )
-        imp = FormulaImputer(relations=[rel], params={"eff_mine": 0.5})
-        run_imputer(imp, f, sigma, 0, acc)
-        assert f[4] == pytest.approx(20.0)   # 10 / 0.5
+        assert len(_pairs(imp)) >= 2
 
 
 # =============================================================================
@@ -1215,11 +898,11 @@ class TestImputationEngineBounds:
     def test_engine_clips_fill_exceeding_upper_bound(self, acc):
         """Engine clips a fill that exceeds acc.bounds.u after the imputer writes it."""
         acc.bounds.u[2] = 3.0   # tight upper bound on edge 2
-        # ParametricImputer fills f[2] = 0.5*10 = 5.0 (CSV ratio bounds aren't applied here);
+        # FillImputer fills f[2] = 0.5*10 = 5.0 (CSV ratio bounds aren't applied here);
         # the engine then clips to acc.bounds.u[2] = 3.0 post-step.
         f = [10.0] + [np.nan] * 9
         ar = _agg_result(f, [1.0] + [np.nan] * 9)
-        imputer = ParametricImputer(_csv_pairs=[(0, 2, 0.5, 0.0, 0.0, "p", "d")])
+        imputer = _fill([(0, 2, 0.5, 0.0, 0.0, "p", "d")])
         engine = ImputationEngine(acc_struct=acc)
         engine.register(imputer)
         import warnings
@@ -1233,7 +916,7 @@ class TestImputationEngineBounds:
         acc.bounds.u[2] = 3.0
         f = [10.0] + [np.nan] * 9
         ar = _agg_result(f, [1.0] + [np.nan] * 9)
-        imputer = ParametricImputer(_csv_pairs=[(0, 2, 0.5, 0.0, 0.0, "p", "d")])
+        imputer = _fill([(0, 2, 0.5, 0.0, 0.0, "p", "d")])
         engine = ImputationEngine(acc_struct=acc)
         engine.register(imputer)
         with pytest.warns(UserWarning, match=r"clipped") as rec:
@@ -1246,7 +929,7 @@ class TestImputationEngineBounds:
         # default bounds: l=0, u=1e9; f[2] = 0.5*10 = 5.0 — well within bounds
         f = [10.0] + [np.nan] * 9
         ar = _agg_result(f, [1.0] + [np.nan] * 9)
-        imputer = ParametricImputer(_csv_pairs=[(0, 2, 0.5, 0.0, 0.0, "p", "d")])
+        imputer = _fill([(0, 2, 0.5, 0.0, 0.0, "p", "d")])
         engine = ImputationEngine(acc_struct=acc)
         engine.register(imputer)
         import warnings
@@ -1255,54 +938,6 @@ class TestImputationEngineBounds:
             engine.run(ar)
         user_warnings = [w for w in rec if issubclass(w.category, UserWarning)]
         assert len(user_warnings) == 0
-
-
-# =============================================================================
-# 9. FormulaImputer — acc.bounds clip (new behaviour)
-# =============================================================================
-
-class TestFormulaImputerAccBounds:
-
-    def _make_balance_rel(self, clip_lower=0.0):
-        """f_target = f[0] - f[4]; target = edge 1."""
-        return FormulaRelation(
-            description="balance",
-            target=lambda ei: ei["edge_id"] == 1,
-            terms=[
-                SourceTerm(lambda ei: ei["edge_id"] == 0,  1.0, "none", False, "single"),
-                SourceTerm(lambda ei: ei["edge_id"] == 4, -1.0, "none", False, "single"),
-            ],
-            clip_lower=clip_lower,
-        )
-
-    def test_formula_clips_to_zero_when_acc_bounds_lower_is_zero(self, acc):
-        """Default bounds.l=0: formula result -40 clips to 0 → method='formula_clipped'."""
-        f     = np.full(10, np.nan)
-        sigma = np.full(10, np.nan)
-        f[0]  = 10.0;  sigma[0] = 0.0
-        f[4]  = 50.0;  sigma[4] = 0.0
-        missing = np.isnan(f)
-        imp = FormulaImputer(relations=[self._make_balance_rel(clip_lower=0.0)])
-        entries = run_imputer(imp, f, sigma, 0, acc)
-        assert f[1] == pytest.approx(0.0)
-        assert entries[0]["method"] == "formula_clipped"
-
-    def test_formula_allows_negative_when_acc_bounds_permit(self, acc):
-        """
-        acc.bounds.l[1] = -1e6 overrides rel.clip_lower=0 — proves FormulaImputer
-        now uses acc.bounds as the authoritative clip source.
-        """
-        acc.bounds.l[1] = -1e6
-        f     = np.full(10, np.nan)
-        sigma = np.full(10, np.nan)
-        f[0]  = 10.0;  sigma[0] = 0.0
-        f[4]  = 50.0;  sigma[4] = 0.0
-        missing = np.isnan(f)
-        # rel.clip_lower=0.0 is set — if it were still used, f[1] would be 0
-        imp = FormulaImputer(relations=[self._make_balance_rel(clip_lower=0.0)])
-        entries = run_imputer(imp, f, sigma, 0, acc)
-        assert f[1] == pytest.approx(-40.0)          # NOT clipped to 0
-        assert entries[0]["method"] == "formula"      # NOT "formula_clipped"
 
 
 # =============================================================================
@@ -1469,10 +1104,10 @@ class TestTimeImputerScoping:
 
 
 # =============================================================================
-# 11. ParametricImputer — specificity dedup
+# 11. ParamSource — specificity dedup
 # =============================================================================
 
-class TestParametricImputerSpecificityDedup:
+class TestParamSourceSpecificityDedup:
 
     _CSV_HEADER = (
         "param_id;param_type;description;"
@@ -1513,7 +1148,7 @@ class TestParametricImputerSpecificityDedup:
         )
         path = tmp_path / "dedup.csv"
         path.write_text(self._CSV_HEADER + rows)
-        imp = ParametricImputer.from_csv(str(path), acc)
+        imp = _from_csv(path, acc)
 
         # --- region-A pair: specific row (coeff=0.9) must win ---
         f_a     = np.full(10, np.nan);  f_a[0]     = 10.0
@@ -1546,9 +1181,9 @@ class TestPipelineChaining:
         f  = [10.0] + [np.nan] * 9
         ar = _agg_result(f, [1.0] + [np.nan] * 9)
         # imp1 fills edge 1: f[1] = 2.0 * 10 = 20
-        imp1 = ParametricImputer(_csv_pairs=[(0, 1, 2.0, 0.0, 0.0, "p1", "")])
+        imp1 = _fill([(0, 1, 2.0, 0.0, 0.0, "p1", "")])
         # imp2 would fill edge 1 with 99 * 10 = 990 if edge 1 were still missing
-        imp2 = ParametricImputer(_csv_pairs=[(0, 1, 99.0, 0.0, 0.0, "p2", "")])
+        imp2 = _fill([(0, 1, 99.0, 0.0, 0.0, "p2", "")])
         engine = ImputationEngine(acc_struct=acc)
         engine.register(imp1)
         engine.register(imp2)
@@ -1563,9 +1198,9 @@ class TestPipelineChaining:
         f  = [10.0] + [np.nan] * 9
         ar = _agg_result(f, [1.0] + [np.nan] * 9)
         # imp1: f[1] = 2.0 * f[0] = 20
-        imp1 = ParametricImputer(_csv_pairs=[(0, 1, 2.0, 0.0, 0.0, "p1", "")])
+        imp1 = _fill([(0, 1, 2.0, 0.0, 0.0, "p1", "")])
         # imp2: f[3] = 3.0 * f[1]; edge 1 was NaN initially, filled by imp1
-        imp2 = ParametricImputer(_csv_pairs=[(1, 3, 3.0, 0.0, 0.0, "p2", "")])
+        imp2 = _fill([(1, 3, 3.0, 0.0, 0.0, "p2", "")])
         engine = ImputationEngine(acc_struct=acc)
         engine.register(imp1)
         engine.register(imp2)
@@ -2069,14 +1704,14 @@ class TestPriorLedger:
         assert imp.writer_scope(acc).all()
 
     def test_parametric_scope_is_the_endpoints_of_its_pairs(self, acc):
-        imp = ParametricImputer(_csv_pairs=[(0, 2, 0.5, 0.05, 0.0, "a", ""),
+        imp = _fill([(0, 2, 0.5, 0.05, 0.0, "a", ""),
                                             (4, 3, 2.0, 0.05, 0.0, "b", "")])
         assert np.flatnonzero(imp.writer_scope(acc)).tolist() == [0, 2, 3, 4]
 
     def test_parametric_cannot_write_outside_its_pairs(self, acc):
         f, sigma = np.full(10, np.nan), np.full(10, np.nan)
         f[0], sigma[0] = 10.0, 1.0
-        imp = ParametricImputer(_csv_pairs=[(0, 2, 0.5, 0.05, 0.0, "a", "")])
+        imp = _fill([(0, 2, 0.5, 0.05, 0.0, "a", "")])
         ledger = PriorLedger(f, sigma, strict_scope=True)
         ledger.open(imp.id, None, imp.writer_scope(acc))
         imp.impute(ledger, 0, acc)

@@ -91,7 +91,7 @@ import pandas as pd
 
 from pysuto._conditioning import condition_prior, condition_sigma_c
 from pysuto.acc import AccountingStructure, write_build_record
-from pysuto.case import Cascade, CaseSpec, ConstSection, ImpSection
+from pysuto.case import CascadeStep, CaseSpec, ConstSection, FillEntry, ImpSection
 from pysuto.conc import WeightMatrix
 from pysuto.constraints import (
     MassBalanceBuilder,
@@ -107,7 +107,6 @@ from pysuto.feedpipe import (
     step_C_build_weight_matrix,
 )
 from pysuto.impute import (
-    FillImputer,
     FlatPriorImputer,
     NetworkImputer,
     TimeImputer,
@@ -116,7 +115,7 @@ from pysuto.input_registry import InputRegistries
 from pysuto.logging import get_logger
 from pysuto.meta import DataFeedMetadata
 from pysuto.psut import PSUT
-from pysuto.relation.sources import Fill, ParamSource, trade_scope
+from pysuto.relation.sources import trade_scope
 from pysuto.registry import (
     ConstraintRunRegistry,
     DataFeedRegistry,
@@ -798,28 +797,30 @@ def _params_csv(ctx, param_id: str) -> str:
     return str(ctx.inputs.params.resolve(param_id) / "params.csv")
 
 
-def imputers(ctx) -> list:
-    """The toy's imputer cascade: the fixpoint :class:`Cascade` (``CASCADE_ORDER`` of
-    trade, network, conc), then the terminal ``TimeImputer`` and ``FlatPriorImputer``."""
+def build_network(ctx) -> NetworkImputer:
+    """The toy's network step: recipe closure on the eff, conc and stripping_ratio params."""
+    spec = ctx.case.imp
+    return NetworkImputer(eff_csv=ctx.use_params("eff"), conc_csv=ctx.use_params("conc"),
+                          stripping_ratio_csv=ctx.use_params("stripping_ratio"),
+                          stripping_sigma=spec.FLAT_SIGMA_HIGH, p=spec.P_PROP,
+                          q=spec.Q_REG, alpha_min=spec.ALPHA_MIN_REG,
+                          cv_cap=spec.NETWORK_CV_CAP, id="network",
+                          stock_sectors=spec.stock_sectors)
+
+
+# Copper's cascade at the toy's scale: the trade fill, the network, the conc fill.
+CASCADE = (
+    FillEntry("trade", "conc", "forward", sigma_rule="trade", twin=True,
+              scope=trade_scope),
+    CascadeStep("network", build_network),
+    FillEntry("conc", "conc", "both"),
+)
+
+
+def terminal(ctx) -> list:
+    """The toy's terminal imputers: the ``TimeImputer`` and the ``FlatPriorImputer``."""
     spec, acc = ctx.case.imp, ctx.acc
-    conc  = _params_csv(ctx, "conc")
-    eff   = _params_csv(ctx, "eff")
-    strip = _params_csv(ctx, "stripping_ratio")
-    cascade = {
-        "trade":   FillImputer(Fill(ParamSource.from_params(conc, acc, twin=True),
-                                    "forward", trade_scope(acc), id="trade"),
-                               "trade", p=spec.P_PROP),
-        "network": NetworkImputer(eff_csv=eff, conc_csv=conc, stripping_ratio_csv=strip,
-                                  stripping_sigma=spec.FLAT_SIGMA_HIGH, p=spec.P_PROP,
-                                  q=spec.Q_REG, alpha_min=spec.ALPHA_MIN_REG,
-                                  cv_cap=spec.NETWORK_CV_CAP, id="network",
-                                  stock_sectors=spec.stock_sectors),
-        "conc":    FillImputer(Fill(ParamSource.from_params(conc, acc), "both", id="conc"),
-                               "parametric", p=spec.P_PROP, q=spec.Q_REG,
-                               alpha_min=spec.ALPHA_MIN_REG),
-    }
     return [
-        Cascade([cascade[k] for k in spec.CASCADE_ORDER], max_iter=spec.CASCADE_MAX_ITER),
         TimeImputer(window=spec.TIME_WINDOW, method=spec.TIME_METHOD,
                     min_obs=spec.TIME_MIN_OBS, gap_inflation=spec.TIME_GAP_INFLATION,
                     interpolate_only=spec.TIME_INTERPOLATE_ONLY, p=spec.P_PROP,
@@ -883,7 +884,7 @@ def const_stage_config(ctx) -> dict:
 CASE = CaseSpec(
     id     = "toy",
     acc_id = ACC_ID,
-    imp    = ToyImp(imputers=imputers, stage_config=imp_stage_config),
+    imp    = ToyImp(cascade=CASCADE, terminal=terminal, stage_config=imp_stage_config),
     const  = ToyConst(builders=builders, stage_config=const_stage_config),
     driver_knobs = {"opt": {"QP_VARIABLES": QP_VARIABLES}},
     stage1 = lambda data_dir: run_stage1(data_dir),     # defined below

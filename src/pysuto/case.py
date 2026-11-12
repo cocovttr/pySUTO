@@ -24,7 +24,9 @@ import logging
 from dataclasses import dataclass, field, fields, replace
 from typing import TYPE_CHECKING, Callable, Iterable, Mapping, Optional
 
+from pysuto.impute import FillImputer
 from pysuto.knobs import check_type
+from pysuto.relation.sources import PAIR_ACCEPTS, TWIN_ACCEPTS, Fill, ParamSource
 
 if TYPE_CHECKING:
     from pysuto.acc import AccountingStructure
@@ -64,28 +66,119 @@ def _describe(value):
     return value
 
 
+def _qualname(fn) -> Optional[str]:
+    return None if fn is None else f"{fn.__module__}.{fn.__qualname__}"
+
+
+@dataclass(frozen=True)
+class FillEntry:
+    """A cascade entry that is one :class:`~pysuto.relation.sources.Fill` of a params
+    relation source (GLOSSARY.md "Fill", ADR 0011): ``params_id`` names the params
+    family, ``twin`` picks the source's reading (``True``: the conc twins, ``False``:
+    the per-pair rows), ``rule`` and ``sigma_rule`` the direction and σ rule of the
+    :class:`~pysuto.impute.FillImputer`, and ``scope`` the writer scope as a function of
+    the accounting structure (``None``: every endpoint of the source's relations). The
+    entry is data until :meth:`build` reads the params registry through the context."""
+    id:         str
+    params_id:  str
+    rule:       str
+    sigma_rule: str                = "parametric"
+    twin:       bool               = False
+    scope:      Optional[Callable] = None
+
+    def build(self, ctx: "CaseContext") -> FillImputer:
+        """The imputer of this entry: its source resolved on ``ctx.acc`` from the
+        registered params file, which the run records as a parent input."""
+        spec = ctx.case.imp
+        path = ctx.use_params(self.params_id)
+        source = ParamSource.from_params(path, ctx.acc, twin=self.twin)
+        fill = Fill(source, self.rule,
+                    None if self.scope is None else self.scope(ctx.acc), id=self.id)
+        kw = {"p": spec.P_PROP}
+        if self.sigma_rule == "parametric":
+            kw.update(q=spec.Q_REG, alpha_min=spec.ALPHA_MIN_REG)
+        ctx.logger.info("C  built FillImputer id=%s (params=%s, %d relations)",
+                        self.id, self.params_id, len(source))
+        return FillImputer(fill, self.sigma_rule, **kw)
+
+    def describe(self) -> dict:
+        """The entry for a sidecar: its source (params id and the param types read),
+        rule, σ rule and scope name."""
+        types = TWIN_ACCEPTS if self.twin else PAIR_ACCEPTS
+        return {"kind": "fill", "id": self.id,
+                "source": {"params_id": self.params_id, "param_types": sorted(types)},
+                "rule": self.rule, "sigma_rule": self.sigma_rule,
+                "scope": _qualname(self.scope)}
+
+
+@dataclass(frozen=True)
+class CascadeStep:
+    """A cascade entry that is not a fill, e.g. the network's recipe traversal:
+    ``build(ctx)`` returns the imputer, whose ``id`` is the entry's."""
+    id:    str
+    build: Callable
+
+    def describe(self) -> dict:
+        return {"kind": "step", "id": self.id, "build": _qualname(self.build)}
+
+
 @dataclass(frozen=True)
 class ImpSection(Section):
     """The Stage 2 section (``collect_aggregate_impute.py``).
 
-    ``imputers(ctx)`` returns the imputer cascade in order, terminal fillers
-    included: a :class:`Cascade` for the fixpoint group, then each terminal imputer.
-    ``pre_impute(ctx)`` runs after aggregation and before the cascade is built,
-    ``post_impute(ctx)`` after the imputation; each may change ``ctx.agg_result`` in
-    place. ``None`` is no hook. ``stage_config(ctx)`` returns the dict of the case's
-    knob values that the imp sidecar records beside the generic keys. ``diag_year`` is
-    the year the Stage 2 diagnostics focus on (``None``: the first year of the acc's
-    time range). The knob ``P_PROP`` (the Lp exponent of the aggregation) is read by
-    the stage body, so every case's section declares it.
+    ``cascade`` declares the fixpoint group as data: its entries (:class:`FillEntry`,
+    :class:`CascadeStep`) in declaration order; the knob ``CASCADE_ORDER`` (empty:
+    declaration order) is the order they run in and must be a permutation of their ids
+    (:meth:`ordered`), and ``CASCADE_MAX_ITER`` caps the group's passes. ``terminal(ctx)``
+    returns the terminal imputers, run once after the cascade in the order listed (time,
+    share, flat prior; ADR 0011). ``pre_impute(ctx)`` runs after aggregation and before
+    the cascade is built, ``post_impute(ctx)`` after the imputation; each may change
+    ``ctx.agg_result`` in place. ``None`` is no hook. ``stage_config(ctx)`` returns the
+    dict of the case's knob values that the imp sidecar records beside the generic keys.
+    ``diag_year`` is the year the Stage 2 diagnostics focus on (``None``: the first year
+    of the acc's time range). The knob ``P_PROP`` (the Lp exponent of the aggregation) is
+    read by the stage body, and ``Q_REG`` and ``ALPHA_MIN_REG`` by a parametric fill, so
+    every case's section declares them.
     """
-    imputers:     Callable
+    cascade:      tuple
+    terminal:     Callable
     pre_impute:   Optional[Callable] = None
     post_impute:  Optional[Callable] = None
     stage_config: Optional[Callable] = None
     diag_year:    Optional[str] = None
-    validate:     Optional[Callable] = None
-    # ``validate(section)`` raises ``ValueError`` for knob values the case cannot run
-    # (copper: a CASCADE_ORDER that is no permutation of its cascade ids).
+    CASCADE_ORDER:    tuple = ()
+    CASCADE_MAX_ITER: int   = 10
+
+    def ordered(self) -> list:
+        """The cascade entries in ``CASCADE_ORDER``, which must be a permutation of
+        their ids (#104); anything else — an unknown, repeated or missing id — raises
+        ``ValueError``."""
+        by_id = {e.id: e for e in self.cascade}
+        order = tuple(self.CASCADE_ORDER) or tuple(by_id)
+        if len(by_id) != len(self.cascade) or sorted(order) != sorted(by_id):
+            raise ValueError(f"CASCADE_ORDER {order} must be a permutation of "
+                             f"{tuple(e.id for e in self.cascade)}")
+        return [by_id[k] for k in order]
+
+    def describe(self) -> dict:
+        """:meth:`Section.describe` with the cascade as its entries' records."""
+        return {**super().describe(), "cascade": [e.describe() for e in self.cascade]}
+
+    def validate(self) -> None:
+        """Raise ``ValueError`` for knob values the case cannot run: a
+        ``CASCADE_ORDER`` that is no permutation of the cascade's ids."""
+        self.ordered()
+
+    def imputers(self, ctx: "CaseContext") -> list:
+        """The imputers in the order they register: a :class:`Cascade` of the entries'
+        imputers in ``CASCADE_ORDER`` (none if the case declares no entries), then each
+        terminal imputer. The entries are built in declaration order."""
+        order = self.ordered()
+        built = {e.id: e.build(ctx) for e in self.cascade}
+        out = []
+        if order:
+            out.append(Cascade([built[e.id] for e in order], self.CASCADE_MAX_ITER))
+        return out + list(self.terminal(ctx))
 
 
 @dataclass(frozen=True)
@@ -196,6 +289,8 @@ class CaseContext:
     n_anchor_exempt : Stage 3: the region-years ``nodata_anchor_exempt`` spares.
     reports : name to DataFrame; the case's screens put their reports here and the
         Stage 2 driver writes each to ``<run>/diag/<name>.csv``.
+
+    :meth:`use_params` is how a Stage 2 entry reads a params file.
     """
     case:       CaseSpec
     acc:        AccountingStructure
@@ -206,3 +301,11 @@ class CaseContext:
     param_refs: list = field(default_factory=list)
     reports:    dict = field(default_factory=dict)
     n_anchor_exempt: int = 0
+
+    def use_params(self, params_id: str) -> str:
+        """The path of the registered ``params_id`` CSV; the run records the entry once
+        in ``param_refs``."""
+        entry = self.inputs.params.entry(params_id)
+        if entry not in self.param_refs:
+            self.param_refs.append(entry)
+        return str(self.inputs.params.resolve(params_id) / "params.csv")

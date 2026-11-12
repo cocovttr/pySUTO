@@ -7,9 +7,9 @@ Steps
 -----
 A  Load accounting structure and feed registry
 B  Collect and aggregate feeds (baci, crude_ore, icsg)
-C  Run the case's imputation cascade (copper: pysuto.cases.copper.imputers, #120):
+C  Run the case's imputation cascade (copper: pysuto.cases.copper.CASCADE, #120, #136):
      1  trade seeds, network closure, concentration, ore-grade and efficiency
-        ratios, iterated to a fixpoint in CASCADE_ORDER
+        ratios, iterated to a fixpoint in CASCADE_ORDER (the Fill entries of the case)
      2  temporal interpolation (interpolation-only)
      3  net-stock share imputation
      4  flat-prior fallback
@@ -118,11 +118,10 @@ if __name__ == "__main__":
     case = case_from_args(parser, args)
     overrides = overrides_from_cli(parser, args, tuple(case.imp.knobs()), case.imp.knobs())
     case = case.with_knobs("imp", overrides)
-    if case.imp.validate is not None:
-        try:
-            case.imp.validate(case.imp)
-        except ValueError as exc:
-            parser.error(str(exc))
+    try:
+        case.imp.validate()
+    except ValueError as exc:
+        parser.error(str(exc))
     # registries have no locking (#101)
     with stage_lock("collect_aggregate_impute", root=os.path.join(args.data_dir, "proc")):
         write_run_id(args.run_id_file,

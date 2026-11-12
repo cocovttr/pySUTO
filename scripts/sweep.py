@@ -61,7 +61,7 @@ FIXED: dict = {"const.DIAG_PLOT": False}
 # Re-measure on the first sweep (its manifest timestamps).
 STEP_MINUTES = {"imp": 2.8, "const": 4.4, "opt": 2.7}
 
-# The copper case's cascade_ids (pysuto.cases.copper); reversed, every pairwise
+# The copper case's cascade ids (pysuto.cases.copper.CASCADE); reversed, every pairwise
 # precedence flips.
 CASCADE_SHIPPED  = ("trade", "network", "conc", "ore_grade")
 CASCADE_REVERSED = tuple(reversed(CASCADE_SHIPPED))

@@ -15,7 +15,7 @@ from pathlib import Path
 
 import pytest
 
-from pysuto.cases.copper import CASE, cascade_in_order
+from pysuto.cases.copper import CASE
 from pysuto.knobs import parse_overrides
 
 REPO    = Path(__file__).resolve().parents[1]
@@ -121,14 +121,14 @@ class TestCascadeOrder:
 
     def test_the_default_order_is_todays_cascade(self):
         assert CASE.imp.CASCADE_ORDER == ("trade", "network", "conc", "ore_grade")
-        assert CASE.imp.cascade_ids == CASE.imp.CASCADE_ORDER
+        assert tuple(e.id for e in CASE.imp.cascade) == CASE.imp.CASCADE_ORDER
         knobs, _ = _surface("imp")
-        assert "CASCADE_ORDER" in knobs and "cascade_ids" not in knobs
+        assert "CASCADE_ORDER" in knobs and "cascade" not in knobs
 
-    def test_the_cascade_is_built_in_the_given_order(self):
-        by_id = {k: object() for k in CASE.imp.CASCADE_ORDER}
+    def test_the_cascade_is_ordered_as_given(self):
         order = ("network", "trade", "ore_grade", "conc")
-        assert cascade_in_order(by_id, order) == [by_id[k] for k in order]
+        got = CASE.with_knobs("imp", {"CASCADE_ORDER": order}).imp.ordered()
+        assert tuple(e.id for e in got) == order
 
     @pytest.mark.parametrize("order", [
         ("trade", "network", "conc", "ore_grade", "time"),        # unknown
@@ -137,7 +137,7 @@ class TestCascadeOrder:
     ])
     def test_an_order_that_is_not_a_permutation_is_refused(self, order):
         with pytest.raises(ValueError, match="permutation"):
-            cascade_in_order({k: object() for k in CASE.imp.CASCADE_ORDER}, order)
+            CASE.with_knobs("imp", {"CASCADE_ORDER": order}).imp.validate()
 
     def test_a_bad_order_fails_on_the_command_line_before_anything_is_loaded(self):
         r = _run("imp", "--set", 'CASCADE_ORDER=("trade","trade","conc","ore_grade")')

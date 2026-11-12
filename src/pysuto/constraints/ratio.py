@@ -98,7 +98,7 @@ class RatioConstraintBuilder(BaseConstraintBuilder):
     """
     Soft free-cone ratio constraint: a_i − r · a_j = ε_k
 
-    Loaded from the same params CSV schema as ParametricImputer.
+    Loaded from the same params CSV schema as ParamSource.
     The CSV uncertainty modes (sd / min_max / pedigree) state σ in *ratio units*;
     :meth:`from_csv` divides it by |r| into the *relative* σ_r each pair carries
     (#29), and :meth:`build_dynamic` rescales that to flow space symmetrically
@@ -145,7 +145,7 @@ class RatioConstraintBuilder(BaseConstraintBuilder):
         covered: np.ndarray | None = None,
     ) -> "RatioConstraintBuilder":
         """
-        Load from params CSV (same schema as ParametricImputer.from_csv).
+        Load from params CSV (same schema as ParamSource.from_params).
         Resolves A→B edge pairs and computes the relative σ_r = σ/|r| from unc_type
         (σ in ratio units, as ``ParamRow.sigma`` returns it). Raises ``ValueError``
         on a zero ratio with σ > 0, and on a soft row with no σ rule (``unc_type`` empty).
