@@ -118,8 +118,9 @@ class ParametricImputer(BaseImputer):
        edge's flow units (kt), every term of the Lp combination:
 
        * propagated source σ: forward |coeff|·σ_a, backward s(1/coeff)·σ_b;
-       * parameter σ: |f_target|·σ_param/|coeff| in both directions (first-order,
-         the form of ``TradeImputer`` and the Mass twin);
+       * parameter σ: forward |f_a|·σ_param, backward |f_a|·σ_param/|coeff|, i.e.
+         |f_target|·σ_param/|coeff| (first-order, the form of ``TradeImputer`` and
+         the Mass twin);
        * ε term: ε·|f_target|.
 
     2. ParametricImputer(relations=[...])  — directed fills from ParametricRelation
@@ -261,13 +262,12 @@ class ParametricImputer(BaseImputer):
             if not a_nan and b_nan:
                 f_b = float(coeff * f[a_id])
                 # Forward (A→B): bare coefficient. All terms in B's flow units (kt):
-                #   σ_b = Lp(|coeff|·σ_a, |f_b|·σ_param/|coeff|, ε·f_b)
-                # σ_param is in ratio units; |f_b|·σ_param/|coeff| = |f_a|·σ_param
-                # is its first-order image in flow units, as in TradeImputer (#148).
+                #   σ_b = Lp(|coeff|·σ_a, |f_a|·σ_param, ε·f_b)
+                # σ_param is in ratio units; |f_a|·σ_param (= |f_b|·σ_param/|coeff|)
+                # is its first-order image in flow units, as in TradeImputer, and
+                # stays defined for coeff == 0 (#148).
                 s_b   = lp_combine(
-                    [coeff * sigma[a_id],
-                     abs(f_b) * sig_p / abs(coeff) if coeff != 0.0 else 0.0,
-                     epsilon * f_b], p,
+                    [coeff * sigma[a_id], abs(f[a_id]) * sig_p, epsilon * f_b], p,
                 )
                 s_b, capped = _apply_cv_cap(s_b, f_b, cv_cap)
                 f[b_id]     = f_b

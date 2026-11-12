@@ -528,6 +528,15 @@ class TestParametricImputerCSV:
         assert sigma[0] == pytest.approx(size * sig_r / r ** 2, rel=1e-12)
         assert sigma[0] / abs(f[0]) == pytest.approx(sig_r / r, rel=1e-12)
 
+    def test_sigma_param_forward_with_zero_ratio_keeps_the_parameter_term(self, acc):
+        """A zero ratio (WR is copperless) fills 0 with σ = |a|·σ_r, not a σ-0 pin."""
+        f     = np.full(10, np.nan);  f[0]     = 500.0
+        sigma = np.full(10, np.nan);  sigma[0] = 0.0
+        imp = ParametricImputer(_csv_pairs=[(0, 2, 0.0, 0.001, 0.0, "p", "d")])
+        imp.impute(f, sigma, np.isnan(f), 0, acc)
+        assert f[2] == 0.0
+        assert sigma[2] == pytest.approx(500.0 * 0.001, rel=1e-12)
+
     def test_epsilon_added_in_quadrature(self, acc):
         f     = np.full(10, np.nan);  f[0]     = 10.0
         sigma = np.full(10, np.nan);  sigma[0] = 0.0
