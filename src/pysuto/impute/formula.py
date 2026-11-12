@@ -23,7 +23,7 @@ from pysuto.lp import lp_combine
 from pysuto.relation.param_relation import get_edge_cache
 from pysuto.relation.params import read_params
 
-from .base import BaseImputer, _apply_cv_cap, _log
+from .base import BaseImputer, _apply_cv_cap
 
 logger = get_logger(__name__)
 
@@ -175,14 +175,18 @@ class FormulaImputer(BaseImputer):
             return (1.0 / val) if coeff.transform == "inverse" else val
         return float(coeff)
 
-    def impute(
-        self,
-        f: np.ndarray,
-        sigma: np.ndarray,
-        missing: np.ndarray,
-        step: int,
-        acc_struct,
-    ) -> list[dict]:
+    def writer_scope(self, acc) -> np.ndarray:
+        """The union of the relations' target selectors."""
+        if self._ei_exp is None:
+            self.prepare(acc)
+        scope = np.zeros(acc.n_edges, dtype=bool)
+        eids = self._ei_exp["edge_id"].to_numpy(dtype=np.int64)
+        for t_mask, _ in self._precomp:
+            scope[eids[t_mask]] = True
+        return scope
+
+    def impute(self, ledger, step: int, acc_struct) -> None:
+        f, sigma = ledger.f, ledger.sigma
         # ── Lazy one-time setup ──────────────────────────────────────────
         if self._ei_exp is None:
             self.prepare(acc_struct)
@@ -194,7 +198,6 @@ class FormulaImputer(BaseImputer):
         ei_rt      = self._ei_rt
         ei_time_np = self._ei_time
         edge_ids   = ei_exp["edge_id"].values
-        entries: list[dict] = []
 
         _rb_col = {
             "from_matches_target_from": "region_from",
@@ -285,8 +288,6 @@ class FormulaImputer(BaseImputer):
 
                 s_val = lp_combine(lp_terms, self.p)
                 s_val, capped = _apply_cv_cap(s_val, f_val, self.cv_cap)
-                f[t_id]     = f_val
-                sigma[t_id] = s_val
                 if clipped and capped:
                     method = "formula_clipped_capped"
                 elif clipped:
@@ -295,13 +296,10 @@ class FormulaImputer(BaseImputer):
                     method = "formula_capped"
                 else:
                     method = "formula"
-                entries.append(_log(
-                    t_id, step, method,
-                    src_ids, src_coeffs, f_val, s_val,
-                    rel.description, None,
-                ))
-
-        return entries
+                ledger.write(
+                    t_id, f_val, s_val, step, method,
+                    src_ids, src_coeffs, rel.description, None,
+                )
 
 
 # ---------------------------------------------------------------------------

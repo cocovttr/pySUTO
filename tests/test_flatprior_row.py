@@ -12,6 +12,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
+from pysuto.impute import run_imputer
 from pysuto.impute.flat_prior import FlatPriorImputer
 
 
@@ -70,7 +71,7 @@ def _attach_full_coverage(imp, n_edges):
 
     a = _Agg()
     a.coverage = np.ones(n_edges, dtype=bool)
-    imp.attach_agg_result(a)
+    imp.attach(a)
 
 
 def _row_sub_masks(acc):
@@ -110,7 +111,7 @@ def test_row_inflation_one_is_no_op():
         masks={"row_supply": row_supply, "row_use": row_use},
     )
     _attach_full_coverage(imp, acc.n_edges)
-    imp.impute(f, sigma, missing, 0, acc)
+    run_imputer(imp, f, sigma, 0, acc)
 
     # Inflation=1 → sigma of ROW supply (edge 3) equals sigma of domestic supply (edge 1).
     assert sigma[3] / sigma[1] == pytest.approx(1.0)
@@ -140,7 +141,7 @@ def test_row_inflation_multiplies_cv_for_row_edges():
         masks={"row_supply": row_supply, "row_use": row_use},
     )
     _attach_full_coverage(imp, acc.n_edges)
-    imp.impute(f, sigma, missing, 0, acc)
+    run_imputer(imp, f, sigma, 0, acc)
 
     # Edge 1 (supply, domestic) vs edge 3 (supply, ROW): same level-2 scale group
     # (Mining, Mass), so sigma ratio = inflation factor.

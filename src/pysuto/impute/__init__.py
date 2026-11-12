@@ -8,6 +8,8 @@ Public surface (re-exported here so call sites can keep using
 * :class:`ImputationEngine`    — orchestrator
 * :class:`ImputationLog`       — per-edge fill provenance table
 * :class:`ImputationMetadata`  — run-level per-step summary
+* :class:`PriorLedger`         — the one write path: no-overwrite + writer scope
+* :class:`ScopeError`          — raised on an out-of-scope write under ``strict_scope``
 
 Imputers (run order is up to the engine's registration sequence):
 * :class:`TradeImputer`        — seed cross-region Flow→Process CC from BACI Mass twin
@@ -25,6 +27,7 @@ Supporting dataclasses (used in :class:`ParametricImputer` /
 
 from .base       import BaseImputer
 from .engine     import ImputationEngine, ImputationLog, ImputationMetadata
+from .ledger     import PriorLedger, ScopeError, run_imputer
 from .parametric import ParametricImputer, ParametricRelation, _reg_sensitivity
 from .formula    import FormulaImputer, FormulaRelation, ParamRef, SourceTerm
 from .network    import NetworkImputer
@@ -39,6 +42,9 @@ __all__ = [
     "ImputationEngine",
     "ImputationLog",
     "ImputationMetadata",
+    "PriorLedger",
+    "ScopeError",
+    "run_imputer",
     "TradeImputer",
     "NetworkImputer",
     "ParametricImputer",

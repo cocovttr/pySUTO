@@ -23,7 +23,7 @@ import pandas as pd
 import pytest
 
 from pysuto.acc import ValuationRoles
-from pysuto.impute import NetworkImputer, TradeImputer
+from pysuto.impute import NetworkImputer, TradeImputer, run_imputer
 from pysuto.lp import lp_combine
 
 
@@ -201,8 +201,8 @@ def _run(acc, trade, network, seeds):
         e = acc.eid(fs, fr, ts, tr, v)
         f[e] = val
         sigma[e] = 0.01 * abs(val) if val else 0.01
-    entries = trade.impute(f, sigma, np.isnan(f), 0, acc)       # trade first
-    entries += network.impute(f, sigma, np.isnan(f), 1, acc)    # then network (internal fixpoint)
+    entries = run_imputer(trade, f, sigma, 0, acc)       # trade first
+    entries += run_imputer(network, f, sigma, 1, acc)    # then network (internal fixpoint)
     method = {e["edge_id"]: e["method"] for e in entries}
     return f, sigma, method
 
@@ -265,14 +265,23 @@ def test_no_conc_row_is_noop(tmp_path):
     m = acc.eid("Anode", "B", "ER", "A", "Mass")
     f[m] = 20.0
     sigma[m] = 0.2
-    entries = trade.impute(f, sigma, np.isnan(f), 0, acc)
+    entries = run_imputer(trade, f, sigma, 0, acc)
     imp = acc.eid("Anode", "B", "ER", "A", "CC")
     assert entries == []
     assert np.isnan(f[imp])
 
 
-def test_ownership_partition_holds_on_chain(tmp_path):
-    from pysuto.diag import ownership_violations
+def test_trade_and_network_scopes_partition_the_edges(tmp_path):
+    # The declared scopes are the ownership partition (ADR 0010): the trade seed owns
+    # cross-region Flow→Process CC edges, the network same-region ones; no edge is both.
+    acc, trade, network = _build(tmp_path)
+    assert not (trade.writer_scope(acc) & network.writer_scope(acc)).any()
+    em = acc.edge_meta
+    cross = (em["from_region"] != em["to_region"]).to_numpy()
+    assert not network.writer_scope(acc)[em["edge_id"].to_numpy()[cross]].any()
+
+
+def test_chain_runs_strict_and_every_write_is_in_scope(tmp_path):
     acc, trade, network = _build(tmp_path)
     f = np.full(acc.n_edges, np.nan)
     sigma = np.full(acc.n_edges, np.nan)
@@ -283,25 +292,7 @@ def test_ownership_partition_holds_on_chain(tmp_path):
         e = acc.eid(fs, fr, ts, tr, v)
         f[e] = val
         sigma[e] = 0.01 * abs(val)
-    entries  = trade.impute(f, sigma, np.isnan(f), 0, acc)
-    entries += network.impute(f, sigma, np.isnan(f), 1, acc)
-    log = pd.DataFrame(entries)
-    assert ownership_violations(log, acc.edge_meta).empty
-
-
-def test_ownership_violations_flags_breaches():
-    from pysuto.diag import ownership_violations
-    edge_meta = pd.DataFrame({
-        "edge_id":     [0, 1, 2, 3],
-        "from_region": ["A", "A", "A", "B"],
-        "to_region":   ["A", "B", "A", "A"],
-    })
-    log = pd.DataFrame({
-        "edge_id": [0, 1, 2, 3],
-        "method":  ["network_forward",  # 0 same-region net → ok
-                    "network_balance",  # 1 cross-region net → VIOLATION
-                    "trade_seed",       # 2 same-region trade → VIOLATION
-                    "trade_seed"],      # 3 cross-region trade → ok
-    })
-    bad = ownership_violations(log, edge_meta)
-    assert set(bad["edge_id"]) == {1, 2}
+    seeded  = run_imputer(trade, f, sigma, 0, acc)        # strict: raises on a breach
+    derived = run_imputer(network, f, sigma, 1, acc)
+    assert {e["edge_id"] for e in seeded} <= set(np.flatnonzero(trade.writer_scope(acc)))
+    assert {e["edge_id"] for e in derived} <= set(np.flatnonzero(network.writer_scope(acc)))

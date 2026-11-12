@@ -21,6 +21,7 @@ from pysuto.logging import get_logger
 from pysuto.relation.param_relation import get_edge_cache
 
 from .base import BaseImputer
+from .ledger import PriorLedger
 
 logger = get_logger(__name__)
 
@@ -115,10 +116,16 @@ class ImputationEngine:
     early if no missing edges remain. Every fill is stamped with the
     imputer's ``id`` and the cascade ``pass`` number (None for terminals) in
     both the ImputationLog and the per-step metadata.
+
+    Every write goes through one :class:`~pysuto.impute.ledger.PriorLedger`, which
+    enforces no-overwrite and each imputer's declared writer scope at write time.
+    ``strict_scope=True`` raises :class:`~pysuto.impute.ledger.ScopeError` on an
+    out-of-scope write (tests); the default logs it at WARNING and drops it.
     """
 
-    def __init__(self, acc_struct) -> None:
+    def __init__(self, acc_struct, strict_scope: bool = False) -> None:
         self._acc_struct = acc_struct
+        self._strict_scope = bool(strict_scope)
         self._imputers: list[BaseImputer] = []       # terminal (run once)
         self._cascade:  list[BaseImputer] = []       # iterated to fixpoint
         self._cascade_max_iter: int = 1
@@ -131,8 +138,7 @@ class ImputationEngine:
 
     def register(self, imputer: BaseImputer) -> None:
         """Register a terminal imputer (run once, after the cascade)."""
-        if hasattr(imputer, "prepare"):
-            imputer.prepare(self._acc_struct)
+        imputer.prepare(self._acc_struct)
         self._imputers.append(imputer)
 
     def register_cascade(self, imputers: list[BaseImputer], max_iter: int = 10) -> None:
@@ -143,14 +149,14 @@ class ImputationEngine:
         always terminates).
         """
         for imp in imputers:
-            if hasattr(imp, "prepare"):
-                imp.prepare(self._acc_struct)
+            imp.prepare(self._acc_struct)
             self._cascade.append(imp)
         self._cascade_max_iter = int(max_iter)
 
     def run(self, agg_result: AggregationResult) -> AggregationResult:
         f     = agg_result.f_agg.copy()
         sigma = agg_result.sigma_agg.copy()
+        ledger = PriorLedger(f, sigma, strict_scope=self._strict_scope)
         log   = ImputationLog()
         meta  = ImputationMetadata()
         run_ts = datetime.now().isoformat(timespec="seconds")
@@ -170,7 +176,7 @@ class ImputationEngine:
             for imputer in self._cascade:
                 if int(np.isnan(f).sum()) == 0:
                     break
-                self._run_one(imputer, pass_no, f, sigma, agg_result,
+                self._run_one(imputer, pass_no, ledger, agg_result,
                               log, meta, n_total, run_ts)
             if int(np.isnan(f).sum()) == missing_before_pass:
                 # Dead pass: a full sweep filled nothing new → fixpoint reached.
@@ -192,7 +198,7 @@ class ImputationEngine:
             if int(np.isnan(f).sum()) == 0:
                 logger.info("step %d: no missing edges — stopping early", self._step)
                 break
-            self._run_one(imputer, None, f, sigma, agg_result,
+            self._run_one(imputer, None, ledger, agg_result,
                           log, meta, n_total, run_ts)
 
         agg_result.f_agg               = f
@@ -202,27 +208,25 @@ class ImputationEngine:
         return agg_result
 
     def _run_one(
-        self, imputer, pass_no, f, sigma, agg_result, log, meta, n_total, run_ts,
+        self, imputer, pass_no, ledger, agg_result, log, meta, n_total, run_ts,
     ) -> None:
-        """Run one imputer once: impute, clip, stamp provenance, log + record."""
+        """Run one imputer once: impute, clip, log + record."""
         step = self._step
+        f = ledger.f
         missing = np.isnan(f)
         n_missing_before = int(missing.sum())
         cov_before = (n_total - n_missing_before) / n_total
 
-        # Hand the (read-only) aggregation context to any imputer that opts in
-        # via attach_agg_result(); FlatPriorImputer uses this to read per-edge
-        # coverage for density-aware CV.
-        if hasattr(imputer, "attach_agg_result"):
-            imputer.attach_agg_result(agg_result)
+        # Hand the (read-only) aggregation context to the imputer; FlatPriorImputer
+        # uses it to read per-edge coverage for density-aware CV, TimeImputer to
+        # resolve its feed scope. The scope is read after attach for that reason.
+        imputer.attach(agg_result)
+        ledger.open(imputer.id, pass_no, imputer.writer_scope(self._acc_struct))
 
         t0 = time.perf_counter()
-        entries = imputer.impute(f, sigma, missing, step, self._acc_struct)
+        imputer.impute(ledger, step, self._acc_struct)
         elapsed = time.perf_counter() - t0
-        for e in entries:
-            e["imputer_id"] = imputer.id
-            e["pass"] = pass_no
-        log.extend(entries)
+        log.extend(ledger.close())
 
         # Post-step bounds enforcement: warn and clip any newly-filled
         # out-of-bounds values.
@@ -272,6 +276,6 @@ class ImputationEngine:
             "edges_filled": n_filled,
             "edges_missing_after": n_missing_after,
             "pct_additionally_filled": round(100 * n_filled / n_total, 2),
-            "config": imputer.config() if hasattr(imputer, "config") else {},
+            "config": imputer.config(),
         })
         self._step += 1

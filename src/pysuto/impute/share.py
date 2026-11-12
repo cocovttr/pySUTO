@@ -46,7 +46,7 @@ from pysuto.logging import get_logger
 from pysuto.relation.param_relation import expand_edge_index
 from pysuto.relation.params import WILDCARD, read_params
 
-from .base import BaseImputer, _log
+from .base import BaseImputer
 
 logger = get_logger(__name__)
 
@@ -127,15 +127,21 @@ class ShareImputer(BaseImputer):
                 "seed_cv": self.seed_cv, "seed_abs_floor": self.seed_abs_floor}
 
     # ------------------------------------------------------------------
-    def impute(self, f, sigma, missing, step, acc_struct) -> list[dict]:
+    def writer_scope(self, acc) -> np.ndarray:
+        """The stock legs: every PSC, MESC and USC net-change edge."""
+        ei = expand_edge_index(acc.edge_index, acc.node_index)
+        scope = np.zeros(acc.n_edges, dtype=bool)
+        for ind in _NET:
+            scope[self._sel(ei, _NET[ind])["edge_id"].to_numpy(dtype=np.int64)] = True
+        return scope
+
+    def impute(self, ledger, step, acc_struct) -> None:
         ei = expand_edge_index(acc_struct.edge_index, acc_struct.node_index)
-        entries: list[dict] = []
         for ind in ("psc", "mesc", "usc"):
             if _MODE[ind] == "transfer":
-                entries += self._transfer(ind, f, sigma, ei, step)
+                self._transfer(ind, ledger, ei, step)
             else:
-                entries += self._seed(ind, f, sigma, ei, step)
-        return entries
+                self._seed(ind, ledger, ei, step)
 
     # ------------------------------------------------------------------
     def _sel(self, ei, spec):
@@ -150,8 +156,8 @@ class ShareImputer(BaseImputer):
         return max(k * abs(base_val), k * self.scale_abs_floor)
 
     # ---- PSC: share = net/base transferred across the region's years ----
-    def _transfer(self, ind, f, sigma, ei, step) -> list[dict]:
-        entries: list[dict] = []
+    def _transfer(self, ind, ledger, ei, step) -> None:
+        f = ledger.f
         net  = self._sel(ei, _NET[ind])
         base_sel = [self._sel(ei, s) for s in _BASE[ind]]
 
@@ -202,23 +208,22 @@ class ShareImputer(BaseImputer):
                 base_val, base_ids = bv
                 f_new = sh * base_val
                 s_new = self._floor_sigma(p95, base_val)
-                f[e], sigma[e] = f_new, s_new
-                entries.append(_log(
-                    e, step, "share_transfer", base_ids, [sh] * len(base_ids),
-                    f_new, s_new, f"{ind.upper()} = share·(CSXEW+CER)",
+                ledger.write(
+                    e, f_new, s_new, step, "share_transfer", base_ids,
+                    [sh] * len(base_ids), f"{ind.upper()} = share·(CSXEW+CER)",
                     f"share_{ind}_{region}",
-                ))
-        return entries
+                )
 
     # ---- MESC/USC: zero-mean seed per co-located edge, held at 1 % / 0.3 kt ----
-    def _seed(self, ind, f, sigma, ei, step) -> list[dict]:
+    def _seed(self, ind, ledger, ei, step) -> None:
+        f = ledger.f
         keys = ["region_from", "region_to", "time", "valuation"]
         net  = self._sel(ei, _NET[ind])[["edge_id"] + keys]
         base = self._sel(ei, _BASE[ind][0])[["edge_id"] + keys].rename(
             columns={"edge_id": "base_id"})
         m = net.merge(base, on=keys, how="inner")
         if m.empty:
-            return []
+            return
 
         net_ids  = m["edge_id"].to_numpy(dtype=int)
         base_ids = m["base_id"].to_numpy(dtype=int)
@@ -226,11 +231,12 @@ class ShareImputer(BaseImputer):
         fill = (np.isnan(f[net_ids]) & ~np.isnan(f[base_ids]))
         e_fill, b_fill = net_ids[fill], base_ids[fill]
         s_new = np.maximum(self.seed_cv * np.abs(f[b_fill]), self.seed_abs_floor)
-        f[e_fill], sigma[e_fill] = 0.0, s_new
         desc = f"{ind.upper()} zero-mean, σ=max(cv·|FU|, floor)"
-        return [_log(int(e), step, "share_seed", [int(b)], [0.0], 0.0, float(s), desc,
-                     f"seed_{ind}")
-                for e, b, s in zip(e_fill, b_fill, s_new)]
+        ledger.write_many(
+            e_fill, np.zeros(e_fill.size), s_new, step, "share_seed", desc,
+            f"seed_{ind}", sources=[[int(b)] for b in b_fill],
+            coeffs=[[0.0]] * e_fill.size,
+        )
 
 
 def _interp_share(share: dict, years: list) -> dict:
