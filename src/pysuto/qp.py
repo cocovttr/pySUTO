@@ -32,7 +32,6 @@ import scipy.sparse as sp
 SOLVED             = "solved"
 SOLVED_INACCURATE  = "solved_inaccurate"
 FAILED             = "failed"
-STATUSES           = (SOLVED, SOLVED_INACCURATE, FAILED)
 
 
 @dataclass
