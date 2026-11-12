@@ -77,6 +77,7 @@ estimates of every stage scored against the truth (:class:`pysuto.diag.truth.Tru
 
 from __future__ import annotations
 
+import copy
 import hashlib
 import inspect
 import json
@@ -140,6 +141,7 @@ PathLike = Union[str, os.PathLike]
 
 SEED    = 59
 ACC_ID  = "toy"
+ACC_ID_COPRODUCT = "toy_coproduct"      # the co-product variant's acc id (#130)
 REGIONS = ("Montara", "Portua", "Isla")
 YEARS   = ("2001", "2002", "2003", "2004", "2005")
 
@@ -212,11 +214,27 @@ ACC_REF = {"id": ACC_ID, "version": 1,
                                   ).hexdigest()[:8]}
 
 
-def build_acc(storage_dir: PathLike, ref: Optional[dict] = None) -> AccountingStructure:
-    """Build the toy's accounting structure from ``ACC_SPEC`` and save it under
-    ``storage_dir/toy`` with its build record (``ref``: an acc input entry, default
-    ``ACC_REF``). Returns the structure (420 admissible edges)."""
-    acc = AccountingStructure.from_spec(ACC_SPEC, ACC_ID, storage_dir=str(storage_dir))
+def acc_spec(coproduct: bool = False) -> dict:
+    """The toy's acc spec; with ``coproduct`` Smelting also supplies ``Dust``, a second
+    Flow product that a ``Use`` edge consumes (#130). The default is ``ACC_SPEC``."""
+    if not coproduct:
+        return ACC_SPEC
+    spec = copy.deepcopy(ACC_SPEC)
+    spec["sectors"].insert(10, {"name": "Dust", "entity": "Flow"})
+    spec["supply"]["Smelting"] = ["Metal", "Dust", "Slag"]
+    spec["use"]["Dust"] = ["Use"]
+    return spec
+
+
+def build_acc(storage_dir: PathLike, ref: Optional[dict] = None,
+              coproduct: bool = False) -> AccountingStructure:
+    """Build the toy's accounting structure from ``ACC_SPEC`` (``acc_spec(coproduct)``)
+    and save it under ``storage_dir/toy`` (``toy_coproduct``) with its build record
+    (``ref``: an acc input entry, default ``ACC_REF``). Returns the structure (420
+    admissible edges; 480 with the co-product)."""
+    acc = AccountingStructure.from_spec(acc_spec(coproduct),
+                                        ACC_ID_COPRODUCT if coproduct else ACC_ID,
+                                        storage_dir=str(storage_dir))
     acc.save()
     write_build_record(str(storage_dir), ref or ACC_REF)
     return acc
@@ -233,6 +251,8 @@ _EFF_SMELT = 0.97                                               # smelting recov
 _C_CONC    = 0.28                                               # concentrate grade
 _C_METAL   = 0.99                                               # metal grade
 _C_SCRAP   = 0.70                                               # scrap grade
+_C_DUST    = 0.20                                               # dust grade (co-product)
+_DUST_SHARE = 0.25                                             # dust's share of products
 _K_STRIP   = 2.0                                                # waste rock per ore
 # where each region's concentrate goes (shares of its output; Portua mills nothing)
 _SHARES    = {"Montara": {"Montara": 0.20, "Portua": 0.70, "Isla": 0.10},
@@ -246,10 +266,10 @@ _TRUTH_COLUMNS = ["time", "valuation", "from_region", "from_sector", "from_entit
                   "to_region", "to_sector", "to_entity", "value"]
 _EDGE_KEY      = ["time", "valuation", "from_sector", "from_region", "to_sector",
                   "to_region"]
-_ENTITY        = {s["name"]: s["entity"] for s in ACC_SPEC["sectors"]}
+_ENTITY        = {s["name"]: s["entity"] for s in acc_spec(True)["sectors"]}
 
 
-def truth(seed: int = SEED) -> pd.DataFrame:
+def truth(seed: int = SEED, coproduct: bool = False) -> pd.DataFrame:
     """The ground truth: every edge's value in both valuations and every year.
 
     Ore and scrap follow a linear trend with a 1 % seeded wiggle; everything else follows
@@ -260,8 +280,16 @@ def truth(seed: int = SEED) -> pd.DataFrame:
     Returns
     -------
     DataFrame
-        420 rows, columns ``time, valuation, from_region, from_sector, from_entity,
-        to_region, to_sector, to_entity, value`` (in ``UNITS`` of the valuation).
+        420 rows (480 with ``coproduct``), columns ``time, valuation, from_region,
+        from_sector, from_entity, to_region, to_sector, to_entity, value`` (in ``UNITS``
+        of the valuation).
+
+    Notes
+    -----
+    ``coproduct`` adds ``Dust`` to Smelting's products (#130): the pooled recovery
+    ``Σ products = eff · Σ inputs`` stays ``_EFF_SMELT``, and ``_DUST_SHARE`` of the
+    product content leaves as dust at grade ``_C_DUST``, the rest as metal. The draws
+    are the same, so the other edges are those of the toy.
     """
     rng  = np.random.default_rng([seed, 0])
     rows = []
@@ -305,11 +333,22 @@ def truth(seed: int = SEED) -> pd.DataFrame:
             in_cc      += scrap[s]
             in_mass    += scrap[s] / _C_SCRAP
             metal_cc    = _EFF_SMELT * in_cc
+            if coproduct:
+                dust_cc   = _DUST_SHARE * metal_cc      # the pooled product content
+                metal_cc  = metal_cc - dust_cc
+                dust_mass = dust_cc / _C_DUST
             metal_mass  = metal_cc / _C_METAL
             lvl, slope  = _STOCK_KT[s]
             stock       = lvl + slope * c
             edge(t, "Smelting", s, "Metal", s, metal_mass,           metal_cc)
-            edge(t, "Smelting", s, "Slag",  s, in_mass - metal_mass, in_cc - metal_cc)
+            if coproduct:
+                edge(t, "Smelting", s, "Dust", s, dust_mass, dust_cc)
+                edge(t, "Dust",     s, "Use",  s, dust_mass, dust_cc)
+                edge(t, "Smelting", s, "Slag", s, in_mass - metal_mass - dust_mass,
+                     in_cc - metal_cc - dust_cc)
+            else:
+                edge(t, "Smelting", s, "Slag", s, in_mass - metal_mass,
+                     in_cc - metal_cc)
             edge(t, "Metal",    s, "Stock", s, stock / _C_METAL,     stock)
             edge(t, "Metal",    s, "Use",   s, metal_mass - stock / _C_METAL,
                  metal_cc - stock)
@@ -621,13 +660,26 @@ def _a_b(a: tuple, b: tuple) -> dict:
     return dict(zip(keys, a + b))
 
 
-def write_params(params_dir: PathLike) -> "dict[str, Path]":
+# The co-product variant (#130): dust's two concentration rows, and the one pooled
+# smelting efficiency row, whose B side is every Flow product of Smelting.
+_CONC_ROWS_COPRODUCT = (
+    ("concdustuse",    "into", "Dust", "*", _C_DUST, 0.02),
+    ("concdustsupply", "out",  "Dust", "*", _C_DUST, 0.02),
+)
+
+
+def write_params(params_dir: PathLike, coproduct: bool = False) -> "dict[str, Path]":
     """Write the toy's ``conc``, ``eff`` and ``stripping_ratio`` CSVs as
     ``params_dir/<param_id>/current/params.csv`` in the project's params schema
-    (``data/input/params/params_template.csv``). Returns ``{param_id: path}``."""
+    (``data/input/params/params_template.csv``). Returns ``{param_id: path}``.
+
+    ``coproduct`` adds the Dust concentration rows and pools both Smelting products on
+    the ``effsmelting`` row (product ``*``, the Flow outputs of Smelting): Stage 3's agg
+    row is then ``Σ (Metal + Dust) − eff · Σ inputs``."""
     same_content = ("same",) * 7 + (CONTENT,)
     conc = []
-    for pid, edges, sector, region, value, sd in _CONC_ROWS:
+    for pid, edges, sector, region, value, sd in (
+            _CONC_ROWS + (_CONC_ROWS_COPRODUCT if coproduct else ())):
         entity = _ENTITY[sector]
         a = (("*", "*", "*", sector, entity, region, "*", GROSS) if edges == "into"
              else (sector, entity, region, "*", "*", "*", "*", GROSS))
@@ -640,6 +692,8 @@ def write_params(params_dir: PathLike) -> "dict[str, Path]":
             **_a_b(a, same_content)))
     eff = []
     for pid, agg, inp, process, product, value, lo, hi in _EFF_ROWS:
+        if coproduct and process == "Smelting":
+            product = "*"
         entity = "*" if inp == "*" else _ENTITY[inp]
         eff.append(_param_row(
             param_id=pid, param_type="efficiency", agg=agg,
@@ -858,8 +912,14 @@ def _latest(registry) -> str:
                        f"run the stage first") from None
 
 
+def _coproduct(tree: dict) -> bool:
+    """Whether the run tree holds the co-product variant's structure (#130)."""
+    return (tree["acc"] / ACC_ID_COPRODUCT).is_dir()
+
+
 def _load_acc(tree: dict) -> AccountingStructure:
-    return AccountingStructure.load(ACC_ID, storage_dir=str(tree["acc"]))
+    return AccountingStructure.load(ACC_ID_COPRODUCT if _coproduct(tree) else ACC_ID,
+                                    storage_dir=str(tree["acc"]))
 
 
 def _upstream(sidecar: dict, key: str) -> str:
@@ -869,15 +929,17 @@ def _upstream(sidecar: dict, key: str) -> str:
     return value
 
 
-def write_inputs(run_root: PathLike) -> InputRegistries:
+def write_inputs(run_root: PathLike, coproduct: bool = False) -> InputRegistries:
     """Lay the toy's inputs out as a data dir's input registries under
-    ``run_root/input``: the acc spec as ``acc/toy/current/acc.json`` (ADR 0046) and the
-    :func:`write_params` CSVs. Returns the registries, scanned (v1 on a fresh tree)."""
+    ``run_root/input``: the acc spec as ``acc/toy/current/acc.json`` (ADR 0046;
+    ``acc/toy_coproduct`` with ``coproduct``) and the :func:`write_params` CSVs. Returns
+    the registries, scanned (v1 on a fresh tree)."""
     input_root = _tree(run_root)["input"]
-    acc_dir = input_root / "acc" / ACC_ID / "current"
+    acc_dir = input_root / "acc" / (ACC_ID_COPRODUCT if coproduct else ACC_ID) / "current"
     acc_dir.mkdir(parents=True, exist_ok=True)
-    (acc_dir / "acc.json").write_text(json.dumps(ACC_SPEC, indent=2), encoding="utf-8")
-    write_params(input_root / "params")
+    (acc_dir / "acc.json").write_text(json.dumps(acc_spec(coproduct), indent=2),
+                                      encoding="utf-8")
+    write_params(input_root / "params", coproduct)
     return InputRegistries.initialize(root=str(input_root))
 
 
@@ -901,10 +963,12 @@ def _feed_steps(feed: SyntheticFeed, acc: AccountingStructure) -> tuple:
     return ct, wm, F_src, result, row_summary
 
 
-def run_stage1(run_root: PathLike, seed: int = SEED) -> "dict[str, str]":
+def run_stage1(run_root: PathLike, seed: int = SEED,
+               coproduct: bool = False) -> "dict[str, str]":
     """Stage 1: lay out the inputs (:func:`write_inputs`), build the accounting
     structure from the registered acc, then register the three synthetic feeds, each
-    run's sidecar recording ``seed``.
+    run's sidecar recording ``seed``. ``coproduct`` is the variant of
+    :mod:`pysuto.cases.toy_coproduct` (#130).
 
     Returns
     -------
@@ -912,12 +976,13 @@ def run_stage1(run_root: PathLike, seed: int = SEED) -> "dict[str, str]":
         ``{feed_id: feed_run_id}`` for ``survey``, ``bureau`` and ``customs``.
     """
     tree      = _tree(run_root)
-    acc_entry = write_inputs(run_root).acc.entry(ACC_ID)
-    acc       = build_acc(tree["acc"], acc_entry)
+    acc_id    = ACC_ID_COPRODUCT if coproduct else ACC_ID
+    acc_entry = write_inputs(run_root, coproduct).acc.entry(acc_id)
+    acc       = build_acc(tree["acc"], acc_entry, coproduct)
     registry  = DataFeedRegistry(odir=str(tree["feed"]))
     registry.load_index()
     run_ids  = {}
-    for feed_id, feed in make_feeds(truth(seed), seed).items():
+    for feed_id, feed in make_feeds(truth(seed, coproduct), seed).items():
         _, wm, F_src, result, row_summary = _feed_steps(feed, acc)
         entry = register_feed(
             wm, feed.metadata, result, registry,
@@ -1151,7 +1216,7 @@ def scoreboard(run_root: PathLike, run_ids: dict, seed: Optional[int] = None
     }
     return TruthDiag(
         estimates,
-        truth_vector(truth(recorded), acc),
+        truth_vector(truth(recorded, _coproduct(tree)), acc),
         _global(post.per_timestep, "sigma_a_star", acc.n_edges),
         acc.edge_meta,
         sigma_prior = sigma_prior,

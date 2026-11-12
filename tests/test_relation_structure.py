@@ -100,11 +100,13 @@ def test_acc_imports_nothing_from_impute():
             assert not any(a.name.startswith("pysuto.impute") for a in node.names)
 
 
-def test_the_network_imputer_refuses_a_co_product_recipe_by_name(two_product, tmp_path):
+def test_the_network_imputer_accepts_a_co_product_recipe(two_product, tmp_path):
     eff = tmp_path / "eff.csv"
     conc = tmp_path / "conc.csv"
     for p in (eff, conc):
         p.write_text("param_id;param_type\n")
     imputer = NetworkImputer(eff_csv=str(eff), conc_csv=str(conc))
-    with pytest.raises(ValueError, match="Mining"):
-        imputer.prepare(two_product)
+    imputer.prepare(two_product)
+    mining = [r for r in imputer._recipes if len(r.products) == 2]
+    assert mining and len(mining) == len([r for r in process_recipes(two_product)
+                                          if r.process == "Mining"])
