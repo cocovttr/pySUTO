@@ -609,7 +609,8 @@ class CopperConst(ConstSection):
     PIN_FLAT_PRIOR_ZEROS: bool = True
     # The sectors the pin spares: the same list as NODATA_ANCHOR_EXCLUDE, held apart
     # because the engine takes it separately (#145; it was the engine's default).
-    PIN_EXCLUDE_SECTORS: tuple = ("CO", "Mining", "Ore", "WR", "Tailings", "Slag", "PSC")
+    PIN_EXCLUDE_SECTORS: tuple = ("CO", "Mining", "Ore", "WR", "Tailings", "Slag",
+                                  "PSC")
     # Soft-ratio σ_c scaling (REP analysis_opt_20260611_075036 §8.2): the CSV σ (ratio
     # units) is made relative, σ_r = σ/|r| (#29), and rescaled to flow space per row,
     # σ_c = max(σ_r, REL_FLOOR) · max(Σ|a₀,num|, |r|·Σ|a₀,denom|, ABS_FLOOR).
@@ -689,8 +690,8 @@ class CopperConst(ConstSection):
 # -----------------------------------------------------------------------------
 
 def scale_total_resolver(ctx):
-    """The scale totals' σ resolver (ADR 0016, 0019, 0025): ``pysuto.constraints.anchors``'
-    resolver over ``ctx.agg_result`` with the case's Stage 3 knobs."""
+    """The scale totals' σ resolver (ADR 0016, 0019, 0025): the resolver of
+    ``pysuto.constraints.anchors`` over ``ctx.agg_result`` with the case's Stage 3 knobs."""
     spec = ctx.case.const
     return anchors.scale_total_resolver(
         ctx.acc, ctx.agg_result,

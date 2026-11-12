@@ -174,7 +174,8 @@ def test_nodata_anchor_exempt_spares_data_aware_sectors_in_listed_region_years(
 def test_engine_spares_no_sector_from_the_pin_unless_the_case_names_them(toy_acc,
                                                                          tmp_path):
     assert ConstraintEngine(toy_acc, storage_dir=str(tmp_path))._pin_exclude_sectors == ()
-    named = ConstraintEngine(toy_acc, storage_dir=str(tmp_path), pin_exclude_sectors=("Ore",))
+    named = ConstraintEngine(toy_acc, storage_dir=str(tmp_path),
+                             pin_exclude_sectors=("Ore",))
     assert named._pin_exclude_sectors == ("Ore",)
 
 

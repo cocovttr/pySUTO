@@ -200,7 +200,7 @@ def nodata_anchor_exempt(acc, params_csv: str, *, param_prefix: str, exclude: tu
     region_years = {(r.selectors[region_key], r.selectors[time_key])
                     for r in rows if r.param_id.startswith(param_prefix)}
     mask = nodata_exempt_mask(acc, exclude, data_aware, region_years)
-    (logger or _log).info("No-data anchor: extraction chain spared in %d region-years "
+    (logger or _log).info("No-data anchor: data-aware sectors spared in %d region-years "
                           "with a relation-set magnitude; %d edges spared in total",
                           len(region_years), int(mask.sum()))
     return mask, len(region_years)
