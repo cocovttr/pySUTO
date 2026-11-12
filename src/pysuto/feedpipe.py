@@ -545,6 +545,8 @@ class FeedBuild:
     :func:`run_feed` fills the fields in step order, so a hook finds every field its
     step precedes: ``user_weights`` sees up to ``meta``, ``post_propagate`` all of them.
     ``input_ref`` is the parent block's ``inputs`` dict; a hook may add entries to it.
+    ``registry_dir`` is the feed-run registry (``<data_dir>/proc/feed/registry``), where a
+    hook finds the runs of the feeds built before it.
     """
     spec:       "FeedSpec"
     acc:        object
@@ -552,6 +554,7 @@ class FeedBuild:
     input_root: str
     feed_dir:   str
     input_ref:  dict
+    registry_dir: str = ""
     raw_df:     Optional[pd.DataFrame] = None
     tables:     Optional[dict] = None
     meta:       Optional[DataFeedMetadata] = None
@@ -753,7 +756,7 @@ def _run_feed(spec, acc_id, data_dir, config_path, run_log, diag):
     # A — accounting structure
     acc = load_acc_structure(acc_id, acc_dir)
     b = FeedBuild(spec=spec, acc=acc, inputs=inputs, input_root=input_root,
-                  feed_dir=str(feed_dir), input_ref=input_ref)
+                  feed_dir=str(feed_dir), input_ref=input_ref, registry_dir=registry_dir)
 
     # B — raw data + concordance tables + metadata sidecar
     _log.info("=" * 60)

@@ -30,6 +30,11 @@ import pandas as pd
 sys.path.insert(0, "src")
 sys.path.insert(0, "scripts")
 import build_trade_shares as B                          # noqa: E402
+from pysuto.cases import copper_feed as CF                  # noqa: E402
+from pysuto.feedprep import trade_shares as T               # noqa: E402
+from pysuto.input_registry import InputRegistries           # noqa: E402
+
+INPUTS = InputRegistries.load(root="data/input")            # read-only (#93)
 from pysuto.acc import AccountingStructure              # noqa: E402
 from pysuto.config import load_config                   # noqa: E402
 
@@ -109,7 +114,7 @@ def _froot(run: str) -> np.ndarray:
 
 def _feed_usage(acc, icsg_froot: np.ndarray) -> pd.DataFrame:
     """Per fan group the ICSG feed run's fan total, the pre-#66 builder's usage."""
-    ei = B._decoded_edges(acc)
+    ei = T.decoded_edges(acc)
     cc = ei[ei["root_sector_from"].isin(B.SECTORS) & (ei["valuation"] == "CC")]
     tot = cc[GROUP].copy()
     tot["usage_raw"] = icsg_froot[cc["edge_id"].to_numpy()]
@@ -135,16 +140,22 @@ def _adr18_line(shares: pd.DataFrame, pre: pd.DataFrame) -> str:
     return f"{len(rec):,} groups recovered, {kt:,.0f} kt CC"
 
 
+def _weights(*a):
+    return T.compute_trade_share_weights(*a, signed_sectors_to=CF.SIGNED_SECTORS_TO)
+
+
 def diag(icsg_run: str, baci_run: str) -> None:
     acc   = AccountingStructure.load(id=load_config().pipeline.acc_id,
                                      storage_dir=B.ACC_DIR)
-    conc  = B._conc_lookup()
+    conc  = T.traded_conc_lookup(INPUTS.params.resolve("conc") / "params.csv",
+                                 acc.valuation_roles.gross, CF.TRADED_SECTORS)
     baci  = _froot(baci_run)
-    edges = B.build_edges_frame(acc, baci, B.SECTORS)
-    obs   = B.baci_observed_regions(acc, baci)
-    held  = B.imports_exhausted_groups(edges)
-    prod  = B.icsg_raw_production(B.BOUND_DOMESTIC_SECTORS, edges)
-    raw   = B.icsg_raw_usage(B.SECTORS)
+    edges = T.build_edges_frame(acc, baci, B.SECTORS, CF.SIGNED_SECTORS_TO,
+                              CF.CATHODE_CARRIER_SECTOR_TO)
+    obs   = T.baci_observed_regions(acc, baci)
+    held  = T.imports_exhausted_groups(edges, INPUTS.feed.resolve("baci") / "reexport_ledger.csv")
+    prod  = CF.icsg_raw_production(INPUTS, CF.BOUND_DOMESTIC_SECTORS, edges)
+    raw   = CF.icsg_raw_usage(INPUTS, B.SECTORS)
     feed  = _feed_usage(acc, _froot(icsg_run))
     # pre-#66: the feed run's fan total, the raw rows only where that total is 0
     old = feed.merge(raw, on=GROUP, how="left", suffixes=("", "_rows"))
@@ -155,9 +166,9 @@ def diag(icsg_run: str, baci_run: str) -> None:
                f"pre-#66 rule on {icsg_run}": (old[GROUP + ["usage_raw"]], feed)}
     shares = {}
     for label, (usage, usage_pre) in sources.items():
-        s    = B.compute_trade_share_weights(edges, usage, conc, obs, held, prod)
-        free = B.compute_trade_share_weights(edges, usage, conc, obs, held, None)
-        pre  = B.compute_trade_share_weights(edges, usage_pre, conc, None)
+        s    = _weights(edges, usage, conc, obs, held, prod)
+        free = _weights(edges, usage, conc, obs, held, None)
+        pre  = _weights(edges, usage_pre, conc, None)
         print(f"{label}:\n   ADR 0024: {_adr24_line(free, s)}"
               f"\n   ADR 0018: {_adr18_line(s, pre)}")
         shares[label] = s

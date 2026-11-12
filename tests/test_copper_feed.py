@@ -1,7 +1,7 @@
 """
-test_icsg_feed.py
-=================
-The ICSG feed's observed zeros (#76, narrowed by #78, extended by #96, #97, #31): in a
+test_copper_feed.py
+===================
+The copper ICSG feed, ``pysuto.cases.copper_feed``: the observed zeros (#76, narrowed by #78, extended by #96, #97, #31): in a
 region ICSG covers that produces none of a product that year, by its raw ICSG production
 (ADR 0024's bound), a weighted fan's domestic leg at trade-share weight 0 and the edge the
 region's own mine or SX-EW output leaves on are covered at 0, priced, and reach Stage 2 as
@@ -9,18 +9,16 @@ covered.
 """
 from __future__ import annotations
 
-import os
-import sys
-
 import numpy as np
 import pandas as pd
 import pytest
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "scripts"))
-from icsg_feed import (OBSERVED_ZERO_FLOOR_KT, icsg_coverage,    # noqa: E402
-                       load_trade_shares, non_producer_mask, observed_zero_sigma,
-                       production_zero_mask, raw_production, reported_elsewhere,
-                       stamp_observed_zeros)
+from pysuto.cases import copper_feed                              # noqa: E402
+from pysuto.cases.copper_feed import (ICSG_SPEC, OBSERVED_ZERO_FLOOR_KT,   # noqa: E402
+                                      icsg_coverage, load_trade_shares,
+                                      non_producer_mask, observed_zero_sigma,
+                                      production_zero_mask, raw_production,
+                                      reported_elsewhere, stamp_observed_zeros)
 from pysuto.collector import FeedCollector                        # noqa: E402
 from pysuto.conc import ConcordanceTable, WeightMatrix            # noqa: E402
 from pysuto.unc import PropagationResult                          # noqa: E402
@@ -223,9 +221,8 @@ def _production(*rows):
 def _full_scope(monkeypatch):
     """The mechanism with every product it supports: the shipped knobs keep only the
     SX-EW output zeros and #78's concentrate legs (ADR 0024 am., measured 2026-10-21)."""
-    import icsg_feed
-    monkeypatch.setattr(icsg_feed, "OBSERVED_ZERO_SECTORS", ("Concentrate", "Cathode"))
-    monkeypatch.setattr(icsg_feed, "PRODUCTION_EDGES",
+    monkeypatch.setattr(copper_feed, "OBSERVED_ZERO_SECTORS", ("Concentrate", "Cathode"))
+    monkeypatch.setattr(copper_feed, "PRODUCTION_EDGES",
                         (("MF", "Concentrate"), ("SXEW", "CSXEW")))
 
 
@@ -265,13 +262,11 @@ def test_the_cathode_test_reads_raw_icsg_production(monkeypatch):
     the ADR 0024 bound's raw ICSG production. ICSG reports Italy's refinery and nothing
     for France; France's row must still say 0."""
     _full_scope(monkeypatch)
-    import build_baci_reexport as R
-
     monkeypatch.setattr(
-        R, "icsg_intake_production",
-        lambda sectors=None: ({}, {("Cathode", "Italy", "2018"): 50.0}, set()))
+        copper_feed, "icsg_intake_production",
+        lambda inputs, sectors=None: ({}, {("Cathode", "Italy", "2018"): 50.0}, set()))
     edges = _edges((0, "Cathode", "Italy", "2018"), (1, "Cathode", "France", "2018"))
-    prod = raw_production(edges)
+    prod = raw_production(None, edges)
     cathode = prod[prod["root_sector_from"] == "Cathode"]
     assert dict(zip(cathode["root_region_to"], cathode["production_cc"])) == {
         "Italy": 50.0, "France": 0.0}
@@ -340,14 +335,12 @@ def test_the_output_test_reads_raw_icsg_mine_and_sxew_production(monkeypatch):
     chains leaves a Concentrate node, so the production rows must not depend on which
     edges the frame holds: a missing row reads as 0 and would stamp Chile."""
     _full_scope(monkeypatch)
-    import build_baci_reexport as R
-
     monkeypatch.setattr(
-        R, "icsg_intake_production",
-        lambda sectors=None: ({}, {("Concentrate", "Chile", "2018"): 5000.0,
-                                   ("CSXEW", "Chile", "2018"): 1500.0}, set()))
+        copper_feed, "icsg_intake_production",
+        lambda inputs, sectors=None: ({}, {("Concentrate", "Chile", "2018"): 5000.0,
+                                           ("CSXEW", "Chile", "2018"): 1500.0}, set()))
     edges = _chain("Chile", "Germany")
-    mask = production_zero_mask(edges, raw_production(edges), _cov("Chile", "Germany"),
+    mask = production_zero_mask(edges, raw_production(None, edges), _cov("Chile", "Germany"),
                                 len(edges), set())
     assert _stamped(edges, mask) == [("Germany", "MF", "Concentrate", "CC"),
                                      ("Germany", "SXEW", "CSXEW", "CC")]
@@ -408,4 +401,14 @@ def test_the_feed_refuses_weights_it_cannot_check(tmp_path):
     (out / "params.csv").write_text("weight\n1.0\n")
     inputs = InputRegistries.initialize(root=tmp_path)
     with pytest.raises(ValueError, match="records no parents.json"):
-        load_trade_shares(inputs)
+        load_trade_shares(inputs, str(tmp_path / "runs"))
+
+
+def test_the_complete_icsg_spec_carries_the_trade_share_and_observed_zero_hooks():
+    """#147: the loaders' ICSG_FEED plus the two hooks, importable without a script."""
+    from pysuto.cases.copper import ICSG_FEED
+
+    assert ICSG_FEED.user_weights is None and ICSG_FEED.post_propagate is None
+    assert ICSG_SPEC.user_weights is not None and ICSG_SPEC.post_propagate is not None
+    assert ICSG_SPEC.load_raw is ICSG_FEED.load_raw
+    assert ICSG_SPEC.drop_unweighted_fans and ICSG_SPEC.feed_id == "icsg"

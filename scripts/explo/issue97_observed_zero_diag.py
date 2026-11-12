@@ -26,6 +26,7 @@ sys.path.insert(0, "src")
 sys.path.insert(0, "scripts")
 sys.path.insert(0, "scripts/explo")
 import build_baci_reexport as R                           # noqa: E402
+from pysuto.cases.copper_feed import icsg_intake_production   # noqa: E402
 import issue69_aggregate_gap_diag as P69                  # noqa: E402
 import roundL_reexport_diag as L                          # noqa: E402
 import roundZ_png_kg_diag as Z                            # noqa: E402
@@ -61,7 +62,7 @@ def _prior_post(opt: str, n: int) -> tuple[np.ndarray, np.ndarray]:
 def mine_chains(base: str, new: str) -> None:
     """M: the no-data mine chains, prior / posterior per run."""
     E = _edges()
-    _, prod, _ = R.icsg_intake_production(["Concentrate"])
+    _, prod, _ = icsg_intake_production(R._input_registries(), ["Concentrate"])
     mine = {(r, t) for (_, r, t), v in prod.items() if v > 0}
     reg = R._input_registries().feed.resolve("icsg")
     raw = pd.read_csv(reg / "values.csv")

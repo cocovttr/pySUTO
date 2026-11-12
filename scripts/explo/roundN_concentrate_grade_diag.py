@@ -43,10 +43,23 @@ from pysuto.acc import AccountingStructure                      # noqa: E402
 from pysuto.config import load_config                           # noqa: E402
 from pysuto.input_registry import InputRegistries               # noqa: E402
 from pysuto.relation.param_relation import expand_edge_index             # noqa: E402
-from build_baci_reexport import (                               # noqa: E402
-    HUB_EXCLUDE, _conc_lookup, _source_dir, icsg_intake_production,
-    load_root_trade, screened_origins,
-)
+from pysuto.cases.copper_feed import (GROSS_VALUATION, HUB_EXCLUDE,      # noqa: E402
+                                      TRADED_SECTORS, icsg_intake_production)
+from pysuto.feedprep.reexport import load_root_trade, screened_origins   # noqa: E402
+from pysuto.feedprep.trade_shares import traded_conc_lookup             # noqa: E402
+from pysuto.input_registry import InputRegistries                       # noqa: E402
+
+
+def _conc_lookup() -> dict:
+    """`conc` supply nominals keyed (traded sector, exporter region), read-only (#147)."""
+    inputs = InputRegistries.load(root="data/input")
+    return traded_conc_lookup(inputs.params.resolve("conc") / "params.csv", GROSS_VALUATION,
+                              TRADED_SECTORS)
+
+
+def _icsg_intake_production(sectors):
+    return icsg_intake_production(InputRegistries.load(root="data/input"), sectors)
+from build_baci_reexport import _source_dir                       # noqa: E402
 
 ROOT       = Path("data/proc")
 DEFAULT_RUN = "opt_20260915_131115_b8bf05a9"
@@ -66,7 +79,7 @@ def load_inputs() -> tuple:
     src = str(inputs.feed.resolve("baci"))
     print(f"   baci (netted) ← {src}")
     raw, legs, _, _ = load_root_trade(src, _conc_lookup())
-    intake, production, _ = icsg_intake_production(["Concentrate"])
+    intake, production, _ = _icsg_intake_production(["Concentrate"])
     screened = {(a, t) for (_s, a, t)
                 in screened_origins(legs[legs.sector == "Concentrate"], production)}
 

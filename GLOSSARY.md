@@ -1025,7 +1025,7 @@ _Avoid_: summing the two forms in that year.
 **BACI-observed region** — a consumer region for which the BACI feed records at least one cross-region
 import (any traded sector, any year). The flag is what makes `Σ imports = 0` *informative*: for an
 observed region it means "sourced domestically", for a trade-blind one it means "we cannot see". Derived
-in `build_trade_shares.baci_observed_regions()` from the BACI `F_root`. _Avoid_: treating a zero import
+in `feedprep.trade_shares.baci_observed_regions()` from the BACI `F_root`. _Avoid_: treating a zero import
 sum as evidence without checking observability — that is how a 100 %-domestic pattern gets fabricated at
 the observation's confidence.
 

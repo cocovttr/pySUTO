@@ -4,16 +4,25 @@ A fixture edge's ``icsg`` is the share of its group's ICSG usage that leg would
 carry; ``_usage`` sums it into the per-group frame the builder reads from the
 raw ICSG rows (#66).  ``compute_trade_share_weights`` never reads the column.
 """
-import os
-import sys
+import json
+from functools import partial
 
 import numpy as np
 import pandas as pd
 import pytest
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "scripts"))
-from build_trade_shares import (compute_trade_share_weights,  # noqa: E402
-                                stock_legs_take_the_cathode_trade)
+from pysuto.cases import copper_feed
+from pysuto.cases.copper_feed import (check_trade_share_parents, eff_smelting,
+                                      icsg_raw_production, trade_share_parents)
+from pysuto.feedprep import trade_shares as T
+from pysuto.feedprep.trade_shares import imports_exhausted_groups
+
+# copper's labels, bound as the case binds them
+compute_trade_share_weights = partial(T.compute_trade_share_weights,
+                                      signed_sectors_to=("MESC", "USC"))
+stock_legs_take_the_cathode_trade = partial(T.stock_legs_take_the_cathode_trade,
+                                            signed_sectors_to=("MESC", "USC"),
+                                            carrier_sector_to="FU")
 
 # (sector, region) keyed; "*" is the region wildcard (ADR 0029 plumbing)
 CONC = {("Cathode", "*"): 0.9975}
@@ -249,20 +258,12 @@ def test_bound_needs_imports_able_to_carry_the_remainder():
 
 # ---- ADR 0027: a netting-exhausted import sum is not an observation --------
 
-def _ledger(tmp_path, monkeypatch, rows):
-    """Point the feed registry at a directory holding a reexport_ledger.csv."""
-    import build_trade_shares as B
-
-    d = tmp_path / "feed" / "baci" / "v9"
-    d.mkdir(parents=True)
+def _ledger(tmp_path, rows):
+    """The path of a reexport_ledger.csv holding ``rows`` (absent when ``rows`` is None)."""
+    path = tmp_path / "reexport_ledger.csv"
     if rows is not None:
-        pd.DataFrame(rows).to_csv(d / "reexport_ledger.csv", index=False)
-
-    class _Regs:
-        feed = type("_Feed", (), {"resolve": staticmethod(lambda _id: d)})()
-
-    monkeypatch.setattr(B, "_input_registries", lambda: _Regs())
-    return B
+        pd.DataFrame(rows).to_csv(path, index=False)
+    return path
 
 
 def _edges_frame():
@@ -276,24 +277,23 @@ def _edges_frame():
     ])
 
 
-def test_exhausted_groups_are_derived_from_the_ledger(tmp_path, monkeypatch):
+def test_exhausted_groups_are_derived_from_the_ledger(tmp_path):
     """Every fan target of a flagged (product, region, year) is withheld —
     cathode fans into FU, USC and MESC, so one flag must reach all of them."""
-    B = _ledger(tmp_path, monkeypatch, [
+    ledger = _ledger(tmp_path, [
         {"sector": "Cathode", "region": "China", "time": 2015,
          "imports_exhausted": True},
         {"sector": "Cathode", "region": "Peru", "time": 2015,
          "imports_exhausted": False},
     ])
-    got = B.imports_exhausted_groups(_edges_frame())
+    got = imports_exhausted_groups(_edges_frame(), ledger)
     assert got == {("Cathode", "FU", "China", "2015"),
                    ("Cathode", "USC", "China", "2015")}
 
 
-def test_no_ledger_means_no_withholding(tmp_path, monkeypatch):
+def test_no_ledger_means_no_withholding(tmp_path):
     """An un-netted feed has no ledger; behaviour must be unchanged."""
-    B = _ledger(tmp_path, monkeypatch, None)
-    assert B.imports_exhausted_groups(_edges_frame()) == set()
+    assert imports_exhausted_groups(_edges_frame(), _ledger(tmp_path, None)) == set()
 
 
 # ---- ADR 0027 / L.2: the production bound extended to Cathode and Anode ----
@@ -348,19 +348,16 @@ def test_raw_production_emits_an_explicit_zero_for_a_non_producer(monkeypatch):
     phantom-mine regions it exists for (measured on Round L.2: Germany's
     concentrate cell went 0 → 38,731 z² and Korea's phantom mine 149 → 2,173 kt
     when this frame carried only the rows ICSG reports)."""
-    import build_baci_reexport as R
-    import build_trade_shares as B
-
     # ICSG reports Chile's mine and nothing for Germany, as in the real feed.
     monkeypatch.setattr(
-        R, "icsg_intake_production",
-        lambda sectors=None: ({}, {("Concentrate", "Chile", "2015"): 500.0}, set()))
+        copper_feed, "icsg_intake_production",
+        lambda inputs, sectors=None: ({}, {("Concentrate", "Chile", "2015"): 500.0}, set()))
     edges = pd.DataFrame([
         _edge("Chile",   "Germany", 100.0, 50.0, sf="Concentrate", st="Smelting", t=2015),
         _edge("Germany", "Germany", 100.0, np.nan, sf="Concentrate", st="Smelting", t=2015),
         _edge("Chile",   "Chile",   100.0, np.nan, sf="Concentrate", st="Smelting", t=2015),
     ])
-    out = B.icsg_raw_production(["Concentrate"], edges)
+    out = icsg_raw_production(None, ["Concentrate"], edges)
     got = {r.root_region_to: r.production_cc for r in out.itertuples()}
     assert got["Germany"] == 0.0, "a non-producer must say zero, not nothing"
     assert got["Chile"] == pytest.approx(500.0)
@@ -591,29 +588,28 @@ def test_a_stock_change_the_raw_rows_no_longer_carry_is_not_fanned():
 
 # ---- #93: a lookup reads the registered version and registers nothing ------
 
-def test_eff_lookup_does_not_version_an_edited_current(tmp_path, monkeypatch):
-    """Every lookup here goes through `_input_registries`; a diagnostic calling one
+def test_eff_lookup_does_not_version_an_edited_current(tmp_path):
+    """Every lookup here reads the registries it is handed; a diagnostic calling one
     must not register what current/ holds mid-edit (#93)."""
-    import build_trade_shares as B
     from pysuto.input_registry import InputRegistries
 
     csv = tmp_path / "params" / "eff" / "current" / "params.csv"
     csv.parent.mkdir(parents=True)
-    csv.write_text("param_type;a_sector_to;value_nominal\nefficiency;Smelting;0.98\n")
+    csv.write_text("param_id;param_type;a_sector_to;value_nominal\n"
+                   "effsmelting;efficiency;Smelting;0.98\n")
     InputRegistries.initialize(root=tmp_path)
-    csv.write_text("param_type;a_sector_to;value_nominal\nefficiency;Smelting;0.95\n")
-    monkeypatch.setattr(B, "_INPUT_ROOT", str(tmp_path))
+    csv.write_text("param_id;param_type;a_sector_to;value_nominal\n"
+                   "effsmelting;efficiency;Smelting;0.95\n")
 
-    assert B._eff_smelting() == pytest.approx(0.98)
+    assert eff_smelting(InputRegistries.load(root=tmp_path)) == pytest.approx(0.98)
     assert not (tmp_path / "params" / "eff" / "v2").exists()
 
 
 # ---- #53: the weights name the BACI feed run and inputs they are built from --
 
-def _registered_trade_shares(tmp_path, monkeypatch):
+def _registered_trade_shares(tmp_path):
     """A registry holding the builder's inputs and one BACI feed run, with
     trade_shares built on them and registered as `main` does."""
-    import build_trade_shares as B
     from pysuto.input_registry import InputRegistries
 
     root = tmp_path / "input"
@@ -623,47 +619,86 @@ def _registered_trade_shares(tmp_path, monkeypatch):
         f.parent.mkdir(parents=True)
         f.write_text("x\n1\n")
     (tmp_path / "runs" / "feed_baci_20261019_100000_aaaaaaaa").mkdir(parents=True)
-    monkeypatch.setattr(B, "_INPUT_ROOT", str(root))
-    monkeypatch.setattr(B, "FEED_REG", str(tmp_path / "runs"))
     InputRegistries.initialize(root=root)
 
     out = root / "params" / "trade_shares" / "current"
     out.mkdir(parents=True)
     (out / "params.csv").write_text("weight\n1.0\n")
-    B.write_parents(str(out), B._input_registries())
+    (out / "parents.json").write_text(json.dumps(
+        trade_share_parents(InputRegistries.load(root=root), str(tmp_path / "runs"))))
     inputs = InputRegistries.initialize(root=root)
-    return B, root, inputs
+    return root, inputs
 
 
-def test_weights_built_from_the_inputs_in_force_pass(tmp_path, monkeypatch):
-    B, _, inputs = _registered_trade_shares(tmp_path, monkeypatch)
-    B.check_parents(inputs.params.resolve("trade_shares"), inputs)
+def _check(tmp_path, inputs):
+    check_trade_share_parents(inputs.params.resolve("trade_shares"), inputs,
+                              str(tmp_path / "runs"))
 
 
-def test_a_newer_baci_feed_run_makes_the_weights_stale(tmp_path, monkeypatch):
+def test_weights_built_from_the_inputs_in_force_pass(tmp_path):
+    _, inputs = _registered_trade_shares(tmp_path)
+    _check(tmp_path, inputs)
+
+
+def test_a_newer_baci_feed_run_makes_the_weights_stale(tmp_path):
     """baci_feed.py re-run, build_trade_shares.py skipped: the ICSG feed would fan
     with weights from the previous BACI run — four rounds of it cost 6.2 pp of z²."""
-    B, _, inputs = _registered_trade_shares(tmp_path, monkeypatch)
+    _, inputs = _registered_trade_shares(tmp_path)
     (tmp_path / "runs" / "feed_baci_20261020_100000_bbbbbbbb").mkdir()
     with pytest.raises(ValueError, match="feed_baci_20261020_100000_bbbbbbbb"):
-        B.check_parents(inputs.params.resolve("trade_shares"), inputs)
+        _check(tmp_path, inputs)
 
 
-def test_a_new_icsg_version_makes_the_weights_stale(tmp_path, monkeypatch):
+def test_a_new_icsg_version_makes_the_weights_stale(tmp_path):
     from pysuto.input_registry import InputRegistries
 
-    B, root, _ = _registered_trade_shares(tmp_path, monkeypatch)
+    root, _ = _registered_trade_shares(tmp_path)
     (root / "feed" / "icsg" / "current" / "values.csv").write_text("x\n2\n")
     inputs = InputRegistries.initialize(root=root)   # icsg_feed registers it first
     with pytest.raises(ValueError, match="icsg"):
-        B.check_parents(inputs.params.resolve("trade_shares"), inputs)
+        _check(tmp_path, inputs)
 
 
-def test_weights_that_record_no_parents_are_refused(tmp_path, monkeypatch):
+def test_weights_that_record_no_parents_are_refused(tmp_path):
     from pysuto.input_registry import InputRegistries
 
-    B, root, _ = _registered_trade_shares(tmp_path, monkeypatch)
+    root, _ = _registered_trade_shares(tmp_path)
     (root / "params" / "trade_shares" / "current" / "parents.json").unlink()
     inputs = InputRegistries.initialize(root=root)
     with pytest.raises(ValueError, match="records no parents.json"):
-        B.check_parents(inputs.params.resolve("trade_shares"), inputs)
+        _check(tmp_path, inputs)
+
+
+# ---- the edge frame of an accounting structure, by its valuation roles (#147) ----
+
+def _acc():
+    """Chile and China with Cathode, FU and MESC nodes: four CC fan-target edges, then their
+    Mass twins (edge ids 0-3 and 4-7)."""
+    from types import SimpleNamespace
+    sectors = ["Cathode", "FU", "MESC"]
+    nodes = pd.DataFrame([(s, r) for r in ("Chile", "China") for s in sectors],
+                         columns=["sector", "region"])
+    nid = {(r.sector, r.region): i for i, r in nodes.iterrows()}
+    pairs = [(("Cathode", "Chile"), ("FU", "China")), (("Cathode", "China"), ("FU", "China")),
+             (("Cathode", "Chile"), ("MESC", "China")), (("Cathode", "China"), ("MESC", "China"))]
+    rows = [(nid[a], nid[b], v, "2015") for v in ("CC", "Mass") for a, b in pairs]
+    edges = pd.DataFrame(rows, columns=["from_id", "to_id", "valuation", "time"])
+    edges["edge_id"] = np.arange(len(edges))
+    return SimpleNamespace(edge_index=edges, node_index=nodes,
+                           valuation_roles=SimpleNamespace(content="CC", gross="Mass"))
+
+
+FROOT = np.array([0.0, 0.0, 0.0, 0.0, 70.0, 0.0, 0.0, 0.0])   # Chile→China FU, on the Mass twin
+
+
+def test_the_edge_frame_pairs_each_cc_edge_with_its_mass_twin_by_the_roles():
+    out = T.build_edges_frame(_acc(), FROOT, ["Cathode"], ("MESC", "USC"), "FU")
+    fu = out[out["root_sector_to"] == "FU"].set_index("root_region_from")["baci_mass"]
+    assert fu.to_dict() == {"Chile": 70.0, "China": 0.0}
+    # the stock leg reads its import pattern on the carrier (FU) leg
+    mesc = out[out["root_sector_to"] == "MESC"].set_index("root_region_from")["baci_mass"]
+    assert mesc.to_dict() == {"Chile": 70.0, "China": 0.0}
+
+
+def test_baci_observed_regions_are_the_importers_of_any_gross_cross_region_flow():
+    assert T.baci_observed_regions(_acc(), FROOT) == {"China"}
