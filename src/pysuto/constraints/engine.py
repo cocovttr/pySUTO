@@ -351,9 +351,9 @@ class ConstraintEngine:
 
         A no-data edge is one the last-resort ``FlatPriorImputer`` filled
         (``flat_prior``, the Stage-2 per-edge flag, #137), i.e. it had neither
-        feed coverage nor a relation fill. ``exclude_sectors`` spares edges whose magnitude is
-        **structurally determined by a fixed ratio / mass balance rather than by
-        feed data** — the extraction chain and the SEM residual outputs — for
+        feed coverage nor a relation fill. ``exclude_sectors`` spares edges whose
+        magnitude is **structurally determined by a fixed ratio / mass balance
+        rather than by feed data** — the extraction chain and the SEM residual outputs — for
         which ``a₀ = 0`` means "value comes from the relation", not "no flow".
         Read from the flag, not from σ (Lp regularization and the no-data anchor
         overwrite σ on exactly these edges). Shared by the soft σ anchor
@@ -385,7 +385,13 @@ class ConstraintEngine:
                 f"imp run {getattr(agg_result, '_imp_run_id', None)!r} carries no "
                 f"flat_prior flag (agg_result.npz predates #137): re-run Stage 2 so "
                 f"the no-data anchor and the flat-prior pin can read it")
-        return np.asarray(flat_prior, dtype=bool)
+        flat_prior = np.asarray(flat_prior, dtype=bool)
+        if flat_prior.shape != agg_result.f_agg.shape:
+            raise ValueError(
+                f"flat_prior has shape {flat_prior.shape}, expected "
+                f"{agg_result.f_agg.shape} (imp run "
+                f"{getattr(agg_result, '_imp_run_id', None)!r})")
+        return flat_prior
 
     def _anchor_nodata_sigma(self, a0, sigma_a, acc, flat_prior):
         """Soft magnitude-anchor for no-data ("flat-prior") edges.

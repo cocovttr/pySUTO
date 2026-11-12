@@ -27,8 +27,8 @@ class ImputationRunRegistry(BaseOutputRegistry):
         ├── registry.json
         └── imp_<ts>_<code>/
             ├── metadata.json          ← harmonized sidecar
-            ├── agg_result.npz         ← f_agg, sigma_agg, Omega, F, Σ, coverage, feed_ids,
-            │                            flat_prior (bool; absent before #137)
+            ├── agg_result.npz         ← f_agg, sigma_agg, Omega, F, Σ, coverage,
+            │                            feed_ids, flat_prior (bool; absent before #137)
             └── imputation_log.parquet
     """
 

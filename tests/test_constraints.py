@@ -2734,8 +2734,8 @@ class TestNodataSigmaAnchor:
                                   nodata_anchor_exempt_mask=np.zeros(3, dtype=bool))
         assert spare._anchor_nodata_sigma(a0, sigma_a, acc, self.FLAT)[2] == 1e6
         # no anchored Mining sibling → the global anchored median (100) sets the scale
-        assert anchor._anchor_nodata_sigma(a0, sigma_a, acc, self.FLAT)[2] == pytest.approx(
-            0.3 * 100.0)
+        out = anchor._anchor_nodata_sigma(a0, sigma_a, acc, self.FLAT)
+        assert out[2] == pytest.approx(0.3 * 100.0)
 
     def test_exempt_mask_of_wrong_length_raises(self):
         from pysuto.constraints import ConstraintEngine
