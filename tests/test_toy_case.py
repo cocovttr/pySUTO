@@ -12,6 +12,7 @@ toy world is declared here.
 from __future__ import annotations
 
 import ast
+import os
 import re
 import time
 from pathlib import Path
@@ -379,3 +380,44 @@ def test_the_toy_module_carries_none_of_copper_s_labels():
                 if isinstance(n, ast.Constant) and isinstance(n.value, str)}
     assert literals.isdisjoint({"CC", "Mass", "SEM", "FD", "Nature"})
     assert (toy.GROSS, toy.CONTENT) == ("Gross", "Content")
+
+
+# =============================================================================
+# The flat-prior flag (#137)
+# =============================================================================
+
+def test_stage_2_persists_the_flat_prior_flag_of_the_log_s_flat_prior_edges(chain):
+    root, ids, acc = chain["root"], chain["ids"], chain["acc"]
+    imp  = ImputationRunRegistry(str(root / "proc" / "imp"))
+    log  = imp.load(ids["imp"]).imputation_log.as_dataframe()
+    flag = np.load(root / "proc" / "imp" / ids["imp"] / "agg_result.npz")["flat_prior"]
+    assert flag.dtype == bool and flag.shape == (acc.n_edges,)
+    expected = np.zeros(acc.n_edges, dtype=bool)
+    expected[log.loc[log["imputer_id"] == "flat_prior", "edge_id"].astype(int)] = True
+    assert flag.any()
+    np.testing.assert_array_equal(flag, expected)
+    np.testing.assert_array_equal(imp.load(ids["imp"]).flat_prior, expected)
+
+
+def _register_flagless(root, ids):
+    imp = ImputationRunRegistry(str(root / "proc" / "imp"))
+    agg = imp.load(ids["imp"])
+    agg.flat_prior = None                              # an imp run from before #137
+    old = imp.register(agg, label="no flag", parents={
+        "inputs": {"acc": {}, "params": []}, "upstream": {"feed_run_ids": []}})
+    assert "flat_prior" not in np.load(root / "proc" / "imp" / old / "agg_result.npz").files
+    return imp, old
+
+
+def test_an_imp_run_from_before_the_flag_derives_it_from_its_log(chain):
+    root, ids = chain["root"], chain["ids"]
+    imp, old = _register_flagless(root, ids)
+    np.testing.assert_array_equal(imp.load(old).flat_prior, imp.load(ids["imp"]).flat_prior)
+
+
+def test_a_const_run_on_an_imp_run_without_flag_or_log_raises_naming_it(chain):
+    root, ids = chain["root"], chain["ids"]
+    _, old = _register_flagless(root, ids)
+    os.remove(root / "proc" / "imp" / old / "imputation_log.parquet")
+    with pytest.raises(ValueError, match=old):
+        toy.run_stage3(root, old)

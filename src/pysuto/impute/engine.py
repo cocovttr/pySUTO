@@ -21,6 +21,7 @@ from pysuto.logging import get_logger
 from pysuto.relation.param_relation import get_edge_cache
 
 from .base import BaseImputer
+from .flat_prior import FlatPriorImputer
 from .ledger import PriorLedger
 
 logger = get_logger(__name__)
@@ -166,6 +167,7 @@ class ImputationEngine:
         run_ts = datetime.now().isoformat(timespec="seconds")
         n_total = len(f)
         self._step = 0
+        self._flat_prior = np.zeros(n_total, dtype=bool)
 
         # ── Phase 1: cascade to fixpoint ────────────────────────────────────
         converged = False
@@ -209,6 +211,7 @@ class ImputationEngine:
         agg_result.sigma_agg           = sigma
         agg_result.imputation_log      = log
         agg_result.imputation_metadata = meta
+        agg_result.flat_prior          = self._flat_prior
         return agg_result
 
     def _run_one(
@@ -230,7 +233,11 @@ class ImputationEngine:
         t0 = time.perf_counter()
         imputer.impute(ledger, step, self._acc_struct)
         elapsed = time.perf_counter() - t0
-        log.extend(ledger.close())
+        entries = ledger.close()
+        log.extend(entries)
+        if isinstance(imputer, FlatPriorImputer):
+            # Relation provenance: the edges the last-resort imputer filled.
+            self._flat_prior[[e["edge_id"] for e in entries]] = True
 
         # Post-step bounds enforcement: warn and clip any newly-filled
         # out-of-bounds values.

@@ -91,6 +91,7 @@ def _make_case(root: Path) -> dict:
     class _Agg:
         f_agg     = np.arange(1.0, acc.n_edges + 1)
         sigma_agg = np.ones(acc.n_edges)
+        flat_prior = np.zeros(acc.n_edges, dtype=bool)
 
     engine = ConstraintEngine(AccountingStructure.load("toy", storage_dir=acc_dir),
                               storage_dir=str(data / "proc" / "const"))
@@ -372,6 +373,7 @@ def _register_imp_run(case) -> str:
                             F=f[None, :], Sigma=0.1 * f[None, :], feed_ids=["toy"],
                             coverage=np.ones(n, dtype=bool))
     agg.imputation_log = ImputationLog()
+    agg.flat_prior = np.zeros(n, dtype=bool)
     return ImputationRunRegistry(storage_dir=str(case["data"] / "proc" / "imp")).register(
         agg, label="case", parents={"inputs": {"acc": case["entry"], "params": []},
                                     "upstream": {"feed_run_ids": []}},
