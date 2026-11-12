@@ -3,7 +3,7 @@ mass_balance.py
 ===============
 ``MassBalanceBuilder`` — Type-1 hard equality rows: Σ inflows − Σ outflows = 0
 per (balanced node × timestep). The rows are :class:`~pysuto.relation.relation.Relation`
-objects built from :func:`pysuto.relation.structure.node_balances` and emitted by
+objects built by :func:`pysuto.relation.balance.node_balance_relations` and emitted by
 :func:`pysuto.constraints.emit.emit`.
 """
 
@@ -12,12 +12,10 @@ from __future__ import annotations
 import numpy as np
 
 from pysuto.logging import get_logger
-from pysuto.relation.relation import Relation
-from pysuto.relation.structure import node_balances
+from pysuto.relation.balance import node_balance_relations
 
 from .base import BaseConstraintBuilder, ConstraintBlock
 from .emit import emit
-from .naming import TYPE_MASSBAL
 
 _log = get_logger(__name__)
 
@@ -46,8 +44,7 @@ class MassBalanceBuilder(BaseConstraintBuilder):
         self._mask_name = mask
 
     def build_static(self, acc_struct) -> ConstraintBlock:
-        n_edges  = acc_struct.n_edges
-        node_idx = acc_struct.node_index
+        n_edges = acc_struct.n_edges
 
         if self._mask_name is not None:
             if self._mask_name not in acc_struct.masks:
@@ -61,44 +58,20 @@ class MassBalanceBuilder(BaseConstraintBuilder):
             scope_mask = np.ones(n_edges, dtype=bool)
 
         # One relation per (time, valuation, node). Splitting by valuation keeps each
-        # emitted row unit-coherent (no Mass+CC mixing in G). ``node_balances`` sorts by
-        # (node, time), so regroup by time in the structure's period order, nodes
-        # ascending within a period.
+        # emitted row unit-coherent (no Mass+CC mixing in G). ``node_balance_relations``
+        # sorts by (node, time), so regroup by time in the structure's period order,
+        # nodes ascending within a period.
         by_valuation = {}
         for valuation in acc_struct.valuation:
             by_time = {}
-            for bal in node_balances(acc_struct, valuation):
-                by_time.setdefault(bal.time, []).append(bal)
+            for rel in node_balance_relations(acc_struct, valuation, scope_mask):
+                by_time.setdefault(rel.time, []).append(rel)
             by_valuation[valuation] = by_time
 
         relations = []
         for time in acc_struct.time_range:
             for valuation in acc_struct.valuation:
-                for bal in by_valuation[valuation].get(str(time), ()):
-                    inc = [e for e in bal.incoming if scope_mask[e]]
-                    out = [e for e in bal.outgoing if scope_mask[e]]
-                    if not inc or not out:
-                        continue
-                    n_row  = node_idx.loc[bal.node_id]
-                    sector = str(n_row["sector"])
-                    region = str(n_row["region"])
-                    relations.append(Relation(
-                        edges        = np.array(inc + out, dtype=np.int64),
-                        coefficients = np.array([1.0] * len(inc) + [-1.0] * len(out)),
-                        type         = TYPE_MASSBAL,
-                        variant      = "massbal",
-                        specs        = (sector, region, valuation),
-                        time         = str(time),
-                        valuation    = valuation,
-                        meta         = {
-                            "sector":     sector,
-                            "region":     region,
-                            "entity":     str(n_row["entity"]),
-                            "entity_sub": (str(n_row.get("entity_sub", ""))
-                                           if "entity_sub" in node_idx.columns else None),
-                        },
-                        source       = "massbal",
-                    ))
+                relations.extend(by_valuation[valuation].get(str(time), ()))
 
         _log.info("MassBalanceBuilder.build_static: %d rows", len(relations))
         return emit(relations, n_edges)
