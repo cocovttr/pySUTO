@@ -1218,6 +1218,13 @@ CRUDE_ORE_FEED = FeedSpec(
 # The case
 # =============================================================================
 
+def stage1(data_dir: str) -> dict:
+    """Copper's Stage 1 hook, ``pysuto.cases.copper_feed.run_stage1`` (#109)."""
+    # Function-local: copper_feed imports this module (the FeedSpecs above).
+    from pysuto.cases.copper_feed import run_stage1
+    return run_stage1(data_dir)
+
+
 CASE = CaseSpec(
     id     = "copper",
     acc_id = "copper",
@@ -1229,4 +1236,5 @@ CASE = CaseSpec(
     # Stage 6's primary valuation is the acc's content valuation unless named; copper's
     # is contained copper.
     driver_knobs = {"psut": {"PRIMARY": "CC"}},
+    stage1 = stage1,
 )

@@ -78,13 +78,9 @@ def test_the_toy_s_checks_hold_on_the_one_command_chain(chain):
     toy_checks.test_the_psut_supply_and_use_blocks_balance_per_node(chain)
 
 
-def test_the_feed_step_of_a_case_without_a_stage_1_hook_names_issue_109(tmp_path):
-    proc = _run(tmp_path, "--case", "copper", "--from", "feed", "--data-dir",
-                str(tmp_path / "d"))
-    assert proc.returncode == 2 and "#109" in proc.stderr, proc.stderr
-    assert not (tmp_path / "d").exists()
-    with pytest.raises(ValueError, match="copper.*#109"):
-        Pipeline(steps=ALL_STEPS, case="copper", data_dir=str(tmp_path))
+def test_a_feed_step_needs_the_case_s_stage_1_hook(tmp_path):
+    with pytest.raises(ValueError, match="declares none"):
+        Pipeline(steps=ALL_STEPS, case="x", data_dir=str(tmp_path))
 
 
 def test_a_start_past_the_feed_step_needs_a_base_and_a_feed_start_refuses_one(tmp_path):

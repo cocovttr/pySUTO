@@ -123,7 +123,7 @@ class CaseSpec:
 
     ``stage1`` is the case's Stage 1 hook, ``stage1(data_dir) -> {feed_id: feed_run_id}``,
     which writes the case's feeds into the feed registry of ``data_dir`` (the ``feed``
-    step of ``python -m pysuto run``); ``None`` is a case with no hook yet (copper, #109).
+    step of ``python -m pysuto run``); ``None`` is a case with no hook.
     """
     id:           str
     acc_id:       str

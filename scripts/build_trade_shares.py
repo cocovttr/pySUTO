@@ -68,6 +68,7 @@ Scrap is an ICSG Use type but is NOT traded → deliberately excluded.
 
 from __future__ import annotations
 
+import argparse
 import json
 import os
 import sys
@@ -100,6 +101,15 @@ _INPUT_ROOT = os.path.join("data", "input")
 ACC_DIR     = os.path.join("data", "proc", "acc")
 FEED_REG    = os.path.join("data", "proc", "feed", "registry")
 OUT_DIR     = os.path.join(_INPUT_ROOT, "params", "trade_shares", "current")
+
+
+def set_data_dir(data_dir: str) -> None:
+    """Point the script at ``data_dir`` instead of ``data`` (the Stage 1 hook, #109)."""
+    global _INPUT_ROOT, ACC_DIR, FEED_REG, OUT_DIR
+    _INPUT_ROOT = os.path.join(data_dir, "input")
+    ACC_DIR     = os.path.join(data_dir, "proc", "acc")
+    FEED_REG    = os.path.join(data_dir, "proc", "feed", "registry")
+    OUT_DIR     = os.path.join(_INPUT_ROOT, "params", "trade_shares", "current")
 
 
 # ---------------------------------------------------------------------------
@@ -218,4 +228,8 @@ def main() -> None:
 
 
 if __name__ == "__main__":
+    ap = argparse.ArgumentParser(description=__doc__.split("\n")[1])
+    ap.add_argument("--data-dir", default="data",
+                    help="data root holding input/ and proc/ (default: %(default)s)")
+    set_data_dir(ap.parse_args().data_dir)
     main()
