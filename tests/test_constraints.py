@@ -1079,14 +1079,14 @@ class TestRatioConstraintBuilder:
         p = builder._pairs[0]
         f = np.zeros(toy_acc.n_edges)
         # numerator-dominant: |f_num| > r·|f_denom|
-        f[p["edge_i"]] = 1000.0
-        f[p["edge_j"]] = 100.0
-        dyn = builder.build_dynamic(toy_acc, f, None, p["time"])
+        f[p.edges[0]] = 1000.0
+        f[p.edges[p.n_num]] = 100.0
+        dyn = builder.build_dynamic(toy_acc, f, None, p.time)
         assert dyn.sigma_c[0] == pytest.approx((0.05 / 0.5) * 1000.0)
         # denominator-dominant: r·|f_denom| > |f_num|
-        f[p["edge_i"]] = 10.0
-        f[p["edge_j"]] = 4000.0
-        dyn = builder.build_dynamic(toy_acc, f, None, p["time"])
+        f[p.edges[0]] = 10.0
+        f[p.edges[p.n_num]] = 4000.0
+        dyn = builder.build_dynamic(toy_acc, f, None, p.time)
         assert dyn.sigma_c[0] == pytest.approx((0.05 / 0.5) * 0.5 * 4000.0)
 
     def test_ratio_sigma_c_floors(self, toy_acc, tmp_path):
@@ -1100,12 +1100,12 @@ class TestRatioConstraintBuilder:
         p = builder._pairs[0]
         f = np.zeros(toy_acc.n_edges)
         # rel floor: σ_r=0.001 < 0.02 → 0.02 used
-        f[p["edge_i"]] = 1000.0
-        dyn = builder.build_dynamic(toy_acc, f, None, p["time"])
+        f[p.edges[0]] = 1000.0
+        dyn = builder.build_dynamic(toy_acc, f, None, p.time)
         assert dyn.sigma_c[0] == pytest.approx(0.02 * 1000.0)
         # abs floor: both priors zero → scale = 1.0
         f[:] = 0.0
-        dyn = builder.build_dynamic(toy_acc, f, None, p["time"])
+        dyn = builder.build_dynamic(toy_acc, f, None, p.time)
         assert dyn.sigma_c[0] == pytest.approx(0.02 * 1.0)
 
     def test_ratio_sigma_is_relative_to_r(self, toy_acc, tmp_path):
@@ -1122,9 +1122,9 @@ class TestRatioConstraintBuilder:
         assert static.sigma_c[0] == pytest.approx(0.0375 / 0.275, rel=1e-12)
         p = builder._pairs[0]
         f = np.zeros(toy_acc.n_edges)
-        f[p["edge_i"]] = 0.275 * 1000.0      # numerator on the ratio
-        f[p["edge_j"]] = 1000.0              # denominator
-        dyn = builder.build_dynamic(toy_acc, f, None, p["time"])
+        f[p.edges[0]] = 0.275 * 1000.0      # numerator on the ratio
+        f[p.edges[p.n_num]] = 1000.0              # denominator
+        dyn = builder.build_dynamic(toy_acc, f, None, p.time)
         assert dyn.sigma_c[0] == pytest.approx((0.0375 / 0.275) * 275.0, rel=1e-12)
         assert dyn.sigma_c[0] == pytest.approx(0.0375 * 1000.0, rel=1e-12)
 
@@ -1141,9 +1141,9 @@ class TestRatioConstraintBuilder:
                                                   rel=1e-12)
         p = builder._pairs[0]
         f = np.zeros(toy_acc.n_edges)
-        f[p["edge_i"]] = 965.0
-        f[p["edge_j"]] = 1000.0
-        dyn = builder.build_dynamic(toy_acc, f, None, p["time"])
+        f[p.edges[0]] = 965.0
+        f[p.edges[p.n_num]] = 1000.0
+        dyn = builder.build_dynamic(toy_acc, f, None, p.time)
         assert dyn.sigma_c[0] == pytest.approx(0.02 * 965.0, rel=1e-12)
 
     def test_ratio_zero_r_stated_exact_keeps_floor(self, toy_acc, tmp_path):
@@ -1158,9 +1158,9 @@ class TestRatioConstraintBuilder:
         assert static.sigma_c[0] == 0.0
         p = builder._pairs[0]
         f = np.zeros(toy_acc.n_edges)
-        f[p["edge_i"]] = 50.0
-        f[p["edge_j"]] = 1000.0
-        dyn = builder.build_dynamic(toy_acc, f, None, p["time"])
+        f[p.edges[0]] = 50.0
+        f[p.edges[p.n_num]] = 1000.0
+        dyn = builder.build_dynamic(toy_acc, f, None, p.time)
         assert dyn.sigma_c[0] == pytest.approx(0.02 * 100.0, rel=1e-12)
 
     def test_ratio_zero_r_with_sigma_raises(self, toy_acc, tmp_path):
@@ -1179,12 +1179,12 @@ class TestRatioConstraintBuilder:
         builder.build_static(toy_acc)
         p = builder._pairs[0]
         f = np.zeros(toy_acc.n_edges)
-        f[p["edge_i_list"]] = 100.0
-        f[p["edge_j_list"]] = 300.0
-        dyn = builder.build_dynamic(toy_acc, f, None, p["time"])
+        f[p.edges[:p.n_num]] = 100.0
+        f[p.edges[p.n_num:]] = 300.0
+        dyn = builder.build_dynamic(toy_acc, f, None, p.time)
         expected = max(0.05 / 0.8, 0.02) * max(
-            100.0 * len(p["edge_i_list"]),
-            p["r"] * 300.0 * len(p["edge_j_list"]),
+            100.0 * len(p.edges[:p.n_num]),
+            -p.coefficients[p.n_num] * 300.0 * len(p.edges[p.n_num:]),
             1.0,
         )
         assert dyn.sigma_c[0] == pytest.approx(expected)

@@ -179,7 +179,7 @@ class TestSoftRowWithoutSigmaRule:
             param_id="netstockbound", param_type="stock_bound", unc_type="", value_sd="",
             value_nominal="0", value_max="0.1", a_valuation="Mass", b_valuation="CC")], ",")
         b = RatioConstraintBuilder.from_csv(str(p), _Acc())
-        assert b._pairs[0]["sigma_c"] == pytest.approx(0.1 / 1.645)
+        assert b._pairs[0].sigma == pytest.approx(0.1 / 1.645)
 
     def test_parametric_imputer_raises_on_a_row_without_one(self, tmp_path):
         p = _write(tmp_path / "c.csv", [_rec(unc_type="", value_sd="")], ",")
