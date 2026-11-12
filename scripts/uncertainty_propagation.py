@@ -7,7 +7,7 @@ expression in :class:`pysuto.uncprop.KalmanUncProp`.
 
 Pipeline
 --------
-1  Instantiate KalmanUncProp (defaults match Solver's σ conditioning)
+1  Instantiate KalmanUncProp (σ conditioning floors come from the opt sidecar)
 2  compute(opt_run_id, alpha=0.05) — cross-discovers const_run_id via the
    opt sidecar, reduces each period at the QP's active set at a* (#27),
    builds S(t) = G·diag(σ²_a)·Gᵀ + diag(σ²_c(t)) on it, and solves for the

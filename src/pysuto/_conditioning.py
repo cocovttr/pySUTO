@@ -30,13 +30,58 @@ from .logging import get_logger
 logger = get_logger("pysuto.conditioning")
 
 
+# The only definition of the default floors and ceiling. The solver (Stage 4)
+# records the values it used in the opt sidecar's ``stage_config``; uncprop
+# (Stage 5) reads them back from there and falls back to these.
+SIGMA_A_FLOOR_ABS      = 1e-8
+SIGMA_A_FLOOR_REL      = 1e-5
+SIGMA_A_CEILING_FACTOR = 1e5
+SIGMA_C_FLOOR          = 1e-9
+
+DEFAULT_CONDITIONING = {
+    "sigma_a_floor_abs":      SIGMA_A_FLOOR_ABS,
+    "sigma_a_floor_rel":      SIGMA_A_FLOOR_REL,
+    "sigma_a_ceiling_factor": SIGMA_A_CEILING_FACTOR,
+    "sigma_c_floor":          SIGMA_C_FLOOR,
+}
+
+
+def recorded_conditioning(stage_config: dict, run_id: str = "") -> dict:
+    """The σ conditioning floors an opt run recorded in its ``stage_config``.
+
+    A run that predates the record (any key missing) gets the library defaults
+    in :data:`DEFAULT_CONDITIONING` and a logged warning; the defaults never
+    changed, so this is exact for every such run.
+
+    Parameters
+    ----------
+    stage_config : dict
+        The opt sidecar's ``stage_config``.
+    run_id : str
+        The opt run id, named in the warning.
+
+    Returns
+    -------
+    dict
+        The four :data:`DEFAULT_CONDITIONING` keys, as floats.
+    """
+    cfg = stage_config or {}
+    missing = [k for k in DEFAULT_CONDITIONING if k not in cfg]
+    if missing:
+        logger.warning(
+            "opt run %r records no %s in its stage_config; using the library "
+            "defaults %s.", run_id, ", ".join(missing), DEFAULT_CONDITIONING,
+        )
+    return {k: float(cfg.get(k, v)) for k, v in DEFAULT_CONDITIONING.items()}
+
+
 def condition_prior(
     a_0:            np.ndarray,
     sigma_a:        np.ndarray,
     *,
-    floor_abs:      float = 1e-8,
-    floor_rel:      float = 1e-5,
-    ceiling_factor: float = 1e5,
+    floor_abs:      float = SIGMA_A_FLOOR_ABS,
+    floor_rel:      float = SIGMA_A_FLOOR_REL,
+    ceiling_factor: float = SIGMA_A_CEILING_FACTOR,
 ) -> tuple[np.ndarray, np.ndarray]:
     """Apply NaN, floor and ceiling rules to the Stage-3 prior.
 
@@ -83,7 +128,7 @@ def condition_prior(
 def condition_sigma_c(
     sigma_c:   np.ndarray,
     *,
-    floor:     float = 1e-9,
+    floor:     float = SIGMA_C_FLOOR,
     hard_mask: Optional[np.ndarray] = None,
 ) -> np.ndarray:
     """Apply NaN→floor and a numerical floor to ``sigma_c``.
