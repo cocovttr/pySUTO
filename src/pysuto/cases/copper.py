@@ -40,13 +40,12 @@ from pysuto.constraints import (
     anchors,
 )
 from pysuto.impute import (
+    FillImputer,
     FlatPriorImputer,
     NetworkImputer,
-    ParametricImputer,
     ShareImputer,
     StockLeg,
     TimeImputer,
-    TradeImputer,
     damp_leg_sigma,
     screen_contradicted_nodes,
     screen_outlier_trade_legs,
@@ -55,6 +54,7 @@ from pysuto.impute import (
 from pysuto.feedpipe import FeedSpec, check_file
 from pysuto.flow_node_balance import K_CLOSE as UNCLOSED_K
 from pysuto.relation.param_relation import expand_edge_index
+from pysuto.relation.sources import Fill, ParamSource, trade_scope
 from pysuto.unc import PedigreeScores
 from pysuto.logging import get_logger
 
@@ -83,10 +83,10 @@ class CopperImp(ImpSection):
 
     # Propagation / Lp settings
     P_PROP:        float = 1.3      # Lp/power-mean exponent
-    Q_REG:         float = 3.0      # ParametricImputer backward-branch knee sharpness
+    Q_REG:         float = 3.0      # parametric fill's backward-branch knee sharpness
     ALPHA_MIN_REG: float = 0.05     # inverse-multiplier effective-sensitivity floor
 
-    # Imputation cascade — conc/eff/formula iterate to a fixpoint (re-run until a
+    # Imputation cascade — trade/network/conc/ore_grade iterate to a fixpoint (re-run until a
     # full sweep fills no new edges). Safety cap on passes (chain depth ≈ 8).
     CASCADE_MAX_ITER: int = 10
     # Cascade order (#104): imputers are write-once, so where two writer scopes overlap
@@ -94,8 +94,11 @@ class CopperImp(ImpSection):
     # can run named alternative orders; it must stay a permutation of cascade_ids. The
     # terminal pass (time → share → flat) is fixed: flat must be last and only share may
     # write the stock legs (ADR 0040).
-    cascade_ids:   tuple = ("trade", "network", "conc", "ore_grade", "eff")
-    CASCADE_ORDER: tuple = ("trade", "network", "conc", "ore_grade", "eff")
+    # (No `eff` entry: the per-pair efficiency ParametricImputer wrote 0 edges in every
+    # run — imp_20261022_111102_1b49a2b3, imp_20261102_095209_86454f46,
+    # imp_20261112_154659_f4ec08ae — the network's pooled recipe owns the eff rows.)
+    cascade_ids:   tuple = ("trade", "network", "conc", "ore_grade")
+    CASCADE_ORDER: tuple = ("trade", "network", "conc", "ore_grade")
 
     # NetworkImputer — waste rock is a satellite mass flow outside the Mining balance
     # (ADR 0038), fixed in Stage 3 by the hard stripping relation WR_Mass = k·Ore_Mass
@@ -341,13 +344,13 @@ def imp_stage_config(ctx) -> dict:
 
 def imputers(ctx) -> list:
     """The copper imputer cascade, in order: the fixpoint :class:`Cascade` (trade,
-    network, conc, ore_grade, eff in ``CASCADE_ORDER``), then the terminal time
+    network, conc, ore_grade in ``CASCADE_ORDER``), then the terminal time
     interpolator, net-stock share imputer and flat prior. Appends the params entries
     it reads to ``ctx.param_refs``."""
     spec, inputs, acc, logger = ctx.case.imp, ctx.inputs, ctx.acc, ctx.logger
     param_refs = ctx.param_refs
 
-    # The conc/eff/formula imputers form a metallurgical cascade: a value
+    # The conc/network imputers form a metallurgical cascade: a value
     # derived at one stage (e.g. Smelting→Matte CC via eff) only feeds the next
     # stage's fill (Matte→CFR Mass via conc/formula) on a *subsequent* pass.
     # They are registered as a fixpoint cascade — re-run together until a full
@@ -355,32 +358,35 @@ def imputers(ctx) -> list:
     # one hop (see docs/rep/analysis_imp_…_conc-after-eff-mass-gap.md).
     # TimeImputer/FlatPrior run once afterwards (terminal).
 
-    def _build_parametric(params_id: str, imp_id: str) -> ParametricImputer:
+    def _build_parametric(params_id: str, imp_id: str) -> FillImputer:
         csv_path = inputs.params.resolve(params_id) / "params.csv"
-        imp = ParametricImputer.from_csv(
-            str(csv_path), acc, id=imp_id, p=spec.P_PROP, q=spec.Q_REG,
-            alpha_min=spec.ALPHA_MIN_REG,
+        source = ParamSource.from_params(str(csv_path), acc)
+        imp = FillImputer(
+            Fill(source, "both", id=imp_id), "parametric", p=spec.P_PROP,
+            q=spec.Q_REG, alpha_min=spec.ALPHA_MIN_REG,
         )
         param_refs.append(inputs.params.entry(params_id))
-        logger.info("C  built ParametricImputer id=%s (params=%s v%d)",
+        logger.info("C  built FillImputer id=%s (params=%s v%d)",
                     imp_id, params_id, inputs.params.entry(params_id)["version"])
         return imp
 
     # Cascade group (iterated to fixpoint): trade seeds → network closure →
-    # concentration ratios → ore-grade ratios → process efficiencies. (The
-    # domestic-use FormulaImputer is retired — see the note above.)
-    # TradeImputer runs FIRST: it seeds cross-region Flow→Process import CC legs
+    # concentration ratios → ore-grade ratios. (The domestic-use FormulaImputer is
+    # retired — see the note above.)
+    # The trade fill runs FIRST: it seeds cross-region Flow→Process import CC legs
     # from the BACI Mass twin (f_CC = conc·f_Mass), so the NetworkImputer recipe
     # gate can pool them and the flow-balance can close the lone domestic leg
     # (ADR 0010). It owns only cross-region edges — the complement of the
     # network's same-region territory.
-    trade = TradeImputer(
-        conc_csv = str(inputs.params.resolve("conc") / "params.csv"),
-        p=spec.P_PROP, id="trade",
+    trade = FillImputer(
+        Fill(ParamSource.from_params(str(inputs.params.resolve("conc") / "params.csv"),
+                                     acc, twin=True),
+             "forward", trade_scope(acc), id="trade"),
+        "trade", p=spec.P_PROP,
     )
     # NetworkImputer is the sole writer of process-incident, same-region chain
-    # edges (recipe closure on CC + Mass twins + SEM waste). The eff/conc
-    # parametric imputers are demoted to a fallback on whatever the network
+    # edges (recipe closure on CC + Mass twins + SEM waste). The conc/ore_grade
+    # parametric fills are demoted to a fallback on whatever the network
     # leaves undetermined; chain-edge provenance shows network_*.
     network = NetworkImputer(
         eff_csv       = str(inputs.params.resolve("eff")       / "params.csv"),
@@ -401,10 +407,12 @@ def imputers(ctx) -> list:
             "network":   network,
             "conc":      _build_parametric("conc",      "conc"),
             "ore_grade": _build_parametric("ore_grade", "ore_grade"),
-            "eff":       _build_parametric("eff",       "eff"),
         }, spec.CASCADE_ORDER),
         max_iter = spec.CASCADE_MAX_ITER,
     )
+    # The network reads the eff rows; the lineage records them as it did when an eff
+    # ParametricImputer was built here.
+    param_refs.append(inputs.params.entry("eff"))
 
     # 5. Temporal interpolation, no extrapolation (terminal).
     #    Scoped to same-region edges (ADR 0026) — see TIME_SCOPE_SAME_REGION.

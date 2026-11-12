@@ -12,7 +12,8 @@ Public surface (re-exported here so call sites can keep using
 * :class:`ScopeError`          — raised on an out-of-scope write under ``strict_scope``
 
 Imputers (run order is up to the engine's registration sequence):
-* :class:`TradeImputer`        — seed cross-region Flow→Process CC from BACI Mass twin
+* :class:`FillImputer`         — one fill rule of the params relation source (trade seed,
+                                 conc, ore grade)
 * :class:`NetworkImputer`      — process-recipe traversal (mass closure on CC)
 * :class:`ParametricImputer`   — CSV bidirectional pairs + λ directed relations
 * :class:`FormulaImputer`      — multi-source balance equations
@@ -31,7 +32,7 @@ from .ledger     import PriorLedger, ScopeError, run_imputer
 from .parametric import ParametricImputer, ParametricRelation, _reg_sensitivity
 from .formula    import FormulaImputer, FormulaRelation, ParamRef, SourceTerm
 from .network    import NetworkImputer
-from .trade      import TradeImputer
+from .fill       import FillImputer
 from .time       import TimeImputer, time_interp_scope
 from .screens    import damp_leg_sigma, screen_contradicted_nodes, screen_outlier_trade_legs
 from .share      import ShareImputer, StockLeg
@@ -45,7 +46,7 @@ __all__ = [
     "PriorLedger",
     "ScopeError",
     "run_imputer",
-    "TradeImputer",
+    "FillImputer",
     "NetworkImputer",
     "ParametricImputer",
     "ParametricRelation",

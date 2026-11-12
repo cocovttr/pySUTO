@@ -63,7 +63,7 @@ STEP_MINUTES = {"imp": 2.8, "const": 4.4, "opt": 2.7}
 
 # The copper case's cascade_ids (pysuto.cases.copper); reversed, every pairwise
 # precedence flips.
-CASCADE_SHIPPED  = ("trade", "network", "conc", "ore_grade", "eff")
+CASCADE_SHIPPED  = ("trade", "network", "conc", "ore_grade")
 CASCADE_REVERSED = tuple(reversed(CASCADE_SHIPPED))
 
 # The varied knobs (#108): σ-scale knobs log-uniform over a factor 2 either side of the

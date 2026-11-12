@@ -36,8 +36,8 @@ deliberate error; :func:`reveal` names it.
 
 Stage 2 runs copper's cascade order, ``trade → network → conc``. The per-pair Milling
 recovery relation is closed by the network (``network_backward``, from the Bureau's
-concentrate output), so copper's ``eff`` ParametricImputer, which runs after the network,
-would write no edge here, as it writes none in copper: it is not registered.
+concentrate output), so a per-pair ``eff`` fill after the network would write no edge
+here, as none did in copper (where it was dropped): it is not registered.
 
 Limitations, stated once
 ------------------------
@@ -107,16 +107,16 @@ from pysuto.feedpipe import (
     step_C_build_weight_matrix,
 )
 from pysuto.impute import (
+    FillImputer,
     FlatPriorImputer,
     NetworkImputer,
-    ParametricImputer,
     TimeImputer,
-    TradeImputer,
 )
 from pysuto.input_registry import InputRegistries
 from pysuto.logging import get_logger
 from pysuto.meta import DataFeedMetadata
 from pysuto.psut import PSUT
+from pysuto.relation.sources import Fill, ParamSource, trade_scope
 from pysuto.registry import (
     ConstraintRunRegistry,
     DataFeedRegistry,
@@ -732,12 +732,11 @@ class ToyImp(ImpSection):
     """The toy's Stage 2 section: copper's knob names at the toy's values."""
 
     P_PROP:          float = 1.3       # Lp exponent, every stage
-    Q_REG:           float = 3.0       # Network/ParametricImputer backward-branch knee
+    Q_REG:           float = 3.0       # Network/parametric-fill backward-branch knee
     ALPHA_MIN_REG:   float = 0.05      # inverse-multiplier sensitivity floor
     FLAT_SIGMA_HIGH: float = 1.0e6     # noisy-zero flat prior σ; the waste-rock fill's σ
                                        # (ADR 0038)
-    # Copper's cascade order without its eff ParametricImputer, which writes no edge
-    # after the network (see the module docstring).
+    # Copper's cascade order (see the module docstring).
     CASCADE_ORDER:   tuple = ("trade", "network", "conc")
     CASCADE_MAX_ITER:      int   = 10
     TIME_WINDOW:           int   = 3
@@ -807,14 +806,17 @@ def imputers(ctx) -> list:
     eff   = _params_csv(ctx, "eff")
     strip = _params_csv(ctx, "stripping_ratio")
     cascade = {
-        "trade":   TradeImputer(conc_csv=conc, p=spec.P_PROP, id="trade"),
+        "trade":   FillImputer(Fill(ParamSource.from_params(conc, acc, twin=True),
+                                    "forward", trade_scope(acc), id="trade"),
+                               "trade", p=spec.P_PROP),
         "network": NetworkImputer(eff_csv=eff, conc_csv=conc, stripping_ratio_csv=strip,
                                   stripping_sigma=spec.FLAT_SIGMA_HIGH, p=spec.P_PROP,
                                   q=spec.Q_REG, alpha_min=spec.ALPHA_MIN_REG,
                                   cv_cap=spec.NETWORK_CV_CAP, id="network",
                                   stock_sectors=spec.stock_sectors),
-        "conc":    ParametricImputer.from_csv(conc, acc, p=spec.P_PROP, q=spec.Q_REG,
-                                              alpha_min=spec.ALPHA_MIN_REG, id="conc"),
+        "conc":    FillImputer(Fill(ParamSource.from_params(conc, acc), "both", id="conc"),
+                               "parametric", p=spec.P_PROP, q=spec.Q_REG,
+                               alpha_min=spec.ALPHA_MIN_REG),
     }
     return [
         Cascade([cascade[k] for k in spec.CASCADE_ORDER], max_iter=spec.CASCADE_MAX_ITER),
