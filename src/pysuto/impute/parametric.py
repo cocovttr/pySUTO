@@ -104,7 +104,7 @@ class ParametricImputer(BaseImputer):
 
        * propagated source σ: forward |coeff|·σ_a, backward s(1/coeff)·σ_b;
        * parameter σ: forward |f_a|·σ_param, backward |f_a|·σ_param/|coeff|, i.e.
-         |f_target|·σ_param/|coeff| (first-order, the form of ``TradeImputer`` and
+         |f_target|·σ_param/|coeff| (first-order, the form of the trade fill and
          the Mass twin);
        * ε term: ε·|f_target|.
 
@@ -247,7 +247,7 @@ class ParametricImputer(BaseImputer):
                 # Forward (A→B): bare coefficient. All terms in B's flow units (kt):
                 #   σ_b = Lp(|coeff|·σ_a, |f_a|·σ_param, ε·f_b)
                 # σ_param is in ratio units; |f_a|·σ_param (= |f_b|·σ_param/|coeff|)
-                # is its first-order image in flow units, as in TradeImputer, and
+                # is its first-order image in flow units, as in the trade fill, and
                 # stays defined for coeff == 0 (#148).
                 s_b   = lp_combine(
                     [coeff * sigma[a_id], abs(f[a_id]) * sig_p, epsilon * f_b], p,

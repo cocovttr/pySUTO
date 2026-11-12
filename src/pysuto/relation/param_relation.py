@@ -122,8 +122,8 @@ def conc_for(lookup: dict, sectors, regions) -> np.ndarray:
 def conc_twin_map(path, resolver, into: dict | None = None) -> dict:
     """Resolve a conc-style CSV (A=Mass, B=CC) into ``CC -> (Mass_edge, conc, σ)``.
 
-    The shared twin-map builder consumed by both ``NetworkImputer`` (CC→Mass twin
-    emission) and ``TradeImputer`` (Mass→CC trade-seed). Keyed by the CC (B-side)
+    The twin-map builder of ``NetworkImputer`` (CC→Mass twin emission); the trade fill
+    reads the same twins through ``ParamSource.from_params(..., twin=True)``. Keyed by the CC (B-side)
     edge, keeping the most specific row per edge. Pass ``into`` to overlay onto an
     existing map — a later call's rows overwrite earlier ones for shared CC edges
     (used to overlay ore_grade onto conc); omit it for a fresh map. Returns the map.
