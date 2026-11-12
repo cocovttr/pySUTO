@@ -137,6 +137,76 @@ def share_by_key(fam, key: str = "sector_key", top=None):
     return out[[key, "zsq", "share", "n_rows", "n_identities"]]
 
 
+MULTI = "multi"
+_SHARE_REGION_COLS = ["family", "region", "year", "zsq", "share", "n_rows"]
+
+
+def _col(fam: pd.DataFrame, name: str):
+    """Column as a unicode array (``""`` for missing), or ``None`` when absent."""
+    return _s(fam[name]) if name in fam.columns else None
+
+
+def assign_region(fam: pd.DataFrame) -> np.ndarray:
+    """Region bucket of every row of a :func:`family_frame` (read from columns).
+
+    * ``edges``       — ``from_region`` when equal to ``to_region``, else ``multi``;
+    * ``sum_rows``    — the row's ``region``; ``multi`` when it has none (world totals);
+    * ``soft_ratios`` — a pair-scoped row takes ``num_region_from`` when equal to
+      ``num_region_to``, else ``multi``; a set-scoped row its ``region``, else ``multi``.
+
+    ``multi`` is the bucket of everything that spans regions or names none.
+    """
+    n = len(fam)
+    multi = np.full(n, MULTI, dtype=object)
+    family = fam["family"].iloc[0] if n else None
+    if family == "edges":
+        a, b = _col(fam, "from_region"), _col(fam, "to_region")
+        return np.where((a == b) & (a != ""), a, multi)
+    own = _col(fam, "region")
+    own = own if own is not None else np.full(n, "", dtype=str)
+    if family == "sum_rows":
+        return np.where(own != "", own, multi)
+    a, b = _col(fam, "num_region_from"), _col(fam, "num_region_to")
+    if a is None:
+        return np.where(own != "", own, multi)
+    pair = np.where((a == b) & (a != ""), a, multi)
+    return np.where(a != "", pair, np.where(own != "", own, multi))
+
+
+def share_by_region(fam):
+    """Each region's share of one family's ``Σz²``, overall and per year.
+
+    Rows are bucketed by :func:`assign_region` (spanning / region-less rows go
+    to ``multi``). Columns ``family, region, year, zsq, share, n_rows``: the
+    ``year == "all"`` rows give the region's ``Σ_t z²`` and its share of the
+    family total; the per-year rows give the region-year's ``Σz²`` and *its*
+    share of the same family total (so each block sums to 1). The ``"all"``
+    block comes first, each block sorted by ``zsq`` descending; NaN ``z``
+    ignored. ``None`` for a ``None`` frame.
+    """
+    if fam is None:
+        return None
+    ok = fam["z"].notna().to_numpy()
+    f = fam.loc[ok]
+    d = pd.DataFrame({
+        "region": assign_region(fam)[ok],
+        "year":   f["year"].to_numpy(),
+        "zsq":    f["z"].to_numpy(dtype=float) ** 2,
+    })
+    total = float(d["zsq"].sum())
+    name = fam["family"].iloc[0] if len(fam) else ""
+    blocks = []
+    for keys, year in ((["region"], "all"), (["region", "year"], None)):
+        g = d.groupby(keys, sort=False)["zsq"].agg(["sum", "size"]).reset_index()
+        g = g.rename(columns={"sum": "zsq", "size": "n_rows"})
+        if year is not None:
+            g["year"] = year
+        g["family"] = name
+        g["share"] = g["zsq"] / total if total > 0 else np.nan
+        blocks.append(g.sort_values("zsq", ascending=False, kind="stable"))
+    return pd.concat(blocks, ignore_index=True)[_SHARE_REGION_COLS]
+
+
 def rank_identities(fam, top=None):
     """Identities of one family ranked by ``Σ_t z²`` (descending).
 

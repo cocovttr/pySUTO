@@ -492,6 +492,14 @@ class SolverDiag:
                 + "  ".join(f"{f}={tot[f'zsq_{f}']:.4g}" for f in FAMILIES)
                 + f"  (worst year t={worst})"
             )
+        shares = self.stats.region_shares()
+        if not shares.empty:
+            shares = shares[shares["year"] == "all"]
+            for fam in FAMILIES:
+                top = shares[shares["family"] == fam].head(5)
+                if not top.empty:
+                    lines.append(f"  region Σz² : {fam}  " + "  ".join(
+                        f"{r}={s:.1%}" for r, s in zip(top["region"], top["share"])))
         worst_eps = max(self._eps_norms, key=self._eps_norms.get)
         lines.append(f"  worst ε   : t={worst_eps}  ‖ε‖₂={self._eps_norms[worst_eps]:.3e}")
         lines.append(f"  max |Gx-c| on mass-balance rows: {mb_max:.3e}")
@@ -560,6 +568,9 @@ class SolverDiag:
 
         # The identity rankings behind SD-R-13/14/15 — one CSV per family.
         paths += self.stats.write_rankings(odir, regions=regions, suffix=suffix)
+        p_shares = self.stats.write_region_shares(odir)
+        if p_shares:
+            paths.append(p_shares)
 
         # Provenance is run lineage, not a figure — always appended (no-op in live mode).
         prov_path = self._write_provenance(odir)

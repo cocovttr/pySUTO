@@ -279,3 +279,53 @@ def test_filter_regions_or_semantics(edges):
     assert set(only_to["identity"]) == {1, 2}
     missing_col = filter_regions(edges, ("nope",), ["B"])
     assert missing_col.empty
+
+
+# ---------------------------------------------------------------------------
+# share_by_region
+# ---------------------------------------------------------------------------
+
+def test_share_by_region_sums_to_one_per_family(edges, rows):
+    from pysuto.diag.stats.objective import share_by_region
+    for fam in FAMILIES:
+        t = share_by_region(family_frame(edges, rows, fam))
+        tot = t[t["year"] == "all"]
+        assert tot["share"].sum() == pytest.approx(1.0, rel=1e-12)
+        by_year = t[t["year"] != "all"]
+        assert by_year["share"].sum() == pytest.approx(1.0, rel=1e-12)
+        assert by_year["zsq"].sum() == pytest.approx(tot["zsq"].sum(), rel=1e-12)
+
+
+def test_share_by_region_assignment_rule(edges, rows):
+    from pysuto.diag.stats.objective import share_by_region
+    # edges: identity 1 (A→B) is cross-region → multi; z² per year 0.25 × 3
+    e = share_by_region(family_frame(edges, None, "edges"))
+    e = e[e["year"] == "all"].set_index("region")
+    assert e.loc["multi", "zsq"] == pytest.approx(0.75)
+    assert e.loc["A", "zsq"] == pytest.approx(1 + 4 + 9)             # identity 0 only
+    assert e.loc["B", "zsq"] == pytest.approx(16.0)                  # identity 2 (NaN year ignored)
+    # sum rows: the row's own region; soft ratios: A→A pair → A, region-less eff rows → multi
+    s = share_by_region(family_frame(None, rows, "sum_rows"))
+    s = s[s["year"] == "all"].set_index("region")
+    assert s.loc["A", "zsq"] == pytest.approx(8.0) and s.loc["B", "zsq"] == pytest.approx(1.0)
+    r = share_by_region(family_frame(None, rows, "soft_ratios"))
+    r = r[r["year"] == "all"].set_index("region")
+    assert r.loc["A", "zsq"] == pytest.approx(0.5) and r.loc["multi", "zsq"] == pytest.approx(400.0)
+
+
+def test_share_by_region_planted_residual_ranks_first(rows):
+    from pysuto.diag.stats.objective import share_by_region
+    rows = rows.copy()
+    hit = (rows["type"] == "sum") & (rows["region"] == "B") & (rows["year"] == "1996")
+    rows.loc[hit, "z"] = 50.0
+    t = share_by_region(family_frame(None, rows, "sum_rows"))
+    tot = t[t["year"] == "all"]
+    assert tot.iloc[0]["region"] == "B"
+    assert tot.iloc[0]["share"] > 0.99
+    top_year = t[t["year"] != "all"].iloc[0]
+    assert (top_year["region"], top_year["year"]) == ("B", "1996")
+
+
+def test_share_by_region_none_frame():
+    from pysuto.diag.stats.objective import share_by_region
+    assert share_by_region(None) is None

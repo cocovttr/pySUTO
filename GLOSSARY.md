@@ -631,7 +631,10 @@ years by `SolverDiag` (SD-R-13 by sector key, SD-R-14 top identities, SD-R-15 z 
 tabulated in `ranking_<family>.csv`; three families: edge defects, sum-row residuals (`type =
 sum`, all soft), soft-ratio residuals (`type = ratio`, free cone). _Avoid_: "deviation" (say defect
 or residual), "violation" (a soft row is meant to absorb disagreement — see Constraint table),
-"fit".
+"fit". _Region share_: a region's share of one family's `Σz²`, tabulated per region and per
+region-year in `objective_share_by_region.csv`; an edge belongs to its region when both ends sit
+in it, a sum row to its `region`, a pair-scoped soft ratio to its numerator's region, and
+anything spanning regions (bilateral legs) or naming none (world totals) to the bucket `multi`.
 
 **Objective decomposition** — the per-year split of `Σz²` into the three families, drawn with the
 max hard mass-balance `|G·a* − c|` (SD-R-11). _Avoid_: reading the Clarabel `objective` in the opt
