@@ -393,13 +393,14 @@ class SolverStatsDiagnostic:
             paths += [p_edges, p_const]
         return paths
 
-    def region_shares(self, regions=None) -> pd.DataFrame:
+    def region_shares(self) -> pd.DataFrame:
         """:func:`~.objective.share_by_region` of every family whose frame exists,
         stacked (columns ``family, region, year, zsq, share, n_rows``)."""
         from .objective import FAMILIES, family_frame, share_by_region
 
         ef, cf = self.edge_frame(), self.constraint_frame()
-        parts = [share_by_region(family_frame(ef, cf, fam, regions=regions)) for fam in FAMILIES]
+        parts = [share_by_region(family_frame(ef, cf, fam))
+                 for fam in FAMILIES]
         parts = [p for p in parts if p is not None]
         return pd.concat(parts, ignore_index=True) if parts else pd.DataFrame()
 

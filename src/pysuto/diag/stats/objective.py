@@ -155,6 +155,8 @@ def assign_region(fam: pd.DataFrame) -> np.ndarray:
       ``num_region_to``, else ``multi``; a set-scoped row its ``region``, else ``multi``.
 
     ``multi`` is the bucket of everything that spans regions or names none.
+    Limitation: a sum row grouped on both ends carries only ``region_to`` in
+    ``row_meta``, so it is credited to the destination, not to ``multi``.
     """
     n = len(fam)
     multi = np.full(n, MULTI, dtype=object)

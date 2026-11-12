@@ -454,4 +454,3 @@ class TestBoundaryPalette:
             assert all(len(a.get_lines()) > 0 for a in axes[2])
         finally:
             plt.close(fig)
-
