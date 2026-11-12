@@ -262,7 +262,8 @@ class TestFromUncpropId:
         z = np.zeros((1, 10))
         agg = SimpleNamespace(f_agg=np.ones(10), sigma_agg=np.ones(10), Omega=z, F=z,
                               Sigma=z, coverage=np.arange(10) < 5, feed_ids=["toy"],
-                              imputation_log=log, imputation_metadata=None)
+                              imputation_log=log, imputation_metadata=None,
+                              flat_prior=np.arange(10) == 9)
         imp_id = ImputationRunRegistry(dirs["imp"]).register(
             agg, label="toy", parents={"inputs": {}, "upstream": {}})
 

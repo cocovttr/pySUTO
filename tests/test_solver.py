@@ -379,6 +379,7 @@ class TestLowerBoundsEnforced:
         class _Agg:
             f_agg     = np.array([100.0, 120.0, 0.0])
             sigma_agg = np.array([1.0, 1.0, 1000.0])
+            flat_prior = np.zeros(3, dtype=bool)
 
         storage_dir = str(tmp_path / "const")
         engine = ConstraintEngine(acc, storage_dir=storage_dir)

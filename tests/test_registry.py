@@ -641,6 +641,7 @@ class _AggResult:
         self.feed_ids  = [f"feed_{i}" for i in range(n_feeds)]
         self.imputation_log      = _ImpLog(n=n_imputed)
         self.imputation_metadata = None
+        self.flat_prior          = np.array([False, False, True, False][:n_edges])
         self._imp_run_id         = None
 
 

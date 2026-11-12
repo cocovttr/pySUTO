@@ -53,6 +53,8 @@ class AggregationResult:
     feed_ids    : list of feed ID strings (row labels for F and Sigma)
     coverage    : [N_r] bool  True where at least one feed has a valid observation
     imputation_log : attached by ImputationEngine after imputation (None until then)
+    flat_prior  : [N_r] bool  True where the last-resort FlatPriorImputer filled the edge
+                  (set by ImputationEngine; None on a run from before it was recorded)
     """
 
     f_agg:    np.ndarray
@@ -64,6 +66,7 @@ class AggregationResult:
     coverage: np.ndarray
     imputation_log:      Optional[object] = field(default=None)
     imputation_metadata: Optional[object] = field(default=None)
+    flat_prior:          Optional[np.ndarray] = field(default=None)
     # Provenance: set by ImputationRunRegistry.register() so downstream stages
     # (ConstraintEngine) can record the upstream imputation run.
     _imp_run_id:         Optional[str]    = field(default=None)

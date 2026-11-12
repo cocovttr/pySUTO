@@ -132,6 +132,7 @@ def _make_toy_agg_result(acc, seed: int = 42):
     r           = _R()
     r.f_agg     = f_agg
     r.sigma_agg = sigma_a
+    r.flat_prior = np.zeros(acc.n_edges, dtype=bool)
     return r
 
 
@@ -2679,6 +2680,8 @@ def _make_anchor_acc():
 
 class TestNodataSigmaAnchor:
 
+    FLAT = np.array([False, True, True])        # the Stage-2 flag: edges 1 and 2 are flat
+
     def test_anchors_nodata_metallurgical_edge(self):
         """A no-data edge (a₀=0, σ=1e6) in a non-excluded sector gets
         σ = cv·median|a₀| of anchored siblings; the anchored sibling and the
@@ -2689,7 +2692,7 @@ class TestNodataSigmaAnchor:
                                nodata_anchor_exclude_sectors=("Mining",))
         a0      = np.array([100.0, 0.0,  0.0])
         sigma_a = np.array([  5.0, 1e6,  1e6])
-        out = eng._anchor_nodata_sigma(a0, sigma_a, acc)
+        out = eng._anchor_nodata_sigma(a0, sigma_a, acc, self.FLAT)
         assert out[1] == pytest.approx(0.3 * 100.0)        # cv · median(anchored Scrap a₀)
         assert out[0] == 5.0                               # anchored sibling untouched
         assert out[2] == 1e6                               # Mining excluded → still flat
@@ -2702,20 +2705,20 @@ class TestNodataSigmaAnchor:
         eng = ConstraintEngine(acc_struct=acc, nodata_anchor_cv=0.0)
         a0      = np.array([100.0, 0.0, 0.0])
         sigma_a = np.array([  5.0, 1e6, 1e6])
-        out = eng._anchor_nodata_sigma(a0, sigma_a, acc)
+        out = eng._anchor_nodata_sigma(a0, sigma_a, acc, self.FLAT)
         np.testing.assert_array_equal(out, sigma_a)
 
-    def test_below_threshold_not_anchored(self):
-        """A zero-prior edge whose σ is already below the flat threshold (i.e.
-        not a global-median fallback) is left alone — only the 1e6 fallback is
+    def test_edge_the_flat_prior_did_not_fill_is_not_anchored(self):
+        """A zero-prior edge at the flat σ that the FlatPriorImputer did not fill
+        (a relation fill, #137) is left alone — only the flagged edges are
         retargeted."""
         from pysuto.constraints import ConstraintEngine
         acc = _make_anchor_acc()
         eng = ConstraintEngine(acc_struct=acc)
         a0      = np.array([100.0, 0.0, 0.0])
-        sigma_a = np.array([  5.0, 50.0, 1e6])             # e1 σ below 1e5 threshold
-        out = eng._anchor_nodata_sigma(a0, sigma_a, acc)
-        assert out[1] == 50.0                              # untouched (not a fallback σ)
+        sigma_a = np.array([  5.0, 1e6, 1e6])              # e1 at the flat σ, unflagged
+        out = eng._anchor_nodata_sigma(a0, sigma_a, acc, np.array([False, False, True]))
+        assert out[1] == 1e6                               # untouched (not flat-prior)
 
     def test_exempt_mask_replaces_the_sector_rule(self):
         """ADR 0013 amendment 3: a per-edge exemption mask decides which no-data
@@ -2729,9 +2732,10 @@ class TestNodataSigmaAnchor:
                                   nodata_anchor_exempt_mask=np.array([False, False, True]))
         anchor = ConstraintEngine(acc_struct=acc,
                                   nodata_anchor_exempt_mask=np.zeros(3, dtype=bool))
-        assert spare._anchor_nodata_sigma(a0, sigma_a, acc)[2] == 1e6
+        assert spare._anchor_nodata_sigma(a0, sigma_a, acc, self.FLAT)[2] == 1e6
         # no anchored Mining sibling → the global anchored median (100) sets the scale
-        assert anchor._anchor_nodata_sigma(a0, sigma_a, acc)[2] == pytest.approx(0.3 * 100.0)
+        assert anchor._anchor_nodata_sigma(a0, sigma_a, acc, self.FLAT)[2] == pytest.approx(
+            0.3 * 100.0)
 
     def test_exempt_mask_of_wrong_length_raises(self):
         from pysuto.constraints import ConstraintEngine
@@ -2739,7 +2743,7 @@ class TestNodataSigmaAnchor:
         eng = ConstraintEngine(acc_struct=acc, nodata_anchor_exempt_mask=np.zeros(2, dtype=bool))
         with pytest.raises(ValueError, match="exempt"):
             eng._anchor_nodata_sigma(np.array([100.0, 0.0, 0.0]),
-                                     np.array([5.0, 1e6, 1e6]), acc)
+                                     np.array([5.0, 1e6, 1e6]), acc, self.FLAT)
 
 
 class TestNodataExemptMask:

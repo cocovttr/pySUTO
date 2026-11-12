@@ -27,7 +27,8 @@ class ImputationRunRegistry(BaseOutputRegistry):
         ├── registry.json
         └── imp_<ts>_<code>/
             ├── metadata.json          ← harmonized sidecar
-            ├── agg_result.npz         ← f_agg, sigma_agg, Omega, F, Σ, coverage, feed_ids
+            ├── agg_result.npz         ← f_agg, sigma_agg, Omega, F, Σ, coverage, feed_ids,
+            │                            flat_prior (bool; absent before #137)
             └── imputation_log.parquet
     """
 
@@ -83,9 +84,8 @@ class ImputationRunRegistry(BaseOutputRegistry):
         created_at = _now_iso()
         run_dir    = self._make_run_dir(run_id)
 
-        # 1. arrays
-        np.savez(
-            os.path.join(run_dir, "agg_result.npz"),
+        # 1. arrays (flat_prior only when the engine recorded it)
+        arrays = dict(
             f_agg     = agg_result.f_agg,
             sigma_agg = agg_result.sigma_agg,
             Omega     = agg_result.Omega,
@@ -94,6 +94,9 @@ class ImputationRunRegistry(BaseOutputRegistry):
             coverage  = agg_result.coverage,
             feed_ids  = np.array(agg_result.feed_ids, dtype=object),
         )
+        if agg_result.flat_prior is not None:
+            arrays["flat_prior"] = np.asarray(agg_result.flat_prior, dtype=bool)
+        np.savez(os.path.join(run_dir, "agg_result.npz"), **arrays)
 
         # 2. imputation log
         log_df = agg_result.imputation_log.as_dataframe()
@@ -175,6 +178,8 @@ class ImputationRunRegistry(BaseOutputRegistry):
             feed_ids  = list(data["feed_ids"]),
             coverage  = data["coverage"].astype(bool),
         )
+        if "flat_prior" in data.files:
+            result.flat_prior = data["flat_prior"].astype(bool)
         result.imputation_log = log_obj
         result._imp_run_id    = run_id
         return result

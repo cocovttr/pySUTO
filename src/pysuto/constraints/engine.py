@@ -288,7 +288,6 @@ class ConstraintEngine:
         prior_box_k: Optional[float] = None,
         nodata_anchor_cv: float = 0.3,
         nodata_anchor_exclude_sectors: tuple = (),
-        nodata_anchor_flat_threshold: float = 1e5,
         nodata_anchor_exempt_mask: Optional[np.ndarray] = None,
         pin_flat_prior_zeros: bool = False,
         pin_exclude_sectors: tuple = (),
@@ -304,7 +303,6 @@ class ConstraintEngine:
         self._prior_box_k       = float(prior_box_k) if prior_box_k else None
         self._nodata_anchor_cv  = float(nodata_anchor_cv)
         self._nodata_anchor_exclude = tuple(nodata_anchor_exclude_sectors)
-        self._nodata_anchor_flat_threshold = float(nodata_anchor_flat_threshold)
         # Per-edge exemption from the no-data anchor (ADR 0013 amendment 3); None
         # keeps the sector rule of nodata_anchor_exclude_sectors.
         self._nodata_anchor_exempt_mask = (
@@ -348,27 +346,27 @@ class ConstraintEngine:
         )
         return l_new, u_new
 
-    def _nodata_target_mask(self, a0, sigma_raw, acc, exclude_sectors, exempt_mask=None):
+    def _nodata_target_mask(self, flat_prior, acc, exclude_sectors, exempt_mask=None):
         """Boolean mask of no-data ("flat-prior") edges outside an exclusion set.
 
-        A no-data edge has ``|a₀| < 1e-9`` and σ still at the FlatPrior
-        global-median fallback (``σ ≥ nodata_anchor_flat_threshold``), i.e. it
-        had no feed coverage. ``exclude_sectors`` spares edges whose magnitude is
+        A no-data edge is one the last-resort ``FlatPriorImputer`` filled
+        (``flat_prior``, the Stage-2 per-edge flag, #137), i.e. it had neither
+        feed coverage nor a relation fill. ``exclude_sectors`` spares edges whose magnitude is
         **structurally determined by a fixed ratio / mass balance rather than by
         feed data** — the extraction chain and the SEM residual outputs — for
         which ``a₀ = 0`` means "value comes from the relation", not "no flow".
-        Computed on the *raw* σ (before Lp regularization / the no-data anchor,
-        which overwrite σ on exactly these edges). Shared by the soft σ anchor
+        Read from the flag, not from σ (Lp regularization and the no-data anchor
+        overwrite σ on exactly these edges). Shared by the soft σ anchor
         and the hard flat-prior-zero pin (different exclusion sets). A per-edge
         ``exempt_mask`` replaces the sector rule (ADR 0013 amendment 3: the
         extraction chain is spared only where a relation sets its magnitude).
         See ADR 0013.
         """
         if exempt_mask is not None:
-            if exempt_mask.shape != (len(a0),):
+            if exempt_mask.shape != (len(flat_prior),):
                 raise ValueError(
                     f"no-data anchor exempt mask has shape {exempt_mask.shape}, "
-                    f"expected ({len(a0)},)")
+                    f"expected ({len(flat_prior)},)")
             is_excluded = exempt_mask
         else:
             em          = acc.edge_meta
@@ -376,10 +374,20 @@ class ConstraintEngine:
             to_sector   = em["to_sector"].to_numpy()
             excl        = np.asarray(exclude_sectors, dtype=object)
             is_excluded = np.isin(from_sector, excl) | np.isin(to_sector, excl)
-        nodata      = (np.abs(a0) < 1e-9) & (sigma_raw >= self._nodata_anchor_flat_threshold)
-        return nodata & ~is_excluded
+        return flat_prior & ~is_excluded
 
-    def _anchor_nodata_sigma(self, a0, sigma_a, acc):
+    @staticmethod
+    def _require_flat_prior(agg_result):
+        """The Stage-2 ``flat_prior`` flag of ``agg_result``; raises when it has none."""
+        flat_prior = agg_result.flat_prior
+        if flat_prior is None:
+            raise ValueError(
+                f"imp run {getattr(agg_result, '_imp_run_id', None)!r} carries no "
+                f"flat_prior flag (agg_result.npz predates #137): re-run Stage 2 so "
+                f"the no-data anchor and the flat-prior pin can read it")
+        return np.asarray(flat_prior, dtype=bool)
+
+    def _anchor_nodata_sigma(self, a0, sigma_a, acc, flat_prior):
         """Soft magnitude-anchor for no-data ("flat-prior") edges.
 
         Edges with no feed coverage are filled by ``FlatPriorImputer`` with
@@ -409,7 +417,7 @@ class ConstraintEngine:
         from_sector = em["from_sector"].to_numpy()
         valuation   = em["valuation"].to_numpy()
 
-        target = self._nodata_target_mask(a0, sigma_a, acc, self._nodata_anchor_exclude,
+        target = self._nodata_target_mask(flat_prior, acc, self._nodata_anchor_exclude,
                                           exempt_mask=self._nodata_anchor_exempt_mask)
         if not target.any():
             _log.info("no-data σ_a anchor (cv=%.2f): 0 edges matched", cv)
@@ -647,17 +655,18 @@ class ConstraintEngine:
                 f"constraint building."
             )
 
-        # ── 0a. Flat-prior-zero pin mask (captured on RAW σ) ──────────
-        # Must be computed before Lp regularization and the no-data σ anchor,
-        # which both overwrite σ on exactly these edges (the anchor drops it
-        # below the 1e5 flat threshold, so a later mask would miss them). When
+        # ── 0a. Flat-prior-zero pin mask (from the Stage-2 flag) ───────
+        # The flag is per edge and independent of σ, which Lp regularization
+        # and the no-data σ anchor overwrite on exactly these edges. When
         # enabled, these genuine no-data leaves are pinned to [0, 0] in the flow
         # bounds below — "no feed data ⇒ no flow". The exclusion set spares
         # structurally-determined edges (extraction chain + SEM residual
         # outputs); see ADR 0013.
+        flat_prior = (self._require_flat_prior(agg_result)
+                      if self._nodata_anchor_cv > 0 or self._pin_flat_prior_zeros
+                      else None)
         pin_mask = (
-            self._nodata_target_mask(f_agg, agg_result.sigma_agg, acc,
-                                     self._pin_exclude_sectors)
+            self._nodata_target_mask(flat_prior, acc, self._pin_exclude_sectors)
             if self._pin_flat_prior_zeros else None
         )
 
@@ -692,7 +701,7 @@ class ConstraintEngine:
         # absorbing mass routed through data-free subgraphs. Runs after Lp
         # regularization so the anchored σ_a flows into a0.npy/sigma_a.npy
         # and p_mean-mode σ_c propagation.
-        sigma_agg = self._anchor_nodata_sigma(f_agg, sigma_agg, acc)
+        sigma_agg = self._anchor_nodata_sigma(f_agg, sigma_agg, acc, flat_prior)
 
         # ── 1. Build static G (time-invariant) ────────────────────────
         static_blocks = [b.build_static(acc) for b in self._builders]
