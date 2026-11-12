@@ -16,13 +16,13 @@ One chain (opt → const → imp) and one year. Vocabulary follows GLOSSARY.md:
 * ``family``          — the constraint family, read from the ``row_meta``
   columns (never from a ``constraint_id``);
 * ``prior_breach``    — **prior breach**: a hard row the prior does not satisfy,
-  ``|G·a_prior − c| > tol`` on a zero-cone row, ``G·a_prior − c > tol`` on a
-  nonneg row;
-* ``binding``         — the row is in the **active set** (ADR 0044): a nonneg row
+  ``|G·a_prior − c| > tol`` on a hard-equality row, ``G·a_prior − c > tol`` on a
+  hard-``≤`` row;
+* ``binding``         — the row is in the **active set** (ADR 0044): a hard-``≤`` row
   with residual ``G·a* − c ≥ −tol``;
 * ``on_flow``         — at least one of the row's edges carries ``|a*| > tol``;
 * **region slice**    — a region's columns and the rows touching them, laid out
-  in Clarabel's standard form ``[G_free −I; G_zero 0; G_nonneg 0]``.
+  in the QP's standard form, rows grouped ``[soft (with −I); hard =; hard ≤]``.
 
 ``tol`` is :data:`~pysuto.uncprop.DEFAULT_BIND_TOL`, the Stage-5 bind
 tolerance. A row's edges are its nonzero coefficients: entries ``G`` stores as
@@ -53,7 +53,7 @@ NO_PRIOR_OF_ITS_OWN = ("net_stock_share", "flat_prior")
 
 FAMILIES = ["mass balance", "stripping", "conc band", "eff band", "scrap-share band",
             "lower bound", "soft ratio", "scale total & scrap anchor"]
-CONES = ["free", "zero", "nonneg"]                 # Clarabel's cone order
+ROW_GROUPS = ["soft", "eq", "le"]                  # row_layout order: soft, hard =, hard ≤
 
 _BAND_FAMILY = {"conc": "conc band", "eff": "eff band", "scrap_share": "scrap-share band"}
 
@@ -107,7 +107,7 @@ class RegionSlice:
     is_leg:          np.ndarray          # bool: cross-region leg
     row_ids:         np.ndarray          # global row ids, row order
     family:          np.ndarray
-    cone:            np.ndarray
+    group:           np.ndarray
     complete:        np.ndarray          # bool: every nonzero of the row is in the slice
     binding_on_flow: np.ndarray          # bool
     n_edges:         int
@@ -330,22 +330,22 @@ class ProblemStatsDiagnostic:
         F       = np.asarray(self._opt.F_opt, dtype=float)
 
         # This diagnostic describes the standard-form block, so it labels rows by
-        # the Clarabel cone the solver realises them in (``row_layout`` groups).
+        # the group the orchestrator realises them in (``row_layout``: soft, hard =, hard ≤).
         sense, hard = rm["sense"].astype(str).to_numpy(), rm["is_hard"].to_numpy(dtype=bool)
-        cone = np.where(sense == "le", "nonneg", np.where(hard, "zero", "free"))
-        zero, nonneg = cone == "zero", cone == "nonneg"
+        group = np.where(sense == "le", "le", np.where(hard, "eq", "soft"))
+        eq, le = group == "eq", group == "le"
         flowing = (np.abs(F) > BIND_TOL_KT).astype(np.int64)
         on_flow = (self._pattern() @ flowing) > 0
-        binding = nonneg & (resid >= -BIND_TOL_KT)
+        binding = le & (resid >= -BIND_TOL_KT)
         f = pd.DataFrame({
             "row_id":       rows,
             "family":       row_family(rm),
-            "cone":         cone,
+            "group":        group,
             "is_hard":      rm["is_hard"].to_numpy(dtype=bool),
             "prior_resid":  r_prior,
             "resid":        resid,
-            "prior_breach": np.where(zero, np.abs(r_prior) > BIND_TOL_KT,
-                                     nonneg & (r_prior > BIND_TOL_KT)),
+            "prior_breach": np.where(eq, np.abs(r_prior) > BIND_TOL_KT,
+                                     le & (r_prior > BIND_TOL_KT)),
             "binding":      binding,
             "on_flow":      on_flow,
         })
@@ -355,34 +355,34 @@ class ProblemStatsDiagnostic:
         return f
 
     def family_summary(self) -> pd.DataFrame:
-        """Rows per family with its cone and the prior-breach / binding counts.
+        """Rows per family with its row group and the prior-breach / binding counts.
 
-        ``prior_breach`` is NA on soft (free) families, the binding counts are NA
-        unless the family is nonneg: an equality always holds at ``a*``.
+        ``prior_breach`` is NA on soft families, the binding counts are NA
+        unless the family is hard-``≤``: an equality always holds at ``a*``.
         """
         r = self.row_frame()
         g = r.groupby("family").agg(
-            cone=("cone", "first"), n_cones=("cone", "nunique"), rows=("row_id", "size"),
+            group=("group", "first"), n_groups=("group", "nunique"), rows=("row_id", "size"),
             prior_breach=("prior_breach", "sum"), binding=("binding", "sum"),
             binding_on_flow=("binding_on_flow", "sum"),
             binding_on_zero_flows=("binding_on_zero_flows", "sum"))
-        if (g["n_cones"] > 1).any():
-            raise ValueError(f"families spanning several cones: "
-                             f"{g.index[g.n_cones > 1].tolist()}")
-        g = g.drop(columns="n_cones").reindex([x for x in FAMILIES if x in g.index])
+        if (g["n_groups"] > 1).any():
+            raise ValueError(f"families spanning several row groups: "
+                             f"{g.index[g.n_groups > 1].tolist()}")
+        g = g.drop(columns="n_groups").reindex([x for x in FAMILIES if x in g.index])
         counts = ["prior_breach", "binding", "binding_on_flow", "binding_on_zero_flows"]
         g[counts] = g[counts].astype("Int64")
-        g.loc[g["cone"] == "free", "prior_breach"] = pd.NA
-        g.loc[g["cone"] != "nonneg", counts[1:]] = pd.NA
+        g.loc[g["group"] == "soft", "prior_breach"] = pd.NA
+        g.loc[g["group"] != "le", counts[1:]] = pd.NA
         g["rows"] = g["rows"].astype(np.int64)
         return g
 
     def block_sizes(self) -> dict:
-        """The year's block: rows (per cone), edges, true and stored nonzeros."""
+        """The year's block: rows (per group), edges, true and stored nonzeros."""
         r = self.row_frame()
         G = self._G()
         return {"rows": int(G.shape[0]), "edges": int(G.shape[1]),
-                "rows_by_cone": {k: int((r["cone"] == k).sum()) for k in CONES},
+                "rows_by_group": {k: int((r["group"] == k).sum()) for k in ROW_GROUPS},
                 "nnz": int(self._pattern().nnz), "nnz_stored": int(G.nnz)}
 
     # ------------------------------------------------------------------
@@ -420,14 +420,14 @@ class ProblemStatsDiagnostic:
         n_all = np.asarray(P.sum(axis=1)).ravel()
         i_rows = np.flatnonzero(n_in > 0)
         sel = r.iloc[i_rows].assign(i=i_rows, complete=(n_in == n_all)[i_rows])
-        sel["k_cone"] = _position(sel["cone"], CONES)
+        sel["k_group"] = _position(sel["group"], ROW_GROUPS)
         sel["k_fam"]  = _position(sel["family"], FAMILIES)
         sel["k_part"] = (~sel["complete"]).astype(np.int64)
-        sel = sel.sort_values(["k_cone", "k_fam", "k_part", "i"], kind="mergesort")
+        sel = sel.sort_values(["k_group", "k_fam", "k_part", "i"], kind="mergesort")
 
         G_slice = self._G()[sel["i"].to_numpy()][:, jcols].tocsr()
         G_slice.eliminate_zeros()
-        n_free = int((sel["cone"] == "free").sum())
+        n_free = int((sel["group"] == "soft").sum())
         S = sp.csr_matrix((-np.ones(n_free), (np.arange(n_free), np.arange(n_free))),
                           shape=(len(sel), n_free))
         return RegionSlice(
@@ -435,7 +435,7 @@ class ProblemStatsDiagnostic:
             edge_ids=k["edge_id"].to_numpy(dtype=np.int64),
             valuation=k["valuation"].to_numpy(), is_leg=k["leg"].to_numpy(dtype=bool),
             row_ids=sel["row_id"].to_numpy(dtype=np.int64),
-            family=sel["family"].to_numpy(), cone=sel["cone"].to_numpy(),
+            family=sel["family"].to_numpy(), group=sel["group"].to_numpy(),
             complete=sel["complete"].to_numpy(dtype=bool),
             binding_on_flow=sel["binding_on_flow"].to_numpy(dtype=bool),
             n_edges=int(len(k)), n_slack=n_free, n_legs_omitted=n_omitted,

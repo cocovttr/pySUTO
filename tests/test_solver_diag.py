@@ -26,7 +26,7 @@ import pytest
 
 
 # Reuse the toy fixture pattern from test_solver.py
-from test_solver import _make_toy_run  # type: ignore
+from test_solver import _make_toy_run, make_solver  # type: ignore
 
 N_FIGURES = 12
 STEMS = [
@@ -49,9 +49,8 @@ HUEABLE = ["SD-R-01", "SD-R-11", "SD-R-13"]
 @pytest.fixture
 def toy_results(monkeypatch):
     """Solve the toy run and return (results, const_run)."""
-    from pysuto.solver import ClarabelSolver
     run = _make_toy_run()
-    s = ClarabelSolver(const_dir="unused", verbose_first_solve=False)
+    s = make_solver(const_dir="unused", verbose_first_solve=False, prior_mode="cold")
     monkeypatch.setattr(s, "load_run", lambda _rid: run)
     results = s.solve_all("toy_run")
     return results, run
@@ -95,6 +94,21 @@ class TestPlotPortfolio:
         pngs = [p for p in diag.plot(odir=str(tmp_path)) if p.endswith(".png")]
         assert len(pngs) == N_FIGURES
 
+    def test_a_backend_without_telemetry_still_gives_the_portfolio(self, toy_results,
+                                                                    tmp_path):
+        """ADR 0042: iteration history and the convergence snapshot are optional backend
+        telemetry; a result without them renders every figure (SD-R-12 as a placeholder,
+        SD-R-01's residual panel empty) and the summary counts neutral statuses."""
+        import dataclasses
+        from pysuto.diag import SolverDiag
+        results, run = toy_results
+        bare = {t: dataclasses.replace(r, iter_history=None, convergence={})
+                for t, r in results.items()}
+        diag = SolverDiag(bare, run, label="toy")
+        pngs = [p for p in diag.plot(odir=str(tmp_path)) if p.endswith(".png")]
+        assert len(pngs) == N_FIGURES
+        assert "solved=2, almost=0" in diag.summary()
+
     def test_empty_label_does_not_crash_provenance(self, toy_results, tmp_path):
         from pysuto.diag import SolverDiag
         results, run = toy_results
@@ -125,7 +139,6 @@ class TestFromOptId:
 
     def test_roundtrip_recreates_portfolio(self, toy_results, tmp_path, monkeypatch):
         """Persist toy results, then reconstruct via from_opt_id and plot."""
-        from pysuto.solver import ClarabelSolver
         from pysuto.registry import ConstraintRunRegistry
         from pysuto.diag import SolverDiag
 
@@ -136,7 +149,7 @@ class TestFromOptId:
 
         ConstraintRunRegistry(str(const_dir)).register(run)
 
-        s = ClarabelSolver(const_dir="unused", verbose_first_solve=False)
+        s = make_solver(const_dir="unused", verbose_first_solve=False, prior_mode="cold")
         opt_run_id = s.persist(
             run_id     = run.run_id,
             results    = results,
@@ -166,7 +179,6 @@ def _solve_block_run(tmp_path, monkeypatch):
     year-local OptimResults + the ConstraintRun + the in-memory acc."""
     from test_constraints import _make_toy_acc, _make_toy_agg_result
     from pysuto.constraints import ConstraintEngine, MassBalanceBuilder
-    from pysuto.solver import ClarabelSolver
 
     acc = _make_toy_acc()
     agg = _make_toy_agg_result(acc)
@@ -174,8 +186,8 @@ def _solve_block_run(tmp_path, monkeypatch):
     engine.register(MassBalanceBuilder())
     cr = engine.run(agg, timesteps=["2020", "2021"], persist=False)
 
-    s = ClarabelSolver(const_dir=str(tmp_path / "const"), verbose_first_solve=False,
-                       prior_mode="cold")
+    s = make_solver(const_dir=str(tmp_path / "const"), verbose_first_solve=False,
+                    prior_mode="cold")
     monkeypatch.setattr(s, "load_run", lambda _rid: cr)
     return s.solve_all(cr.run_id), cr, acc
 

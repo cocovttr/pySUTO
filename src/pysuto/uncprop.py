@@ -93,7 +93,7 @@ from .registry.optim import warn_if_prefix_block_run
 logger = get_logger("pysuto.uncprop")
 
 
-# Defaults mirror ClarabelSolver so uncprop sees the same effective prior
+# Defaults mirror Solver so uncprop sees the same effective prior
 # the QP saw. Keep these in sync with src/pysuto/solver.py if either side
 # changes. (The shared helper enforces the rules; only the *defaults*
 # need to stay aligned.)

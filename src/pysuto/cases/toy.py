@@ -124,7 +124,8 @@ from pysuto.registry import (
     PsutRunRegistry,
     UncPropRunRegistry,
 )
-from pysuto.solver import ClarabelSolver
+from pysuto.clarabel_backend import ClarabelBackend
+from pysuto.solver import Solver
 from pysuto.stages import run_const, run_imp
 from pysuto.uncprop import KalmanUncProp
 
@@ -953,14 +954,11 @@ def run_stage3(run_root: PathLike, imp_run_id: Optional[str] = None) -> str:
 
 
 def run_stage4(run_root: PathLike, const_run_id: Optional[str] = None) -> str:
-    """Stage 4: one Clarabel QP per year from the cold prior, at the ADR 0039
+    """Stage 4: one QP per year from the cold prior, solved by Clarabel at the ADR 0039
     tolerances. Returns the opt run id."""
     tree = _tree(run_root)
     const_run_id = const_run_id or _latest(ConstraintRunRegistry(str(tree["const"])))
-    solver = ClarabelSolver(
-        const_dir           = str(tree["const"]),
-        opt_dir             = str(tree["opt"]),
-        acc_dir             = str(tree["acc"]),
+    backend = ClarabelBackend(
         tol_feas            = TOL_FEAS,
         tol_gap_rel         = TOL_GAP_REL,
         tol_gap_abs         = TOL_GAP_ABS,
@@ -968,11 +966,17 @@ def run_stage4(run_root: PathLike, const_run_id: Optional[str] = None) -> str:
         reduced_tol_gap_rel = REDUCED_TOL_GAP_REL,
         reduced_tol_gap_abs = REDUCED_TOL_GAP_ABS,
         max_iter            = MAX_ITER,
+    )
+    solver = Solver(
+        backend,
+        const_dir           = str(tree["const"]),
+        opt_dir             = str(tree["opt"]),
+        acc_dir             = str(tree["acc"]),
         verbose_first_solve = False,
         prior_mode          = "cold",
         qp_variables        = QP_VARIABLES,
     )
-    results = solver.solve_all(const_run_id, feasibility_check="first")
+    results = solver.solve_all(const_run_id, feasibility_check="all")
     run_id  = solver.persist(
         const_run_id, results, const_run_id=const_run_id, label=LABEL,
         stage_config={"prior_mode": "cold", "max_iter": MAX_ITER, "tol_feas": TOL_FEAS,
@@ -980,7 +984,7 @@ def run_stage4(run_root: PathLike, const_run_id: Optional[str] = None) -> str:
                       "reduced_tol_feas": REDUCED_TOL_FEAS,
                       "reduced_tol_gap_rel": REDUCED_TOL_GAP_REL,
                       "reduced_tol_gap_abs": REDUCED_TOL_GAP_ABS,
-                      "feasibility_check": "first", "case": CASE.ref()})
+                      "feasibility_check": "all", "case": CASE.ref()})
     _log.info("stage 4: %s (%s)", run_id,
               ", ".join(f"{t} {r.solver_status}" for t, r in results.items()))
     return run_id

@@ -6,7 +6,7 @@ persisted ConstraintRun.
 
 Pipeline
 --------
-1  Load ClarabelSolver + ConstraintRun
+1  Load Solver (ClarabelBackend) + ConstraintRun
 2  Feasibility pre-check (defaults to first timestep only)
 3  Solve every timestep from the cold prior  a_prior(t) = conditioned f_agg(t)
    (--prior-mode cold, this driver's default; 'warm' carries a_post(t-1)),
@@ -36,13 +36,12 @@ from datetime import datetime
 # derives every path from `--data-dir` (default data): proc/const, proc/opt, proc/acc.
 
 TIMESTEPS  = None #[1995]           # None → all timesteps in the run
-# Feasibility pre-check: which years the probe checks before any solve — "first"
-# (the default since Round C), "all" (localises a mid-series infeasibility; ~350 s
-# per probe, ~3 h on the full hard system) or "none" (#104: a sweep point; the probe
-# is ≈ 7 of Stage 4's ≈ 11 min). Each year's QP reports its own status anyway: a
-# status outside Solved/AlmostSolved raises with or without the probe, which only
-# localises it.
-FEASIBILITY_CHECK = "first"
+# Feasibility pre-check: which years the probe checks before any solve — "all" (a
+# zero-objective QP per year over its hard rows and bounds, on the same N_WORKERS
+# threads as the solves; ADR 0042 replaced the full-G first-year probe, ≈ 7 of Stage 4's
+# ≈ 11 min) or "none" (#104: a sweep point). Each year's QP reports its own status
+# anyway: a `failed` status raises with or without the probe, which only localises it.
+FEASIBILITY_CHECK = "all"
 # Clarabel iteration cap. The default (200) is too low for the pinned, soft-stock
 # 1.37M-row phase-1 feasibility QP (converges but not within 200 iters → spurious
 # MaxIterations reported as infeasible). max_iter is a CAP, so easy runs still stop
@@ -121,7 +120,8 @@ from pysuto.case    import CaseSpec, check_case
 from pysuto.cases   import add_case_arg, case_from_args
 from pysuto.cases.copper import CASE
 from pysuto.input_registry import InputRegistry
-from pysuto.solver  import ClarabelSolver
+from pysuto.clarabel_backend import ClarabelBackend
+from pysuto.solver  import Solver
 from pysuto.diag    import SolverDiag
 from pysuto.logging import get_logger, add_run_handler
 from pysuto.knobs   import add_knob_args, overrides_from_cli, write_run_id
@@ -167,20 +167,20 @@ def main(const_run_id: str, label: str = "", prior_mode: str = "warm",
     const_parents = const_sidecar["parents"]
     check_built_acc(acc_dir, const_parents["inputs"].get("acc", {}),
                     InputRegistry("acc", root=input_dir), EDGE_UNIVERSE_ROLE_KEYS)
-    _log.info("Loading ClarabelSolver (const_dir=%s)", const_dir)
+    _log.info("Loading Solver with ClarabelBackend (const_dir=%s)", const_dir)
     # Termination tolerances: see the USER CONFIGURATION block (Round W.1).
-    solver = ClarabelSolver(const_dir=const_dir, opt_dir=opt_dir, acc_dir=acc_dir,
-                            input_dir=input_dir,
-                            tol_feas=cfg["TOL_FEAS"],
-                            tol_gap_rel=cfg["TOL_GAP_REL"], tol_gap_abs=cfg["TOL_GAP_ABS"],
-                            reduced_tol_feas=cfg["REDUCED_TOL_FEAS"],
-                            reduced_tol_gap_rel=cfg["REDUCED_TOL_GAP_REL"],
-                            reduced_tol_gap_abs=cfg["REDUCED_TOL_GAP_ABS"],
-                            max_iter=cfg["MAX_ITER"],
-                            prior_mode=prior_mode,
-                            n_workers=cfg["N_WORKERS"],
-                            direct_solve_method=cfg["DIRECT_SOLVE_METHOD"],
-                            qp_variables=cfg["QP_VARIABLES"],)
+    backend = ClarabelBackend(tol_feas=cfg["TOL_FEAS"],
+                              tol_gap_rel=cfg["TOL_GAP_REL"], tol_gap_abs=cfg["TOL_GAP_ABS"],
+                              reduced_tol_feas=cfg["REDUCED_TOL_FEAS"],
+                              reduced_tol_gap_rel=cfg["REDUCED_TOL_GAP_REL"],
+                              reduced_tol_gap_abs=cfg["REDUCED_TOL_GAP_ABS"],
+                              max_iter=cfg["MAX_ITER"],
+                              direct_solve_method=cfg["DIRECT_SOLVE_METHOD"])
+    solver = Solver(backend, const_dir=const_dir, opt_dir=opt_dir, acc_dir=acc_dir,
+                    input_dir=input_dir,
+                    prior_mode=prior_mode,
+                    n_workers=cfg["N_WORKERS"],
+                    qp_variables=cfg["QP_VARIABLES"],)
 
     _log.info("Solving ConstraintRun '%s'", const_run_id)
     results = solver.solve_all(
@@ -251,7 +251,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--prior-mode", required=False, default='cold',
         choices=["warm", "cold"],
-        help="ClarabelSolver prior mode: 'cold' (default) or 'warm'."
+        help="Solver prior mode: 'cold' (default) or 'warm'."
     )
     add_case_arg(parser)
     parser.add_argument("--data-dir", default="data",

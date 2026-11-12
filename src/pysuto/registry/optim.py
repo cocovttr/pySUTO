@@ -20,6 +20,12 @@ if TYPE_CHECKING:                                  # break Stage-4 import cycle
     from pysuto.solver import OptimResult
 
 
+# Opt runs written before the QP backend split (ADR 0042) hold Clarabel's status strings
+# in ``solver_status`` and no backend fields; loading maps them to the neutral statuses.
+_PRE_SPLIT_STATUS  = {"Solved": "solved", "AlmostSolved": "solved_inaccurate"}
+_PRE_SPLIT_BACKEND = "clarabel"
+
+
 def warn_if_prefix_block_run(results: dict, const_run) -> None:
     """Guard for runs produced before the year-local persistence fix (REP §8.2).
 
@@ -119,6 +125,8 @@ class OptimRunRegistry(BaseOutputRegistry):
                     "solve_time_s":  res.solve_time_s,
                     "solver_status": res.solver_status,
                     "convergence":   res.convergence,
+                    "backend":       res.backend,
+                    "backend_status": res.backend_status,
                 }
                 for t, res in results.items()
             }
@@ -156,6 +164,12 @@ class OptimRunRegistry(BaseOutputRegistry):
         for t in summary.get("timesteps", []):
             npz = np.load(os.path.join(ts_dir, f"t_{t}.npz"))
             per = per_ts.get(t, {})
+            status = str(per.get("solver_status", ""))
+            if "backend" in per:
+                backend, backend_status = str(per["backend"]), str(per.get("backend_status", ""))
+            else:                                    # written before ADR 0042
+                backend, backend_status = _PRE_SPLIT_BACKEND, status
+                status = _PRE_SPLIT_STATUS.get(status, status)
             results[t] = OptimResult(
                 timestep      = t,
                 F_opt         = npz["F_opt"],
@@ -165,12 +179,14 @@ class OptimRunRegistry(BaseOutputRegistry):
                 objective     = float(per.get("objective", 0.0)),
                 iterations    = int(per.get("iterations", 0)),
                 solve_time_s  = float(per.get("solve_time_s", 0.0)),
-                solver_status = str(per.get("solver_status", "")),
+                solver_status = status,
                 convergence   = dict(per.get("convergence", {})),
                 iter_history  = npz["iter_history"] if "iter_history" in npz.files else None,
                 cols_t        = npz["cols_t"] if "cols_t" in npz.files else None,
                 rows_t        = npz["rows_t"] if "rows_t" in npz.files else None,
                 a_prior       = npz["a_prior"] if "a_prior" in npz.files else None,
+                backend        = backend,
+                backend_status = backend_status,
             )
         return results
 

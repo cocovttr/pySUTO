@@ -317,9 +317,9 @@ def sidecar_numbers(N: Numbers, ch: Chain) -> None:
           oc.get("reduced_tol_gap_rel"))
     N.add("method:L154.n_years", "years solved (also results.md:50)", len(st))
     N.add("method:L154.n_solved", "years Solved (also results.md:50, S5 Table S6)",
-          st.count("Solved"))
+          st.count("Solved") + st.count("solved"))
     N.add("method:L154.n_almost_solved", "years AlmostSolved (also results.md:50, Table S6)",
-          st.count("AlmostSolved"))
+          st.count("AlmostSolved") + st.count("solved_inaccurate"))
     N.add("method:L154.iterations_min", "fewest iterations of a year (also S5)", min(it))
     N.add("method:L154.iterations_max", "most iterations of a year (also S5 caption)", max(it))
     N.add("method:L154.solve_time_min_s", "fastest year", min(ts), "s")

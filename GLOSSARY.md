@@ -146,13 +146,16 @@ right-hand side `c(t)` and `σ_c(t)`.
 One constraint-row generator — `MassBalance`, `Sum`, `Ratio`, `RatioBound`, or `FlowBounds`.
 
 **Solver**:
-Stage 4 — the σ-weighted QP solved per timestep with Clarabel (`ClarabelSolver`), producing
+Stage 4 — the σ-weighted QP, built per timestep by the orchestrator `Solver` (σ weights, prior,
+slack of the soft rows) and solved by an injected **QP backend** (`ClarabelBackend`), producing
 the optimised flow vector `a*`.
 
 **QP backend**:
 The numerical solver of one period's standard-form QP (variables `[a; ε]`, equality and `≤`
-rows), reporting a neutral status; it knows nothing of edges, rows, σ or periods. Clarabel is
-the production backend.
+rows), reporting a neutral status (`solved`, `solved_inaccurate`, `failed`) beside its own raw
+one (`OptimResult.backend_status`); it knows nothing of edges, rows, σ or periods. It owns its
+settings, its telemetry (`convergence`, `iter_history`) and the reuse of its factorisation.
+Clarabel (`ClarabelBackend`) is the production backend.
 _Avoid_: "the solver" (that is Stage 4 as a whole), "solver backend".
 
 **Posterior uncertainty propagation**:
@@ -305,13 +308,12 @@ path stored these; they caused the spurious mass-balance deviation and bimodal `
 distribution. Year-local persistence removes them entirely.
 _Avoid_: "warm-start carry" (that's a separate, legitimate mechanism).
 
-**Block path** vs **legacy path**:
-*Block path* = `_solve_all_via_blocks`, used when the `ConstraintRun` carries a
-per-t partition (`G_blocks`); produces year-local output. *Legacy path* =
-`_solve_all_legacy`, used when `G_blocks` is empty; produces full-`[E]` output.
-The npz `cols_t` key discriminates the two on load.
-_Avoid_: "per-t solver" / "global solver" (both solve per timestep — the
-distinction is *partitioned* vs *full-G*, not per-t vs not).
+**Block path**:
+`_solve_all_via_blocks`, the only way Stage 4 solves: the `ConstraintRun` carries a per-t
+partition (`G_blocks`) and the output is year-local. A run without one raises (the full-`[E]`
+legacy path was removed, ADR 0042); opt runs written by it still load, and their npz lack
+`cols_t`.
+_Avoid_: "per-t solver" / "global solver".
 
 **No cross-time coupling** (invariant):
 The property that every constraint row's non-zeros lie within a single time
@@ -532,7 +534,7 @@ set (a hub is a region whose trade the re-export netting re-attributes); "transi
 ## Defect, residual & violation vocabulary
 
 **a_prior (warm-start prior)** — the per-**period** prior mean the optimiser uses for year `t`.
-Under `prior_mode='warm'` (the `ClarabelSolver` default) it is genuinely the *previous* year's
+Under `prior_mode='warm'` (the `Solver` class default) it is genuinely the *previous* year's
 posterior, aligned by **edge template** `(from_id, to_id, valuation)` since each year occupies
 disjoint global columns: `a_prior(t0) = f_agg` (the cold seed), `a_prior(t) = a_post(t-1)` for
 `t > 0`. Under `prior_mode='cold'` every year uses its own cold seed `f_agg(t)`. Stored as the

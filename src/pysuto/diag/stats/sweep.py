@@ -9,7 +9,7 @@ A sweep's points are scored against its **base chain** (GLOSSARY.md "Sweep",
 
 * the **cross-evaluated objective** — ``J_base_at_point = Σ_t J_base(a*_point(t)) −
   Σ_t J_base(a*_base(t))``: each point's answer scored under the base QP
-  (:meth:`pysuto.solver.ClarabelSolver.objective_at`), ≥ 0 while the point is feasible
+  (:meth:`pysuto.solver.Solver.objective_at`), ≥ 0 while the point is feasible
   for the base's hard rows (``max_hard_violation_base`` says whether it is);
 * the **posterior distance** ``mass_moved = Σ_years Σ |a*_point − a*_base|`` (kt), in
   total and per valuation, and per category in the category tables with the **pooled
@@ -46,7 +46,8 @@ from scipy.stats import rankdata, spearmanr
 from pysuto.acc import AccountingStructure
 from pysuto.relation.param_relation import expand_edge_index
 from pysuto.registry import OptimRunRegistry, SweepRunRegistry
-from pysuto.solver import ClarabelSolver
+from pysuto.clarabel_backend import ClarabelBackend
+from pysuto.solver import Solver
 
 FAMILIES = ("edges", "sum_rows", "soft_ratios", "other_soft")
 MEASURES = ("mass_moved", "retention", "total")
@@ -440,9 +441,9 @@ class SweepStatsDiagnostic:
     def mode(self) -> str:
         return self.declaration["mode"]
 
-    def _solver(self) -> ClarabelSolver:
-        return ClarabelSolver(const_dir=os.path.join(self.root, "const"),
-                              opt_dir=os.path.join(self.root, "opt"))
+    def _solver(self) -> Solver:
+        return Solver(ClarabelBackend(), const_dir=os.path.join(self.root, "const"),
+                      opt_dir=os.path.join(self.root, "opt"))
 
     def _opt(self, opt_run_id: str) -> dict:
         return OptimRunRegistry(os.path.join(self.root, "opt")).load(opt_run_id)

@@ -28,7 +28,7 @@ Run scope (x = year):
 * **SD-R-11** ``sd_r_11_objective_decomposition`` — ``Σz²`` per family (edge
   defects / sum-row residuals / soft-ratio residuals) per year, max hard
   mass-balance ``|G·a*−c|``, share of ``|z| > 3``.                    [hueable]
-* **SD-R-12** ``sd_r_12_convergence_traces`` — Clarabel per-iteration traces,
+* **SD-R-12** ``sd_r_12_convergence_traces`` — the backend's per-iteration traces,
   one line per year.
 * **SD-R-13** ``sd_r_13_objective_share_by_sector`` — objective share per
   sector key, per family.                                              [hueable]
@@ -72,7 +72,7 @@ _HUE_PALETTE = _CAT8
 # One colour / linestyle per objective family (single-run SD-R-11, SD-R-15).
 _FAMILY_COLOR = {"edges": _CAT8[0], "sum_rows": _CAT8[1], "soft_ratios": _CAT8[2]}
 _FAMILY_LS    = {"edges": "-",        "sum_rows": "--",         "soft_ratios": ":"}
-_STATUS_COLOR = {"Solved": _STATUS["good"], "AlmostSolved": _STATUS["warning"]}   # anything else: critical
+_STATUS_COLOR = {"solved": _STATUS["good"], "solved_inaccurate": _STATUS["warning"]}   # anything else: critical
 
 _LOG_FLOOR   = 1e-6   # values are floored here before log10 (rocket axes)
 _MAX_SERIES  = 8      # categorical hues per panel; the tail folds into "other"
@@ -118,7 +118,7 @@ def _short(text, n: int = 45) -> str:
 
 class SolverDiag:
     """
-    Stage-4 solver diagnostics — runs after ``ClarabelSolver.solve_all()``.
+    Stage-4 solver diagnostics — runs after ``Solver.solve_all()``.
 
     Two construction modes:
 
@@ -136,7 +136,7 @@ class SolverDiag:
     Parameters
     ----------
     results : dict[str, OptimResult]
-        Output of ``ClarabelSolver.solve_all()``.
+        Output of ``Solver.solve_all()``.
     constraint_run : ConstraintRun
         The ConstraintRun the solver consumed — supplies G, row_meta,
         a0, sigma_a, u, l, and per-timestep c / sigma_c.
@@ -157,7 +157,7 @@ class SolverDiag:
         "SD-R-09":  PlotSpec("_fig_flow_total_output",       "sd_r_09_flow_total_output",        "Total output by flow sector (Flow→Process + Flow→SB): Σa*(t) vs Σa_prior(t) + retention, cols = valuation"),
         "SD-R-10":  PlotSpec("_fig_boundary_flows",          "sd_r_10_boundary_flows",           "System-boundary totals by SB sector: SB-input and SB-output Σa* vs Σa_prior + retention, cols = valuation"),
         "SD-R-11":  PlotSpec("_fig_objective_decomposition", "sd_r_11_objective_decomposition",  "Objective decomposition per year: Σz² edge defects / sum-row residuals / soft-ratio residuals, max hard mass-balance |G·a*−c|, share |z|>3", hueable=True),
-        "SD-R-12":  PlotSpec("_fig_convergence_traces",      "sd_r_12_convergence_traces",       "Clarabel per-iteration traces (res_primal, res_dual, gap_abs, step_length), one line per year"),
+        "SD-R-12":  PlotSpec("_fig_convergence_traces",      "sd_r_12_convergence_traces",       "Backend per-iteration traces (res_primal, res_dual, gap_abs, step_length), one line per year"),
         "SD-R-13":  PlotSpec("_fig_objective_share_by_sector", "sd_r_13_objective_share_by_sector", "Objective share per sector key, per family (edges: from→to sector; sum rows: sector; soft ratios: numerator from→to sector)", hueable=True),
         "SD-R-14":  PlotSpec("_fig_top_identities",          "sd_r_14_top_identities",           "Top-25 identities per family ranked by Σ_t z², annotated with Σ_t|Δ| in kt"),
         "SD-R-15a": PlotSpec("_fig_profiles_edges",          "sd_r_15a_profiles_edges",          "z_t over years for the top-12 edge identities (cross-year template)"),
@@ -459,8 +459,8 @@ class SolverDiag:
         """Print and return a one-block text digest of the run."""
         n = len(self._timesteps)
         statuses = [self._results[t].solver_status for t in self._timesteps]
-        n_solved = sum(s == "Solved" for s in statuses)
-        n_almost = sum(s == "AlmostSolved" for s in statuses)
+        n_solved = sum(s == "solved" for s in statuses)
+        n_almost = sum(s == "solved_inaccurate" for s in statuses)
         total_iter = sum(self._results[t].iterations for t in self._timesteps)
         total_time = sum(self._results[t].solve_time_s for t in self._timesteps)
 
@@ -1057,6 +1057,10 @@ class SolverDiag:
                          color=color, lw=1.6, marker="o", ms=3, label=lbl)
             axes[2].plot(x, dg._scalar_series("solve_time_s"),
                          color=color, lw=1.6, marker="o", ms=3, label=lbl)
+            # Final residuals are backend telemetry (res_primal, res_dual, gap_rel in
+            # ``convergence``): drawn only for a run whose backend reported them.
+            if not any(dg._results[t].convergence for t in dg._timesteps):
+                continue
             axes[3].semilogy(x, np.maximum(dg._conv_series("res_primal"), 1e-16),
                              color=color, lw=1.4, ls="-",  label=f"{lbl}: res_primal")
             axes[3].semilogy(x, np.maximum(dg._conv_series("res_dual"),   1e-16),
@@ -1074,7 +1078,7 @@ class SolverDiag:
         axes[1].set_ylabel("iterations");     axes[1].set_title("Iterations", loc="left", fontsize=10)
         axes[2].set_ylabel("solve_time (s)"); axes[2].set_title("Solve time", loc="left", fontsize=10)
         axes[3].set_ylabel("residual");       axes[3].set_title("Final KKT residuals (res_primal, res_dual, gap_rel)", loc="left", fontsize=10)
-        axes[3].axhspan(1e-9, 1e-7, color=_INK["muted"], alpha=0.10)  # Clarabel default feasibility band
+        axes[3].axhspan(1e-9, 1e-7, color=_INK["muted"], alpha=0.10)  # Clarabel's default feasibility band
 
         for ax in axes:
             _apply_modern_style(ax)
@@ -1137,7 +1141,7 @@ class SolverDiag:
         return fig
 
     def _fig_convergence_traces(self, *, hue=None, timesteps=None, regions=None):
-        """SD-R-12: Clarabel per-iteration traces, one line per year."""
+        """SD-R-12: the backend's per-iteration traces (when it keeps them), one line per year."""
         import matplotlib.pyplot as plt
         from matplotlib.cm import ScalarMappable
         from matplotlib.colors import ListedColormap, Normalize

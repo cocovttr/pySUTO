@@ -150,23 +150,55 @@ def _compute_block_toy(tmp_path, monkeypatch, **compute_kw):
 
 
 def _solve_and_persist(const_run, tmp_path):
-    """Persist const_run, solve it, persist opt run. Returns (opt_run_id, dirs)."""
-    from pysuto.solver import ClarabelSolver
-    from pysuto.registry import ConstraintRunRegistry
+    """Persist const_run, solve it as full-G QPs, persist opt run. Returns
+    (opt_run_id, dirs). Stage 4 no longer has a full-G path (ADR 0042), so this solves
+    the legacy full-vector problem here: one QP per period over every edge, each
+    period's prior the previous period's optimum (the first period's the run's)."""
+    import clarabel
+    from pysuto._conditioning import condition_prior
+    from pysuto.solver import OptimResult, row_layout
+    from pysuto.registry import ConstraintRunRegistry, OptimRunRegistry
 
     const_dir   = str(tmp_path / "const")
     opt_dir     = str(tmp_path / "opt")
     uncprop_dir = str(tmp_path / "uncprop")
+    ConstraintRunRegistry(const_dir).register(const_run)
 
-    const_reg = ConstraintRunRegistry(const_dir)
-    const_reg.register(const_run)
+    rm = const_run.row_meta
+    lay = row_layout(rm["sense"].to_numpy(), rm["is_hard"].to_numpy())
+    n_slack, n_eq, n_le = lay.n_slack, lay.n_eq, lay.n_le
+    n_a, M = const_run.G.shape[1], const_run.G.shape[0]
+    a_prior, sigma_a = condition_prior(const_run.a_prior_global, const_run.sigma_a)
+    A = sp.hstack([const_run.G.tocsr()[lay.perm],
+                   sp.vstack([-sp.eye(n_slack, format="csr"),
+                              sp.csr_matrix((n_eq + n_le, n_slack))], format="csr")],
+                  format="csc")
+    cones = [clarabel.ZeroConeT(n_slack + n_eq)]
+    if n_le:
+        cones.append(clarabel.NonnegativeConeT(n_le))
+    settings = clarabel.DefaultSettings()
+    settings.verbose = False
+    settings.tol_feas = settings.tol_gap_abs = settings.tol_gap_rel = 1e-8
 
-    solver  = ClarabelSolver(
-        const_dir=const_dir, opt_dir=opt_dir, verbose_first_solve=False,
-    )
-    results = solver.solve_all(const_run.run_id)
-    opt_run_id = solver.persist(const_run.run_id, results, output_dir=opt_dir)
-
+    results = {}
+    for t, td in const_run.timestep_data.items():
+        c = np.asarray(td["c"], dtype=float)
+        sc = np.maximum(np.where(np.isnan(td["sigma_c"]), 1e-9, td["sigma_c"]), 1e-9)
+        P = sp.diags(2.0 * np.concatenate([1.0 / sigma_a ** 2,
+                                           1.0 / sc[lay.perm[:n_slack]] ** 2]), format="csc")
+        q = np.concatenate([-2.0 * a_prior / sigma_a ** 2, np.zeros(n_slack)])
+        sol = clarabel.DefaultSolver(P, q, A, c[lay.perm], cones, settings).solve()
+        x = np.asarray(sol.x)
+        eps = np.zeros(M)
+        eps[lay.perm[:n_slack]] = x[n_a:]
+        results[t] = OptimResult(
+            timestep=t, F_opt=x[:n_a], eps_opt=x[n_a:], c_star=c + eps,
+            residuals=const_run.G @ x[:n_a] - c, objective=float(sol.obj_val),
+            iterations=int(sol.iterations), solve_time_s=0.0, solver_status="solved",
+            convergence={}, a_prior=a_prior.copy())
+        a_prior = x[:n_a]
+    opt_run_id = OptimRunRegistry(opt_dir).register(
+        results, parents={"inputs": {}, "upstream": {"const_run_id": const_run.run_id}})
     return opt_run_id, dict(const=const_dir, opt=opt_dir, uncprop=uncprop_dir)
 
 

@@ -87,7 +87,7 @@ def test_the_driver_chain_reproduces_the_toy_s_own_numbers(chain):
     theirs, ours = registry.load(ids["opt"]), registry.load(own)
     assert set(theirs) == set(ours) == set(toy.YEARS)
     for t in toy.YEARS:
-        assert theirs[t].solver_status == "Solved"
+        assert theirs[t].solver_status == "solved"
         np.testing.assert_allclose(theirs[t].F_opt, ours[t].F_opt, rtol=1e-6, atol=1e-8)
     soft = toy.soft_residuals(root, ids["opt"])
     assert soft.iloc[0]["z"] == pytest.approx(-4.779, abs=5e-4)
