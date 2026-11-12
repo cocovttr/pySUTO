@@ -22,9 +22,9 @@ import numpy as np
 import pandas as pd
 import scipy.sparse as sp
 
-from pysuto.acc import BALANCE_ENTITIES
 from pysuto.logging import get_logger
 from pysuto.registry import ConstraintRunRegistry, make_run_id
+from pysuto.relation.structure import node_balances
 
 from .base import BaseConstraintBuilder, ConstraintBlock, _empty_block
 from .naming import SENSE_LE, TYPE_MASSBAL, TYPE_RATIO, soft_row_mask
@@ -486,19 +486,7 @@ class ConstraintEngine:
                   type_counts.to_string() if len(type_counts) else "  (empty)")
 
         # 4. Expected mass_balance row count: one per (balanced_node × time × valuation)
-        ei, ni = acc.edge_index, acc.node_index
-        t_arr  = ei["time"].values
-        v_arr  = ei["valuation"].values
-        expected_mb = 0
-        for time in acc.time_range:
-            t_mask_base = (t_arr == str(time))
-            for valuation in acc.valuation:
-                t_mask = t_mask_base & (v_arr == valuation)
-                nodes_in  = set(ei.loc[t_mask, "to_id"].values)
-                nodes_out = set(ei.loc[t_mask, "from_id"].values)
-                for nid in nodes_in & nodes_out:
-                    if str(ni.loc[nid, "entity"]) in BALANCE_ENTITIES:
-                        expected_mb += 1
+        expected_mb = sum(len(node_balances(acc, valuation)) for valuation in acc.valuation)
         actual_mb = int(type_counts.get(TYPE_MASSBAL, 0))
         if actual_mb == expected_mb:
             _log.info("CHECK OK: mass_balance rows = %d (matches expected)", actual_mb)

@@ -23,10 +23,12 @@ from pysuto.relation.param_relation import (
     get_edge_cache,
 )
 from pysuto.relation.params import A_FIELDS, B_FIELDS, WILDCARD, read_params
+from pysuto.relation.relation import Relation
 
 from .base import BaseConstraintBuilder, ConstraintBlock, _empty_block
+from .emit import emit, ratio_scale_index, ratio_sigma_c
 from .naming import TYPE_RATIO, _safe, build_constraint_id, empty_row_meta_dict, render_edge
-from .sum  import SIGMA_C_INACTIVE, BOUND_C_INACTIVE
+from .sum  import BOUND_C_INACTIVE
 
 _log = get_logger(__name__)
 
@@ -164,14 +166,15 @@ class RatioConstraintBuilder(BaseConstraintBuilder):
     their scale is the denominator alone, which the ratio is already relative to.
     """
 
-    def __init__(self, pairs: list[dict],
+    def __init__(self, pairs: list[Relation],
                  sigma_rel_floor: float = 0.02,
                  scale_abs_floor: float = 1.0,
                  hard: bool = False):
         """
-        pairs : list of dicts with keys:
-            constraint_id, edge_i, edge_j, r, sigma_c   (sigma_c = relative σ_r = σ/|r|;
-            in ratio units on scale_mode="denominator" rows)
+        pairs : list of ratio :class:`~pysuto.relation.relation.Relation` objects
+            (numerator edges first, ``n_num`` of them; denominator coefficients −r;
+            ``sigma`` = relative σ_r = σ/|r|, in ratio units on scale_mode="denominator"
+            rows)
         sigma_rel_floor : lower bound on σ_r (caps |z| at 1/floor on a 100 %
             ratio violation).
         scale_abs_floor : lower bound on the flow-space scale (tonnage), so
@@ -265,24 +268,27 @@ class RatioConstraintBuilder(BaseConstraintBuilder):
                 for bk in buckets:
                     if skip_reported and covered[bk["b_edges"]].any():
                         continue
-                    cid = build_constraint_id(
-                        TYPE_RATIO, variant,
-                        _safe(bk["region"], field="region"), bk["valuation"],
-                        year=bk["time"],
-                    )
-                    pairs.append({
-                        "constraint_id": cid,
-                        "variant":     variant,
-                        "agg":         True,
-                        "edge_i_list": bk["b_edges"],
-                        "edge_j_list": bk["a_edges"],
-                        "r":           nominal,
-                        "sigma_c":     sigma,
-                        "scale_mode":  scale_mode,
-                        "time":        bk["time"],
-                        "valuation":   bk["valuation"],
-                        "region":      bk["region"],
-                    })
+                    # Σ b (coeff +1) − r·Σ a (coeff −r) into one row; set-scoped, so
+                    # num_*/denom_* stay None (no single numerator/denominator edge).
+                    # The bucket's region is the row's group key and is carried as a
+                    # column, so the cross-year identity never needs the id.
+                    n_b, n_a = len(bk["b_edges"]), len(bk["a_edges"])
+                    pairs.append(Relation(
+                        edges        = np.array(bk["b_edges"] + bk["a_edges"], dtype=np.int64),
+                        coefficients = np.array([1.0] * n_b + [-nominal] * n_a),
+                        type         = TYPE_RATIO,
+                        variant      = variant,
+                        specs        = (_safe(bk["region"], field="region"), bk["valuation"]),
+                        time         = bk["time"],
+                        valuation    = bk["valuation"],
+                        hard         = hard,
+                        sigma        = sigma,
+                        scale_mode   = scale_mode,
+                        n_num        = n_b,
+                        meta         = {"region": bk["region"]},
+                        agg          = True,
+                        source       = param_id or "",
+                    ))
                 continue
 
             for r in resolver.resolve_row(row):
@@ -290,30 +296,30 @@ class RatioConstraintBuilder(BaseConstraintBuilder):
                     continue
                 if skip_reported and covered[r.b_edge_id]:
                     continue
-                # edge_i (coeff +1) is the numerator; edge_j (coeff −r) the denom.
+                # edge b (coeff +1) is the numerator; edge a (coeff −r) the denom.
                 num   = _decode_edge(ei_idx, r.b_edge_id)
                 denom = _decode_edge(ei_idx, r.a_edge_id)
-                cid = build_constraint_id(
-                    TYPE_RATIO, variant,
-                    render_edge(num["sector_from"], num["region_from"],
-                                num["sector_to"], num["region_to"]),
-                    render_edge(denom["sector_from"], denom["region_from"],
-                                denom["sector_to"], denom["region_to"]),
-                    num["valuation"], denom["valuation"],
-                    year=num["time"],
-                )
-                pairs.append({
-                    "constraint_id": cid,
-                    "variant":  variant,
-                    "edge_i":   r.b_edge_id,
-                    "edge_j":   r.a_edge_id,
-                    "r":        nominal,
-                    "sigma_c":  sigma,
-                    "scale_mode": scale_mode,
-                    "time":     num["time"],
-                    "num":      num,
-                    "denom":    denom,
-                })
+                pairs.append(Relation(
+                    edges        = np.array([r.b_edge_id, r.a_edge_id], dtype=np.int64),
+                    coefficients = np.array([1.0, -nominal]),
+                    type         = TYPE_RATIO,
+                    variant      = variant,
+                    specs        = (
+                        render_edge(num["sector_from"], num["region_from"],
+                                    num["sector_to"], num["region_to"]),
+                        render_edge(denom["sector_from"], denom["region_from"],
+                                    denom["sector_to"], denom["region_to"]),
+                        num["valuation"], denom["valuation"],
+                    ),
+                    time         = num["time"],
+                    valuation    = num["valuation"],
+                    hard         = hard,
+                    sigma        = sigma,
+                    scale_mode   = scale_mode,
+                    n_num        = 1,
+                    meta         = _ratio_struct_cols(num, denom),
+                    source       = param_id or "",
+                ))
 
         _log.info("RatioConstraintBuilder: %d pairs from %s", len(pairs), os.path.basename(path))
         return cls(pairs, sigma_rel_floor=sigma_rel_floor, scale_abs_floor=scale_abs_floor,
@@ -324,84 +330,18 @@ class RatioConstraintBuilder(BaseConstraintBuilder):
         return []
 
     def build_static(self, acc_struct) -> ConstraintBlock:
-        n_edges = acc_struct.n_edges
-        if not self._pairs:
-            return _empty_block(n_edges)
-
-        M = len(self._pairs)
-        rows_list, cols_list, vals_list = [], [], []
-        meta_list = []
-
-        for row_id, p in enumerate(self._pairs):
-            if p.get("agg"):
-                # Σ b (coeff +1) − r·Σ a (coeff −r) into one row; set-scoped, so
-                # num_*/denom_* stay None (no single numerator/denominator edge).
-                # The bucket's region is the row's group key and is carried as
-                # a column, so the cross-year identity never needs the id.
-                for ei in p["edge_i_list"]:
-                    rows_list.append(row_id); cols_list.append(ei); vals_list.append(1.0)
-                for ej in p["edge_j_list"]:
-                    rows_list.append(row_id); cols_list.append(ej); vals_list.append(-p["r"])
-                valuation = p["valuation"]
-                struct = {"region": p["region"]}
-            else:
-                rows_list += [row_id, row_id]
-                cols_list += [p["edge_i"], p["edge_j"]]
-                vals_list += [1.0, -p["r"]]
-                num, denom = p["num"], p["denom"]
-                valuation = num["valuation"]
-                struct = _ratio_struct_cols(num, denom)
-            meta = empty_row_meta_dict()
-            meta.update({
-                "constraint_id": p["constraint_id"],
-                "type":          TYPE_RATIO,
-                "variant":       p["variant"],
-                "is_hard":       self._hard,
-                "sense":         "eq",
-                "time":          p["time"],
-                "valuation":     valuation,
-                **struct,
-            })
-            meta_list.append(meta)
-
-        G = sp.csr_matrix((vals_list, (rows_list, cols_list)), shape=(M, n_edges))
-        _log.info("RatioConstraintBuilder.build_static: %d rows", M)
-        block = ConstraintBlock(
-            G_rows   = G,
-            c        = np.zeros(M),
-            sigma_c  = (np.zeros(M) if self._hard
-                        else np.array([p["sigma_c"] for p in self._pairs])),
-            row_meta = pd.DataFrame(meta_list),
-        )
+        block = emit(self._pairs, acc_struct.n_edges)
+        if self._pairs:
+            _log.info("RatioConstraintBuilder.build_static: %d rows", len(self._pairs))
         self._cached_static = block
         return block
-
-    def _scale_index(self):
-        """Cached flattened (row, col) index arrays for the numerator and
-        denominator sides of every pair, plus |r| per row — used to evaluate
-        the symmetric flow-space scale in one vectorized pass per timestep."""
-        cached = getattr(self, "_scale_idx", None)
-        if cached is None:
-            rn, cn, rd, cd, rabs, den_mode = [], [], [], [], [], []
-            for row_id, p in enumerate(self._pairs):
-                num_cols = p["edge_i_list"] if p.get("agg") else [p["edge_i"]]
-                den_cols = p["edge_j_list"] if p.get("agg") else [p["edge_j"]]
-                rn += [row_id] * len(num_cols); cn += list(num_cols)
-                rd += [row_id] * len(den_cols); cd += list(den_cols)
-                rabs.append(abs(p["r"]))
-                den_mode.append(p.get("scale_mode") == "denominator")
-            cached = (np.asarray(rn, dtype=int), np.asarray(cn, dtype=int),
-                      np.asarray(rd, dtype=int), np.asarray(cd, dtype=int),
-                      np.asarray(rabs), np.asarray(den_mode, dtype=bool))
-            self._scale_idx = cached
-        return cached
 
     def build_dynamic(self, acc_struct, f_agg, sigma_agg, t) -> ConstraintBlock:
         """
         Rescale the relative σ_r to flow space against the prior ``f_agg``
         (symmetric: max of numerator-side and r·denominator-side prior mass,
         floored), then deactivate rows whose ``time`` does not match ``t`` by
-        setting ``sigma_c = SIGMA_C_INACTIVE``.
+        setting ``sigma_c = SIGMA_C_INACTIVE`` (:func:`pysuto.constraints.emit.ratio_sigma_c`).
 
         Mirrors :meth:`SumConstraintBuilder.build_dynamic`. ``c`` is left
         unchanged (always 0 for ratio_eq).
@@ -414,27 +354,11 @@ class RatioConstraintBuilder(BaseConstraintBuilder):
             # year-local), like the mass balances: no σ scaling, no deactivation.
             return static
 
-        rn, cn, rd, cd, rabs, den_mode = self._scale_index()
-        M = static.G_rows.shape[0]
-        num_scale = np.zeros(M)
-        den_scale = np.zeros(M)
-        np.add.at(num_scale, rn, np.abs(f_agg[cn]))
-        np.add.at(den_scale, rd, np.abs(f_agg[cd]))
-        # Symmetric ratios (r≠0): scale by max(|num|, |r|·|den|). Net-stock bands
-        # (scale_mode="denominator", r=0): scale by the throughput |denominator|
-        # alone — else |r|·den=0 collapses σ_c to the abs floor (quasi-hard). The
-        # abs floor still keeps σ_c finite & soft when the throughput collapses
-        # (flat-prior-zero pin), avoiding re-infeasibility. See plan A2.
-        scale   = np.where(den_mode, den_scale, np.maximum(num_scale, rabs * den_scale))
-        scale   = np.maximum(scale, self._scale_abs_floor)
-        sigma_r = np.maximum(static.sigma_c, self._sigma_rel_floor)
-        sigma_c = sigma_r * scale
-
-        t_str    = str(t)
-        times    = static.row_meta["time"].astype(str).to_numpy()
-        inactive = times != t_str
-        sigma_c[inactive] = SIGMA_C_INACTIVE
-
+        index = getattr(self, "_scale_idx", None)
+        if index is None:
+            index = self._scale_idx = ratio_scale_index(self._pairs)
+        sigma_c = ratio_sigma_c(index, static, f_agg, t,
+                                self._sigma_rel_floor, self._scale_abs_floor)
         return ConstraintBlock(
             G_rows   = static.G_rows,
             c        = static.c,
