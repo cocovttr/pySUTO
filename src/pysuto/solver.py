@@ -42,7 +42,10 @@ from typing import Callable, Optional
 import numpy as np
 import scipy.sparse as sp
 
-from ._conditioning import condition_prior, condition_sigma_c
+from ._conditioning import (
+    SIGMA_A_CEILING_FACTOR, SIGMA_A_FLOOR_ABS, SIGMA_A_FLOOR_REL, SIGMA_C_FLOOR,
+    condition_prior, condition_sigma_c,
+)
 from .acc import EDGE_UNIVERSE_ROLE_KEYS, AccountingStructure, check_built_acc
 from .constraints import ConstraintRun
 from .constraints.naming import SENSE_EQ, SENSE_LE
@@ -228,10 +231,10 @@ class Solver:
         opt_dir:   str = "data/proc/opt",
         acc_dir:   str = "data/proc/acc",
         input_dir: str = "data/input",
-        sigma_a_floor_abs:      float = 1e-8,
-        sigma_a_floor_rel:      float = 1e-5,
-        sigma_a_ceiling_factor: float = 1e5,
-        sigma_c_floor:          float = 1e-9,
+        sigma_a_floor_abs:      float = SIGMA_A_FLOOR_ABS,
+        sigma_a_floor_rel:      float = SIGMA_A_FLOOR_REL,
+        sigma_a_ceiling_factor: float = SIGMA_A_CEILING_FACTOR,
+        sigma_c_floor:          float = SIGMA_C_FLOOR,
         verbose_first_solve:    bool  = True,
         prior_mode:             str   = "warm",
         n_workers:              int   = 1,
@@ -467,6 +470,10 @@ class Solver:
             "qp_variables":     self.qp_variables,
             "backend":          self.backend.name,
             "backend_settings": settings,
+            "sigma_a_floor_abs":      self.sigma_a_floor_abs,
+            "sigma_a_floor_rel":      self.sigma_a_floor_rel,
+            "sigma_a_ceiling_factor": self.sigma_a_ceiling_factor,
+            "sigma_c_floor":          self.sigma_c_floor,
         }
         # Persisted before the backend split under these names (#70); kept.
         for k in ("max_threads", "direct_solve_method"):
@@ -605,8 +612,7 @@ class Solver:
         b     = c_t[perm]
 
         if n_slack:
-            sc_arr   = np.where(np.isnan(sc_t), self.sigma_c_floor, sc_t)
-            sc_arr   = np.maximum(sc_arr, self.sigma_c_floor)
+            sc_arr   = condition_sigma_c(sc_t, floor=self.sigma_c_floor)
             inv_scf  = 1.0 / (sc_arr[perm[:n_slack]] ** 2)
         else:
             inv_scf = np.zeros(0)

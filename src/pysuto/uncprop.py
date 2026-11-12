@@ -84,7 +84,9 @@ from scipy.linalg import qr
 from scipy.linalg.lapack import dpstrf
 from scipy.stats import norm
 
-from ._conditioning import condition_prior, condition_sigma_c
+from ._conditioning import (
+    DEFAULT_CONDITIONING, condition_prior, condition_sigma_c, recorded_conditioning,
+)
 from .constraints.naming import SENSE_EQ, SENSE_LE
 from .logging import get_logger
 from .registry import ConstraintRunRegistry, OptimRunRegistry, UncPropRunRegistry
@@ -92,15 +94,6 @@ from .registry.optim import warn_if_prefix_block_run
 
 logger = get_logger("pysuto.uncprop")
 
-
-# Defaults mirror Solver so uncprop sees the same effective prior
-# the QP saw. Keep these in sync with src/pysuto/solver.py if either side
-# changes. (The shared helper enforces the rules; only the *defaults*
-# need to stay aligned.)
-DEFAULT_SIGMA_A_FLOOR_ABS      = 1e-8
-DEFAULT_SIGMA_A_FLOOR_REL      = 1e-5
-DEFAULT_SIGMA_A_CEILING_FACTOR = 1e5
-DEFAULT_SIGMA_C_FLOOR          = 1e-9
 
 # Active set (#27). A hard inequality row binds when G·a* − c ≥ −bind_tol (kt,
 # 1 kg). Clarabel's a* has no clean gap there (thousands of bound edges sit in
@@ -246,10 +239,10 @@ class KalmanUncProp(BaseUncProp):
         const_dir:   str = "data/proc/const",
         uncprop_dir: str = "data/proc/uncprop",
         block_size:  int = 1024,
-        sigma_a_floor_abs:      float = DEFAULT_SIGMA_A_FLOOR_ABS,
-        sigma_a_floor_rel:      float = DEFAULT_SIGMA_A_FLOOR_REL,
-        sigma_a_ceiling_factor: float = DEFAULT_SIGMA_A_CEILING_FACTOR,
-        sigma_c_floor:          float = DEFAULT_SIGMA_C_FLOOR,
+        sigma_a_floor_abs:      Optional[float] = None,
+        sigma_a_floor_rel:      Optional[float] = None,
+        sigma_a_ceiling_factor: Optional[float] = None,
+        sigma_c_floor:          Optional[float] = None,
         bind_tol:               float = DEFAULT_BIND_TOL,
         rank_tol:               float = DEFAULT_RANK_TOL,
         exclude_scale_totals:   bool  = DEFAULT_EXCLUDE_SCALE_TOTALS,
@@ -258,10 +251,15 @@ class KalmanUncProp(BaseUncProp):
         self.const_dir    = const_dir
         self.uncprop_dir  = uncprop_dir
         self.block_size   = int(block_size)
-        self.sigma_a_floor_abs      = sigma_a_floor_abs
-        self.sigma_a_floor_rel      = sigma_a_floor_rel
-        self.sigma_a_ceiling_factor = sigma_a_ceiling_factor
-        self.sigma_c_floor          = sigma_c_floor
+        # The σ conditioning floors: an explicit value overrides, None takes the
+        # opt run's recorded one (compute); the attributes hold the effective values.
+        self._floor_override = {k: v for k, v in (
+            ("sigma_a_floor_abs",      sigma_a_floor_abs),
+            ("sigma_a_floor_rel",      sigma_a_floor_rel),
+            ("sigma_a_ceiling_factor", sigma_a_ceiling_factor),
+            ("sigma_c_floor",          sigma_c_floor)) if v is not None}
+        for k, v in {**DEFAULT_CONDITIONING, **self._floor_override}.items():
+            setattr(self, k, v)
         self.bind_tol               = bind_tol
         self.rank_tol               = rank_tol
         self.exclude_scale_totals   = bool(exclude_scale_totals)
@@ -308,6 +306,11 @@ class KalmanUncProp(BaseUncProp):
                 f"OptimRun '{opt_run_id}' sidecar has no "
                 f"parents.upstream.const_run_id — uncprop cannot proceed."
             )
+
+        for k, v in {**recorded_conditioning(opt_sidecar.get("stage_config", {}),
+                                             opt_run_id),
+                     **self._floor_override}.items():
+            setattr(self, k, v)
 
         logger.info("Loading OptimRun '%s' (→ ConstraintRun '%s')",
                     opt_run_id, const_run_id)

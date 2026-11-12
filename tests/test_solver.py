@@ -217,6 +217,20 @@ class TestConvergenceCapture:
 
 class TestPersist:
 
+    def test_sidecar_records_the_sigma_conditioning_floors(self, monkeypatch, toy_run,
+                                                          tmp_path):
+        """Stage 5 reads these back (#142)."""
+        from pysuto._conditioning import DEFAULT_CONDITIONING
+        s = make_solver(const_dir="unused", verbose_first_solve=False, prior_mode="cold",
+                        sigma_c_floor=5e-9)
+        monkeypatch.setattr(s, "load_run", lambda _rid: toy_run)
+        out_id = s.persist(run_id="toy_run", results=s.solve_all("toy_run"),
+                           output_dir=str(tmp_path), const_run_id="toy_const")
+        with open(tmp_path / out_id / "metadata.json") as fh:
+            cfg = json.load(fh)["stage_config"]
+        assert {k: cfg[k] for k in DEFAULT_CONDITIONING} == {**DEFAULT_CONDITIONING,
+                                                              "sigma_c_floor": 5e-9}
+
     def test_roundtrip(self, toy_solver, tmp_path):
         from pysuto.clarabel_backend import ITER_DTYPE
         results = toy_solver.solve_all("toy_run")

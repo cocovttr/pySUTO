@@ -21,6 +21,8 @@ import pandas as pd
 import pytest
 import scipy.sparse as sp
 
+from pysuto._conditioning import DEFAULT_CONDITIONING
+
 
 # ---------------------------------------------------------------------------
 # Fabrication helpers
@@ -149,13 +151,13 @@ def _compute_block_toy(tmp_path, monkeypatch, **compute_kw):
     return cr, opt_results, prop.compute("opt_fake", alpha=0.05, **compute_kw)
 
 
-def _solve_and_persist(const_run, tmp_path):
+def _solve_and_persist(const_run, tmp_path, stage_config=None):
     """Persist const_run, solve it as full-G QPs, persist opt run. Returns
     (opt_run_id, dirs). Stage 4 no longer has a full-G path (ADR 0042), so this solves
     the legacy full-vector problem here: one QP per period over every edge, each
     period's prior the previous period's optimum (the first period's the run's)."""
     import clarabel
-    from pysuto._conditioning import condition_prior
+    from pysuto._conditioning import condition_prior, condition_sigma_c
     from pysuto.solver import OptimResult, row_layout
     from pysuto.registry import ConstraintRunRegistry, OptimRunRegistry
 
@@ -183,7 +185,7 @@ def _solve_and_persist(const_run, tmp_path):
     results = {}
     for t, td in const_run.timestep_data.items():
         c = np.asarray(td["c"], dtype=float)
-        sc = np.maximum(np.where(np.isnan(td["sigma_c"]), 1e-9, td["sigma_c"]), 1e-9)
+        sc = condition_sigma_c(td["sigma_c"])
         P = sp.diags(2.0 * np.concatenate([1.0 / sigma_a ** 2,
                                            1.0 / sc[lay.perm[:n_slack]] ** 2]), format="csc")
         q = np.concatenate([-2.0 * a_prior / sigma_a ** 2, np.zeros(n_slack)])
@@ -198,7 +200,8 @@ def _solve_and_persist(const_run, tmp_path):
             convergence={}, a_prior=a_prior.copy())
         a_prior = x[:n_a]
     opt_run_id = OptimRunRegistry(opt_dir).register(
-        results, parents={"inputs": {}, "upstream": {"const_run_id": const_run.run_id}})
+        results, parents={"inputs": {}, "upstream": {"const_run_id": const_run.run_id}},
+        stage_config=stage_config)
     return opt_run_id, dict(const=const_dir, opt=opt_dir, uncprop=uncprop_dir)
 
 
@@ -216,10 +219,8 @@ class TestToyClosedForm:
         # directly — closed-form check needs no disk I/O.
         prop = KalmanUncProp.__new__(KalmanUncProp)
         prop.block_size                  = 1024
-        prop.sigma_a_floor_abs           = 1e-8
-        prop.sigma_a_floor_rel           = 1e-5
-        prop.sigma_a_ceiling_factor      = 1e5
-        prop.sigma_c_floor               = 1e-9
+        for k, v in DEFAULT_CONDITIONING.items():
+            setattr(prop, k, v)
 
         from pysuto._conditioning import condition_prior
         _, sigma_a = condition_prior(run.a0, run.sigma_a)
@@ -284,10 +285,8 @@ class TestPsdAndMonotone:
 
         prop = KalmanUncProp.__new__(KalmanUncProp)
         prop.block_size             = 64
-        prop.sigma_a_floor_abs      = 1e-8
-        prop.sigma_a_floor_rel      = 1e-5
-        prop.sigma_a_ceiling_factor = 1e5
-        prop.sigma_c_floor          = 1e-9
+        for k, v in DEFAULT_CONDITIONING.items():
+            setattr(prop, k, v)
 
         from pysuto._conditioning import condition_prior
         _, sigma_a = condition_prior(run.a0, run.sigma_a)
@@ -348,10 +347,8 @@ class TestByronLimit:
         # σ_c already 0 on the hard row — this IS the Byron limit
         prop = KalmanUncProp.__new__(KalmanUncProp)
         prop.block_size                  = 1024
-        prop.sigma_a_floor_abs           = 1e-8
-        prop.sigma_a_floor_rel           = 1e-5
-        prop.sigma_a_ceiling_factor      = 1e5
-        prop.sigma_c_floor               = 1e-9
+        for k, v in DEFAULT_CONDITIONING.items():
+            setattr(prop, k, v)
 
         from pysuto._conditioning import condition_prior
         _, sigma_a = condition_prior(run.a0, run.sigma_a)
@@ -758,6 +755,63 @@ class TestLoadFromOptRunId:
         )
         with pytest.raises(KeyError, match="const_run_id"):
             prop.compute(opt_run_id, alpha=0.05)
+
+
+# ---------------------------------------------------------------------------
+# 8b) σ conditioning floors (#142): Stage 5 applies the floors its opt run recorded
+# ---------------------------------------------------------------------------
+
+_TUNED = {"sigma_a_floor_abs": 2e-8, "sigma_a_floor_rel": 3e-5,
+          "sigma_a_ceiling_factor": 4e5, "sigma_c_floor": 5e-9}
+
+
+class TestRecordedConditioning:
+
+    def test_floors_recorded_by_a_solved_toy_run_are_the_ones_stage_5_applies(
+            self, tmp_path):
+        from pysuto.uncprop import KalmanUncProp
+        from pysuto.registry import UncPropRunRegistry
+
+        opt_run_id, dirs = _solve_and_persist(_make_toy_3edge_2t(), tmp_path,
+                                              stage_config=dict(_TUNED))
+        prop = KalmanUncProp(opt_dir=dirs["opt"], const_dir=dirs["const"],
+                             uncprop_dir=dirs["uncprop"])
+        result = prop.compute(opt_run_id)
+        assert {k: getattr(prop, k) for k in _TUNED} == _TUNED
+
+        run_id = prop.persist(result, opt_run_id)
+        cfg = UncPropRunRegistry(dirs["uncprop"]).load_sidecar(run_id)["stage_config"]
+        assert {k: cfg[k] for k in _TUNED} == _TUNED
+
+    def test_a_sidecar_without_floors_warns_and_uses_the_defaults(self, tmp_path, caplog):
+        import logging
+        from pysuto.uncprop import KalmanUncProp
+
+        opt_run_id, dirs = _solve_and_persist(_make_toy_3edge_2t(), tmp_path)
+        prop = KalmanUncProp(opt_dir=dirs["opt"], const_dir=dirs["const"],
+                             uncprop_dir=dirs["uncprop"])
+        with caplog.at_level(logging.WARNING, logger="pysuto.conditioning"):
+            prop.compute(opt_run_id)
+        assert {k: getattr(prop, k) for k in DEFAULT_CONDITIONING} == DEFAULT_CONDITIONING
+        assert "records no" in caplog.text and opt_run_id in caplog.text
+
+    def test_an_explicit_argument_overrides_the_record(self, tmp_path):
+        from pysuto.uncprop import KalmanUncProp
+
+        opt_run_id, dirs = _solve_and_persist(_make_toy_3edge_2t(), tmp_path,
+                                              stage_config=dict(_TUNED))
+        prop = KalmanUncProp(opt_dir=dirs["opt"], const_dir=dirs["const"],
+                             uncprop_dir=dirs["uncprop"], sigma_c_floor=7e-9)
+        prop.compute(opt_run_id)
+        assert prop.sigma_c_floor == 7e-9
+        assert prop.sigma_a_floor_abs == _TUNED["sigma_a_floor_abs"]
+
+    def test_the_solver_defaults_are_the_conditioning_defaults(self):
+        import inspect
+        from pysuto.solver import Solver
+
+        params = inspect.signature(Solver.__init__).parameters
+        assert {k: params[k].default for k in DEFAULT_CONDITIONING} == DEFAULT_CONDITIONING
 
 
 # ---------------------------------------------------------------------------
