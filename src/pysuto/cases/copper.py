@@ -1281,11 +1281,14 @@ def icsg_sector_key(proc: str, typ: str, supply_use: str) -> str:
 
 def _concordance_maps(sheets: dict, sector_cols: list, var_cols: list) -> dict:
     """The five concordance maps of a feed's workbook ``sheets``; ``sector_cols`` and
-    ``var_cols`` name the columns of ``sector_map`` and ``variable_map`` the feed reads."""
+    ``var_cols`` name the columns of ``sector_map`` and ``variable_map`` it reads."""
     sector_map    = sheets["sector_map"][sector_cols].drop_duplicates()
-    region_map    = sheets["region_map"][["src_region",     "root_region"]].drop_duplicates()
-    time_map      = sheets["time_map"][  ["src_time",       "root_time"]  ].drop_duplicates()
-    valuation_map = sheets["valuation_map"][["src_valuation", "root_valuation"]].drop_duplicates()
+    region_map    = sheets["region_map"][
+        ["src_region", "root_region"]].drop_duplicates()
+    time_map      = sheets["time_map"][
+        ["src_time", "root_time"]].drop_duplicates()
+    valuation_map = sheets["valuation_map"][
+        ["src_valuation", "root_valuation"]].drop_duplicates()
     var_map       = sheets["variable_map"][var_cols].copy()
 
     time_map["src_time"]  = time_map["src_time"].astype(str)
@@ -1355,7 +1358,8 @@ def load_plain_tables(path: str) -> dict:
     (BACI, crude ore)."""
     check_file(path, "concordance workbook")
     sheets = pd.read_excel(path, sheet_name=None)
-    return _concordance_maps(sheets, ["src_sector", "root_sector"], ["raw_var", "src_var"])
+    return _concordance_maps(sheets, ["src_sector", "root_sector"],
+                             ["raw_var", "src_var"])
 
 
 def baci_user_weights(build):
