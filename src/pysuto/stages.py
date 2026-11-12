@@ -275,6 +275,7 @@ def run_const(case: CaseSpec, imp_run_id: str, label: str,
         nodata_anchor_exclude_sectors = spec.NODATA_ANCHOR_EXCLUDE,
         nodata_anchor_exempt_mask     = anchor_exempt,
         pin_flat_prior_zeros = spec.PIN_FLAT_PRIOR_ZEROS,
+        pin_exclude_sectors  = spec.PIN_EXCLUDE_SECTORS,
     )
 
     for builder in spec.builders(ctx):

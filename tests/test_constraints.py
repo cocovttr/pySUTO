@@ -2580,7 +2580,8 @@ class TestScrapLevelAnchor:
         """Because the mask is coverage-gated every group is 100 % feed-backed,
         so ADR 0025's 0.3 kt floor applies unconditionally and the fabricated
         branch is never taken."""
-        from pysuto.cases.copper import CASE, scale_total_cv
+        from pysuto.cases.copper import CASE
+        from pysuto.constraints.anchors import scale_total_cv
         spec = CASE.const
         SCALE_TOTAL_ABS_FLOOR = spec.SCALE_TOTAL_ABS_FLOOR
         acc = _make_scrap_acc()
@@ -2828,7 +2829,7 @@ class TestScaleTotalCvRule:
     at the feeds' reporting resolution; fabricated groups keep their tight cv."""
 
     def test_rule(self):
-        from pysuto.cases.copper import scale_total_cv
+        from pysuto.constraints.anchors import scale_total_cv
         kw = dict(anchor_cv=0.01, fabricated_cv=0.01, feed_share_observed=0.5, abs_floor=0.3)
         # feed-backed, tiny total: cv·|c| == floor
         assert scale_total_cv(1.0, 1.0, **kw) * 1.0 == pytest.approx(0.3)

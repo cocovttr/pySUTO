@@ -456,6 +456,7 @@ class SumConstraintBuilder(BaseConstraintBuilder):
         id_prefix: str = "anchor",
         min_abs_c: float = 1e-9,
         sigma_cv_resolver=None,
+        p: float = 1.3,
     ) -> "SumConstraintBuilder":
         """
         One soft-sum anchor row per group of masked edges.
@@ -490,6 +491,7 @@ class SumConstraintBuilder(BaseConstraintBuilder):
                         group key to its value, ``edge_ids`` are the group's
                         edges). Overrides ``sigma_cv`` per group; return
                         ``None`` to keep the ``sigma_cv`` fallback.
+        p             : the builder's Lp exponent (the case's ``P_PROP``).
         """
         if isinstance(mask, str):
             scope = cls._resolve_scope_mask(acc_struct, mask)
@@ -557,7 +559,7 @@ class SumConstraintBuilder(BaseConstraintBuilder):
             "(mask=%s, %d edges in scope, group_keys=%s, cv=%.3g)",
             len(specs), mask_label, int(scope.sum()), list(group_keys), sigma_cv,
         )
-        return cls(specs)
+        return cls(specs, p=p)
 
     # ------------------------------------------------------------------
 

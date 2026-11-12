@@ -14,11 +14,12 @@ the copper application as one :class:`pysuto.case.CaseSpec`, ``CASE``.
 
 The knob values, their notes and the construction steps moved here unchanged from the
 two drivers' ``# USER CONFIGURATION`` blocks and ``main()``s (#120), and so did the
-script-level algorithms (#121): the cascade order check, ``scale_total_cv`` and the
-scale totals' σ resolver stay here; leg-σ damping, the outlier and contradicted-node
-screens and the time interpolator's scope moved into ``pysuto.impute`` with their
-labels as parameters (#144), and this case passes its own. The hooks ``pre_impute``
-and ``post_impute`` and the builders reach them through the :class:`CaseContext`.
+script-level algorithms (#121): the cascade order check stays here, the Stage 3 anchor
+families moved into ``pysuto.constraints.anchors`` (#145); leg-σ damping, the outlier
+and contradicted-node screens and the time interpolator's scope moved into
+``pysuto.impute`` with their labels as parameters (#144), and this case passes its own.
+The hooks ``pre_impute`` and ``post_impute`` and the builders reach them through the
+:class:`CaseContext`.
 """
 
 from __future__ import annotations
@@ -36,9 +37,8 @@ from pysuto.constraints import (
     MassBalanceBuilder,
     RatioBoundBuilder,
     RatioConstraintBuilder,
-    SumConstraintBuilder,
+    anchors,
 )
-from pysuto.constraints.engine import nodata_exempt_mask
 from pysuto.impute import (
     FlatPriorImputer,
     NetworkImputer,
@@ -52,9 +52,8 @@ from pysuto.impute import (
     time_interp_scope,
 )
 from pysuto.feedpipe import FeedSpec, check_file
-from pysuto.flow_node_balance import K_CLOSE as UNCLOSED_K, contradicted_flow_nodes
-from pysuto.relation.param_relation import CONC_ACCEPTS, expand_edge_index
-from pysuto.relation.params import read_params
+from pysuto.flow_node_balance import K_CLOSE as UNCLOSED_K
+from pysuto.relation.param_relation import expand_edge_index
 from pysuto.unc import PedigreeScores
 from pysuto.logging import get_logger
 
@@ -608,6 +607,9 @@ class CopperConst(ConstSection):
     # determined edges (extraction chain + all four SEM residual outputs
     # {WR,Tailings,Slag,PSC}); see ADR 0013.
     PIN_FLAT_PRIOR_ZEROS: bool = True
+    # The sectors the pin spares: the same list as NODATA_ANCHOR_EXCLUDE, held apart
+    # because the engine takes it separately (#145; it was the engine's default).
+    PIN_EXCLUDE_SECTORS: tuple = ("CO", "Mining", "Ore", "WR", "Tailings", "Slag", "PSC")
     # Soft-ratio σ_c scaling (REP analysis_opt_20260611_075036 §8.2): the CSV σ (ratio
     # units) is made relative, σ_r = σ/|r| (#29), and rescaled to flow space per row,
     # σ_c = max(σ_r, REL_FLOOR) · max(Σ|a₀,num|, |r|·Σ|a₀,denom|, ABS_FLOOR).
@@ -686,89 +688,33 @@ class CopperConst(ConstSection):
 # Stage 3 algorithms — moved unchanged from scripts/constraints.py (#121)
 # -----------------------------------------------------------------------------
 
-def scale_total_cv(feed_share: float, c_abs: float, *, anchor_cv: float,
-                   fabricated_cv: float, feed_share_observed: float,
-                   abs_floor: float) -> float | None:
-    """cv for one scale-total group (ADR 0016 classification, ADR 0025 floor).
-
-    Fabricated groups (feed share below the threshold) keep ``fabricated_cv``.
-    Feed-backed groups get the cv that makes ``cv·|c|`` equal the feeds'
-    reporting-resolution floor on small totals, ``max(anchor_cv, floor/|c|)``,
-    so σ_c = max(anchor_cv·|c|, floor). ``None`` means "use the builder's
-    default cv" (a feed-backed group with |c| = 0 cannot be floored via cv).
-    The four knobs are the case's ANCHOR_CV, FABRICATED_ANCHOR_CV,
-    FEED_SHARE_OBSERVED and SCALE_TOTAL_ABS_FLOOR.
-    """
-    if feed_share < feed_share_observed:
-        return fabricated_cv
-    if c_abs <= 0.0:
-        return None
-    return max(anchor_cv, abs_floor / c_abs)
-
-
 def scale_total_resolver(ctx):
-    """The scale totals' σ resolver (ADR 0016, 0019, 0025): ``(key_map, edge_ids) ->
-    cv`` for ``SumConstraintBuilder.from_mask_anchor``, built over ``ctx.agg_result``
-    with the case's Stage 3 knobs."""
-    spec, acc, agg_result, logger = (ctx.case.const, ctx.acc, ctx.agg_result,
-                                     ctx.logger)
-    # Provenance-aware σ_c: loosen scale totals whose prior group-sum is
-    # fabricated (feed-backed share of Σ|f_agg| < FEED_SHARE_OBSERVED). Uses
-    # agg_result.coverage — the pre-imputation "did any feed observe this
-    # edge?" flag (GLOSSARY.md §Coverage), so imputations never count.
-    f_agg = agg_result.f_agg
-    cov   = np.asarray(agg_result.coverage, dtype=bool)
-    f_agg_signed = np.nan_to_num(np.asarray(f_agg, dtype=float))
-    absf = np.abs(f_agg_signed)
-
-    # ADR 0019: the same detection Stage 2 used to σ-inflate the edges.
-    unclosed, unclosed_rep = contradicted_flow_nodes(
-        acc, agg_result, sectors=spec.UNCLOSED_SECTORS)
-    logger.info("ADR 0019: %d contradicted %s node-year(s) — anchor action: %s",
-                len(unclosed), "/".join(spec.UNCLOSED_SECTORS),
-                f"usetotout cv={spec.UNCLOSED_ANCHOR_CV}"
-                if spec.UNCLOSED_ANCHOR_CV is not None else "none (detector only)")
-
-    def resolve(key_map, edge_ids):
-        # Contradicted node: the outflow anchor loses authority so the hard
-        # balance can settle at the reliable inflow prior (ADR 0019).
-        if (spec.UNCLOSED_ANCHOR_CV is not None
-                and (key_map.get("sector_from"), key_map.get("region_from"),
-                     key_map.get("time")) in unclosed):
-            return spec.UNCLOSED_ANCHOR_CV
-        ids = np.asarray(edge_ids, dtype=int)
-        tot = absf[ids].sum()
-        if tot <= 0.0:
-            return spec.FABRICATED_ANCHOR_CV
-        feed_share = absf[ids[cov[ids]]].sum() / tot
-        return scale_total_cv(feed_share, abs(float(f_agg_signed[ids].sum())),
-                              anchor_cv=spec.ANCHOR_CV,
-                              fabricated_cv=spec.FABRICATED_ANCHOR_CV,
-                              feed_share_observed=spec.FEED_SHARE_OBSERVED,
-                              abs_floor=spec.SCALE_TOTAL_ABS_FLOOR)
-    return resolve
+    """The scale totals' σ resolver (ADR 0016, 0019, 0025): ``pysuto.constraints.anchors``'
+    resolver over ``ctx.agg_result`` with the case's Stage 3 knobs."""
+    spec = ctx.case.const
+    return anchors.scale_total_resolver(
+        ctx.acc, ctx.agg_result,
+        anchor_cv           = spec.ANCHOR_CV,
+        fabricated_cv       = spec.FABRICATED_ANCHOR_CV,
+        feed_share_observed = spec.FEED_SHARE_OBSERVED,
+        abs_floor           = spec.SCALE_TOTAL_ABS_FLOOR,
+        unclosed_sectors    = spec.UNCLOSED_SECTORS,
+        unclosed_anchor_cv  = spec.UNCLOSED_ANCHOR_CV,
+        logger              = ctx.logger)
 
 
 def nodata_anchor_exempt(ctx) -> tuple:
     """``(mask, n)``: the no-data anchor's per-edge exemption and the number of
     ore-grade region-years it spares (``(None, 0)`` when NODATA_ANCHOR_DATA_AWARE is
-    empty)."""
-    spec, inputs, acc, _log = ctx.case.const, ctx.inputs, ctx.acc, ctx.logger
-
-    # ADR 0013 amendment 3: spare the extraction chain only in region-years with an
-    # ore-grade row (the copper case's "a relation sets this magnitude").
-    anchor_exempt, n_grade_ry = None, 0
-    if spec.NODATA_ANCHOR_DATA_AWARE:
-        _og = read_params(inputs.params.resolve("ore_grade") / "params.csv",
-                          CONC_ACCEPTS)
-        _grade_ry = {(r.selectors["a_region_from"], r.selectors["a_time"])
-                     for r in _og if r.param_id.startswith("oregradecosupply")}
-        n_grade_ry = len(_grade_ry)
-        anchor_exempt = nodata_exempt_mask(acc, spec.NODATA_ANCHOR_EXCLUDE,
-                                           spec.NODATA_ANCHOR_DATA_AWARE, _grade_ry)
-        _log.info("No-data anchor: extraction chain spared in %d ore-grade region-years; "
-                  "%d edges spared in total", n_grade_ry, int(anchor_exempt.sum()))
-    return anchor_exempt, n_grade_ry
+    empty). The copper case's "a relation sets this magnitude" is an ore-grade row
+    (ADR 0013 amendment 3)."""
+    spec = ctx.case.const
+    return anchors.nodata_anchor_exempt(
+        ctx.acc, str(ctx.inputs.params.resolve("ore_grade") / "params.csv"),
+        param_prefix = "oregradecosupply",
+        exclude      = spec.NODATA_ANCHOR_EXCLUDE,
+        data_aware   = spec.NODATA_ANCHOR_DATA_AWARE,
+        logger       = ctx.logger)
 
 
 def const_stage_config(ctx) -> dict:
@@ -890,38 +836,15 @@ def builders(ctx) -> list:
     #        per flow, summing over all sector_to destinations = the flow's total
     #        output of an industrial flow.
     #    A *scale total*, not an external *control total* — see ADR 0006.
-    ei_exp      = expand_edge_index(acc.edge_index, acc.node_index)
-    f_agg       = agg_result.f_agg
-    supply_mask = (ei_exp["entity_from"].eq("Process")
-                   & ei_exp["entity_to"].eq("Flow")).to_numpy()
-    use_mask    = ei_exp["entity_from"].eq("Flow").to_numpy()
-    GROUP_KEYS  = ("sector_from", "region_from", "time", "valuation")
+    f_agg = agg_result.f_agg
 
     # Feed coverage — the pre-imputation "did any feed observe this edge?" flag
     # (GLOSSARY.md §Coverage); the σ resolver reads the same flag.
     _cov  = np.asarray(agg_result.coverage, dtype=bool)
 
-    _log.info("Registering SumConstraintBuilder — supply/use total-output scale totals")
-    out.append(SumConstraintBuilder.from_mask_anchor(
-        acc,
-        mask          = supply_mask,
-        anchor_values = f_agg,
-        group_keys    = GROUP_KEYS,
-        sigma_cv      = spec.ANCHOR_CV,
-        id_prefix     = "supplytotout",
-        sigma_cv_resolver = _scale_total_cv,
-        p             = spec.P_PROP,
-    ))
-    out.append(SumConstraintBuilder.from_mask_anchor(
-        acc,
-        mask          = use_mask,
-        anchor_values = f_agg,
-        group_keys    = GROUP_KEYS,
-        sigma_cv      = spec.ANCHOR_CV,
-        id_prefix     = "usetotout",
-        sigma_cv_resolver = _scale_total_cv,
-        p             = spec.P_PROP,
-    ))
+    out.extend(anchors.scale_total_anchors(
+        acc, f_agg, _scale_total_cv, anchor_cv=spec.ANCHOR_CV, p=spec.P_PROP,
+        supply_prefix="supplytotout", use_prefix="usetotout", logger=_log))
 
     # 2b. Soft sum — ICSG SCRAP LEVEL anchors (Round P, ADR 0031).
     #     `Scrap` is an SB node, so `Scrap→Process` edges match NEITHER family
@@ -970,28 +893,11 @@ def builders(ctx) -> list:
     #     route") but is recorded here as merely unstated.
     #     σ_c: `_scale_total_cv` unchanged. Its ADR 0019 branch is inert here
     #     (UNCLOSED_ANCHOR_CV is None, and it targets Matte usetotout rows).
-    _scrap_cc = ((ei_exp["sector_from"].eq("Scrap")
-                  & ei_exp["valuation"].eq("CC")).to_numpy() & _cov)
-    smelter_scrap_mask   = _scrap_cc & ei_exp["sector_to"].eq("Smelting").to_numpy()
-    directref_scrap_mask = _scrap_cc & ei_exp["sector_to"].eq("CFR").to_numpy()
-    SCRAP_GROUP_KEYS = ("sector_to", "region_to", "time", "valuation")
-
     if spec.SCRAP_LEVEL_ANCHOR:
-        _log.info("Registering SumConstraintBuilder — ICSG scrap-level anchors "
-                  "(smelter scrap %d edges, direct-to-refinery scrap %d edges)",
-                  int(smelter_scrap_mask.sum()), int(directref_scrap_mask.sum()))
-        for _mask, _prefix in ((smelter_scrap_mask,   "smelterscrap"),
-                               (directref_scrap_mask, "directrefscrap")):
-            out.append(SumConstraintBuilder.from_mask_anchor(
-                acc,
-                mask          = _mask,
-                anchor_values = f_agg,
-                group_keys    = SCRAP_GROUP_KEYS,
-                sigma_cv      = spec.ANCHOR_CV,
-                id_prefix     = _prefix,
-                sigma_cv_resolver = _scale_total_cv,
-                p             = spec.P_PROP,
-            ))
+        out.extend(anchors.scrap_level_anchors(
+            acc, f_agg, _cov, _scale_total_cv, source_sector="Scrap",
+            consumers={"smelterscrap": "Smelting", "directrefscrap": "CFR"},
+            anchor_cv=spec.ANCHOR_CV, p=spec.P_PROP, logger=_log))
     else:
         _log.info("SCRAP_LEVEL_ANCHOR off — scrap levels unstated (Round O config)")
 
