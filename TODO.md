@@ -66,6 +66,12 @@ Results still read the W.1 chain, as they have since Round X.t:** pending.
 
 # OPEN (2026-09-16, out of Round L)
 
+## #56 MEASURED 2026-11-12 — ADR 0042 accepted: Solver + ClarabelBackend reproduce the final chain's opt bit for bit; Stage 4 ≈ 3 min
+
+Branch `diag/qp-backend-measure`, REP `docs/rep/analysis_opt_20261112_144603_1256b16b_20261112_issue56-qp-backend-measure.md`.
+- **Run:** `opt_20261112_144603_1256b16b` on `const_20261022_111531_df61bf5c`: 240/240 arrays bit-identical to
+  `opt_20261022_112855_928da10c`, 30/30 solved; per-period probe of all 30 years 14.8 s; Stage 4 3 min 9 s (was ≈ 12 min).
+
 ## manuscript_ready_2 (label, 2026-10-20) — rounds shipped 2026-10-20/21
 
 Each against the previous one; REPs under `docs/rep/`.
