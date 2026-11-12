@@ -66,6 +66,16 @@ Results still read the W.1 chain, as they have since Round X.t:** pending.
 
 # OPEN (2026-09-16, out of Round L)
 
+## #149 MEASURED 2026-11-12 — the parametric σ-units fix (#148) ships; reference chain opt_20261112_135523_88fa69f3
+
+Branch `diag/parametric-sigma-units-measure`, REP
+`docs/rep/analysis_opt_20261112_135523_88fa69f3_20261112_issue149-parametric-sigma-units.md`.
+- **Runs:** `imp_20261112_133434_22fc54b3` → `const_20261112_134032_b6802ef3` → `opt_20261112_135523_88fa69f3` →
+  `uncprop_20261112_144236_f79da518`, `psut_20261112_144358_449d34b5`. **Reference chain.**
+- **Result:** prior σ moves on 6,687 edges, `f_agg` bit-identical; Round-E items equal to three decimals; common-set Σz²
+  −0.001 % vs `opt_20261022_112855_928da10c`; Σσ* +0.03 %.
+- **Open:** the manuscript still reads `opt_20261022_112855_928da10c` — re-point and re-check its keyed numbers.
+
 ## manuscript_ready_2 (label, 2026-10-20) — rounds shipped 2026-10-20/21
 
 Each against the previous one; REPs under `docs/rep/`.
