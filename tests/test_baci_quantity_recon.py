@@ -192,12 +192,12 @@ def test_sidecar_carries_every_column_the_gate_needs():
 import types  # noqa: E402
 
 
-def _stub_feed(tmp_path, monkeypatch):
-    """`baci_feed` with its module paths pointed at a temp feed dir."""
-    sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "scripts"))
-    import baci_feed
-    monkeypatch.setattr(baci_feed, "RAW_DATA", str(tmp_path / "values.csv"))
-    return baci_feed
+def _stub_feed(tmp_path):
+    """The copper case's cv-scale loader, over a temp feed dir."""
+    import pysuto.cases.copper as copper
+    return types.SimpleNamespace(
+        load_cv_scales=lambda acc: copper.load_cv_scales(acc, str(tmp_path)),
+        MAX_CV_SCALE=copper.MAX_CV_SCALE)
 
 
 class _Acc:
@@ -225,9 +225,9 @@ def _scale_csv(path, cv):
 
 @pytest.fixture
 def wired(tmp_path, monkeypatch):
-    bf = _stub_feed(tmp_path, monkeypatch)
-    import pysuto.param_relation as pr
-    monkeypatch.setattr(pr, "expand_edge_index", lambda *a, **k: _ei_frame())
+    bf = _stub_feed(tmp_path)
+    import pysuto.cases.copper as copper
+    monkeypatch.setattr(copper, "expand_edge_index", lambda *a, **k: _ei_frame())
     return bf, tmp_path
 
 
