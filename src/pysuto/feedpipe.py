@@ -17,20 +17,26 @@ AccountingStructure or Excel file required).
 
 from __future__ import annotations
 
+import logging
 import os
 import tempfile
+import warnings
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Optional
+from typing import Callable, Optional
 
 import numpy as np
 import pandas as pd
 import scipy.sparse as sp
 
+from pysuto.acc import AccountingStructure
+from pysuto.config import load_config
+from pysuto.input_registry import InputRegistries
 from pysuto.meta import DataFeedMetadata
 from pysuto.conc import ConcordanceTable, WeightMatrix
 from pysuto.unc import UncertaintyMixin, PropagationResult
 from pysuto.registry import DataFeedRegistry
-from pysuto.logging import get_logger
+from pysuto.logging import add_run_handler, get_logger
 
 _log = get_logger("pysuto.feedpipe")
 
@@ -526,6 +532,313 @@ def run_feed_pipeline(
         diag.plot(odir=os.path.join(entry.run_dir, "diag"))
 
     return wm, meta, result, entry
+
+
+# ===========================================================================
+# ONE FEED PIPELINE — FeedSpec + run_feed (#143)
+# ===========================================================================
+
+@dataclass
+class FeedBuild:
+    """What a :class:`FeedSpec` hook sees of one feed build.
+
+    :func:`run_feed` fills the fields in step order, so a hook finds every field its
+    step precedes: ``user_weights`` sees up to ``meta``, ``post_propagate`` all of them.
+    ``input_ref`` is the parent block's ``inputs`` dict; a hook may add entries to it.
+    """
+    spec:       "FeedSpec"
+    acc:        object
+    inputs:     InputRegistries
+    input_root: str
+    feed_dir:   str
+    input_ref:  dict
+    raw_df:     Optional[pd.DataFrame] = None
+    tables:     Optional[dict] = None
+    meta:       Optional[DataFeedMetadata] = None
+    ct:         Optional[ConcordanceTable] = None
+    wm:         Optional[WeightMatrix] = None
+    F_src:      Optional[np.ndarray] = None
+    result:     Optional[PropagationResult] = None
+
+
+@dataclass(frozen=True)
+class FeedSpec:
+    """One feed's policy for :func:`run_feed` (GLOSSARY.md "Case").
+
+    Attributes
+    ----------
+    feed_id : str
+        The input registry's feed id, the label of the run and of its diagnostics.
+    load_raw : callable
+        ``load_raw(values_csv_path) -> DataFrame``: the raw rows, with ``Year`` a string.
+    load_tables : callable
+        ``load_tables(conc_xlsx_path) -> dict`` with ``sector_map``, ``region_map``,
+        ``time_map``, ``valuation_map`` and ``var_map``.
+    row_region : str or None
+        The case's rest-of-world region, for the ROW pedigree penalty (#119).
+    aux_col, aux_sides :
+        The raw column that tells supply rows from use rows and its vocabulary.
+    allow_unmatched_edges, drop_unweighted_fans :
+        Passed to :func:`step_B_build_concordance`.
+    edge_scope : bool
+        Apply the metadata sidecar's ``Edge_scope_mask`` to the concordance (ADR 0014).
+    leg_filter : callable or None
+        ``leg_filter(tables) -> dict``: the fan policy (ADR 0008).
+    user_weights : callable or None
+        ``user_weights(build) -> (DataFrame or None, {input_ref key: registry entry})``:
+        producer weights, and the inputs they were built from.
+    cv_scale : callable or None
+        ``cv_scale(acc, feed_dir) -> ndarray or None``: a per-root-edge CV multiplier.
+    post_propagate : callable or None
+        ``post_propagate(build)``: edits ``build.result`` after propagation (σ hooks such
+        as ICSG's observed zeros) and may add entries to ``build.input_ref``.
+    """
+    feed_id:               str
+    load_raw:              Callable
+    load_tables:           Callable
+    row_region:            Optional[str] = None
+    aux_col:               Optional[str] = None
+    aux_sides:             Optional[dict] = None
+    allow_unmatched_edges: bool = True
+    drop_unweighted_fans:  bool = False
+    edge_scope:            bool = False
+    leg_filter:            Optional[Callable] = None
+    user_weights:          Optional[Callable] = None
+    cv_scale:              Optional[Callable] = None
+    post_propagate:        Optional[Callable] = None
+
+
+def check_file(path: str, label: str) -> None:
+    """Raise ``FileNotFoundError`` naming the missing input file ``path``."""
+    if not os.path.isfile(path):
+        raise FileNotFoundError(
+            f"\nMissing {label}:\n  {path}\n"
+            f"Place the file there or update the input registry's current/ directory."
+        )
+
+
+def load_acc_structure(acc_id: str, acc_dir: str) -> AccountingStructure:
+    """Load the registered accounting structure ``acc_id`` from ``acc_dir``."""
+    _log.info("=" * 60)
+    _log.info("A  Loading AccountingStructure")
+    _log.info("   id  : %s", acc_id)
+    _log.info("   dir : %s", acc_dir)
+
+    acc_path = os.path.join(acc_dir, acc_id)
+    if not os.path.isdir(acc_path):
+        available = (
+            "\n".join(
+                f"  • {d}" for d in sorted(os.listdir(acc_dir))
+                if os.path.isdir(os.path.join(acc_dir, d))
+            )
+            if os.path.isdir(acc_dir) else
+            f"  ('{acc_dir}' does not exist)"
+        )
+        raise FileNotFoundError(
+            f"\nAccounting structure '{acc_id}' not found at '{acc_path}'.\n"
+            f"Set pipeline.acc_id in config/config.yaml.\n"
+            f"Available structures:\n{available}"
+        )
+
+    acc = AccountingStructure.load(id=acc_id, storage_dir=acc_dir)
+    _log.info("   nodes           : %d", acc.n_nodes)
+    _log.info("   admissible edges: %d", len(acc.edge_index))
+    _log.info("   time range      : %s – %s", acc.time_range[0], acc.time_range[-1])
+    _log.info("   valuations      : %s", acc.valuation)
+    return acc
+
+
+def build_feed_concordance(spec: FeedSpec, raw_df: pd.DataFrame, tables: dict, acc,
+                           user_weights_df: Optional[pd.DataFrame] = None
+                           ) -> ConcordanceTable:
+    """Step B for ``spec``: its concordance tables and fan policy over ``raw_df``."""
+    _log.info("=" * 60)
+    _log.info("C  Building ConcordanceTable")
+
+    leg_filter = spec.leg_filter(tables) if spec.leg_filter is not None else None
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        ct = step_B_build_concordance(
+            raw_df                = raw_df,
+            acc_struct            = acc,
+            sector_map_df         = tables["sector_map"],
+            region_map_df         = tables["region_map"],
+            time_map_df           = tables["time_map"],
+            valuation_map_df      = tables["valuation_map"],
+            var_map_df            = tables["var_map"],
+            feed_id               = spec.feed_id,
+            aux_col               = spec.aux_col,
+            aux_sides             = spec.aux_sides,
+            allow_unmatched_edges = spec.allow_unmatched_edges,
+            user_weights_df       = user_weights_df,
+            leg_filter            = leg_filter,
+            drop_unweighted_fans  = spec.drop_unweighted_fans,
+        )
+
+    for w in caught:
+        _log.warning("   ⚠  %s", w.message)
+    return ct
+
+
+def run_feed(spec: FeedSpec, *, acc_id: Optional[str] = None, data_dir: str = "data",
+             config_path: str = "config/config.yaml", run_log: Optional[str] = None,
+             diag: bool = True):
+    """Build, propagate and register one feed run (Stage 1) from ``spec``.
+
+    Steps A → F of the three copper drivers, once: the registered accounting structure,
+    the feed's raw rows, concordance workbook and metadata sidecar, the concordance and
+    weight matrix, the source vector and its propagated root values, the registered
+    run, and (``diag``) its diagnostics.
+
+    Parameters
+    ----------
+    spec : FeedSpec
+    acc_id : str, optional
+        The accounting structure; default ``pipeline.acc_id`` of ``config_path``.
+    data_dir : str
+        Holds ``input/`` (the input registries) and ``proc/`` (``proc/acc``, and the
+        feed registry at ``proc/feed/registry``, where the run is written).
+    run_log : str, optional
+        A file that collects the process's log records for this call; the handler is
+        removed again on return.
+    diag : bool
+        Render the feed diagnostics into the run's ``diag/`` directory.
+
+    Returns
+    -------
+    entry
+        The feed run's registry entry (``.run_id``, ``.run_dir``).
+    """
+    root = logging.getLogger()
+    handler, root_level = None, root.level
+    if run_log is not None:
+        handler = add_run_handler(run_log)
+    try:
+        return _run_feed(spec, acc_id, data_dir, config_path, run_log, diag)
+    finally:
+        if handler is not None:
+            root.removeHandler(handler)
+            handler.close()
+            root.setLevel(root_level)
+
+
+def _run_feed(spec, acc_id, data_dir, config_path, run_log, diag):
+    if acc_id is None:
+        acc_id = load_config(config_path).pipeline.acc_id
+    input_root   = os.path.join(data_dir, "input")
+    acc_dir      = os.path.join(data_dir, "proc", "acc")
+    registry_dir = os.path.join(data_dir, "proc", "feed", "registry")
+
+    _log.info("=" * 60)
+    _log.info("feed=%s  acc=%s", spec.feed_id, acc_id)
+    if run_log is not None:
+        _log.info("run log → %s", run_log)
+
+    # 0 — input registries (scan-and-bump every kind)
+    inputs    = InputRegistries.initialize(root=input_root)
+    feed_dir  = inputs.feed.resolve(spec.feed_id)
+    raw_file  = str(feed_dir / "values.csv")
+    conc_file = str(feed_dir / "conc.xlsx")
+    meta_file = str(feed_dir / "meta.xlsx")
+    input_ref = {
+        "acc":  inputs.acc.entry(acc_id),
+        "feed": inputs.feed.entry(spec.feed_id),
+    }
+    _log.info("   input feed : %s v%d (code=%s)",
+              input_ref["feed"]["id"], input_ref["feed"]["version"],
+              input_ref["feed"]["code"])
+    _log.info("   input acc  : %s v%d", input_ref["acc"]["id"],
+              input_ref["acc"]["version"])
+
+    # A — accounting structure
+    acc = load_acc_structure(acc_id, acc_dir)
+    b = FeedBuild(spec=spec, acc=acc, inputs=inputs, input_root=input_root,
+                  feed_dir=str(feed_dir), input_ref=input_ref)
+
+    # B — raw data + concordance tables + metadata sidecar
+    _log.info("=" * 60)
+    _log.info("B  Loading inputs")
+    _log.info("   raw data     : %s", raw_file)
+    _log.info("   concordance  : %s", conc_file)
+    _log.info("   meta sidecar : %s", meta_file)
+    b.raw_df = spec.load_raw(raw_file)
+    b.tables = spec.load_tables(conc_file)
+    if os.path.isfile(meta_file):
+        b.meta = step_A_read_metadata(meta_file)
+    else:
+        _log.warning("   meta sidecar not found — using default pedigree scores")
+        b.meta = DataFeedMetadata(feed_name=spec.feed_id)
+    user_weights_df = None
+    if spec.user_weights is not None:
+        user_weights_df, extra_inputs = spec.user_weights(b)
+        input_ref.update(extra_inputs)
+    _log.info("   rows loaded  : %d", len(b.raw_df))
+    _log.info("   sector map   : %d entries", len(b.tables["sector_map"]))
+    _log.info("   region map   : %d entries", len(b.tables["region_map"]))
+    _log.info("   time map     : %d entries", len(b.tables["time_map"]))
+
+    # C — concordance + weight matrix
+    b.ct = build_feed_concordance(spec, b.raw_df, b.tables, acc, user_weights_df)
+    if spec.edge_scope:
+        # Edge scope (meta.xlsx Edge_scope_mask), e.g. BACI's cross_region (ADR 0014):
+        # this driver builds the ct directly, so it applies the scope itself.
+        _apply_edge_scope_mask(b.ct, acc, b.meta.edge_scope_mask)
+    _log.info("=" * 60)
+    _log.info("C  Building WeightMatrix")
+    b.wm = step_C_build_weight_matrix(b.ct)
+
+    # D — source flow vector + uncertainty propagation
+    b.F_src = build_F_src(b.raw_df, b.ct, label=spec.feed_id)
+    _log.info("=" * 60)
+    _log.info("D  F_src vector")
+    _log.info("   length    : %d", len(b.F_src))
+    _log.info("   non-zero  : %d", int(np.count_nonzero(b.F_src)))
+    _log.info("   total kt  : %.1f", float(b.F_src.sum()))
+    _log.info("=" * 60)
+    _log.info("D  Propagating uncertainty")
+    cv_extra = spec.cv_scale(acc, str(feed_dir)) if spec.cv_scale is not None else None
+    b.result, row_summary = propagate_with_row_penalty(
+        b.wm, b.F_src, b.meta, acc, cv_root_scale_extra=cv_extra,
+        row_region=spec.row_region)
+    if spec.post_propagate is not None:
+        spec.post_propagate(b)
+
+    # E — register + persist
+    _log.info("=" * 60)
+    _log.info("E  Registering feed")
+    registry = DataFeedRegistry(odir=registry_dir)
+    registry.load_index()
+    b.wm.odir = registry_dir
+    entry = register_feed(
+        b.wm, b.meta, b.result, registry,
+        parents       = {"inputs": input_ref, "upstream": {}},
+        F_src         = b.F_src,
+        stage_summary = row_summary,
+    )
+    _log.info("   run_id           %s", entry.run_id)
+    _log.info("   run dir          %s", entry.run_dir)
+
+    # F — diagnostics
+    if diag:
+        from pysuto.diag import FeedDiagnostics   # diag/ is a leaf: imported on use
+        _log.info("=" * 60)
+        _log.info("F  Generating diagnostics")
+        d = FeedDiagnostics(
+            feed_run_id = entry.run_id,
+            feed_id     = spec.feed_id,
+            acc_id      = acc_id,
+            raw_df      = b.raw_df,
+            ct          = b.ct,
+            F_src       = b.F_src,
+            result      = b.result,
+            conc_file   = conc_file,
+        )
+        d.plot(odir=os.path.join(entry.run_dir, "diag"))
+        d.summary()
+        _log.info("   written to: %s/", entry.run_dir)
+    _log.info("=" * 60)
+    _log.info("Done.")
+    return entry
 
 
 # ===========================================================================

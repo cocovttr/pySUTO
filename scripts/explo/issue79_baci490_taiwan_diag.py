@@ -42,6 +42,7 @@ sys.path.insert(0, "src")
 sys.path.insert(0, "scripts")
 sys.path.insert(0, "scripts/explo")
 import icsg_feed                                          # noqa: E402
+from pysuto.feedpipe import build_feed_concordance        # noqa: E402
 import issue65_icsg_stock_parse_diag as P65               # noqa: E402
 import issue69_aggregate_gap_diag as P69                  # noqa: E402
 import issue75_scandinavia_split_diag as P75              # noqa: E402
@@ -96,13 +97,11 @@ def feeds(E: dict, acc, base: str, new: str) -> None:
         froot = np.load(ROOT / "feed" / "registry" / baci / "result.npz")["F_root"]
         observed = baci_observed_regions(acc, froot)
         V = ICSG_IN / f"v{v_icsg}"
-        # icsg_feed's loaders read module paths that its main() normally sets
-        icsg_feed.RAW_DATA = str(V / "values.csv")
-        icsg_feed.CONC_FILE = str(V / "conc.xlsx")
         weights = pd.read_csv(TS_IN / f"v{v_ts}" / "params.csv")
         with contextlib.redirect_stdout(io.StringIO()):
-            raw, tables = icsg_feed.load_raw_data(), icsg_feed.load_concordance_tables()
-            ct = icsg_feed.build_concordance(raw, tables, acc, user_weights_df=weights)
+            raw = icsg_feed.SPEC.load_raw(str(V / "values.csv"))
+            tables = icsg_feed.SPEC.load_tables(str(V / "conc.xlsx"))
+            ct = build_feed_concordance(icsg_feed.SPEC, raw, tables, acc, weights)
         root = _icsg_raw(v_icsg).root
         und = raw.loc[ct.undistributed_raw_rows]
         tw = und[root.loc[und.index] == TAIWAN]

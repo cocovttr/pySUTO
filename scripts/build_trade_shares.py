@@ -79,6 +79,7 @@ import pandas as pd
 sys.path.insert(0, os.path.dirname(__file__))
 
 from pysuto.acc import AccountingStructure
+from pysuto.cases.copper import icsg_sector_key
 from pysuto.config import load_config
 from pysuto.input_registry import PARAMS_PARENTS, InputRegistries
 from pysuto.param_relation import conc_for, conc_nominal_lookup
@@ -348,24 +349,6 @@ def _decoded_edges(acc: AccountingStructure) -> pd.DataFrame:
     return ei
 
 
-def _icsg_sector_key(proc: str, typ: str, supply_use: str) -> str:
-    """Mirror of ``icsg_feed._make_sector_key`` for Use rows (process+material
-    disambiguation). Kept local so this script does not import the feed driver."""
-    if supply_use == "Supply":
-        return proc
-    if proc == "Smelting" and typ in ("Scrap", "Srap"):
-        return "Smelting_Scrap"
-    if proc == "Smelting":
-        return "Smelting_Concentrate"
-    if proc == "Refining" and typ == "Scrap":
-        return "Refining_Scrap"
-    if proc == "Refining":
-        # ADR 0021: the refining Use row is total refined production placed on
-        # the anode entering ER, not the matte entering CFR.
-        return "Refining_Anode"
-    return proc
-
-
 def icsg_raw_usage(sectors) -> pd.DataFrame:
     """Per-fan-group ICSG Use totals straight from the raw ICSG rows.
 
@@ -389,7 +372,7 @@ def icsg_raw_usage(sectors) -> pd.DataFrame:
             for _, r in smap_df[smap_df["supply_use"] == "Use"].iterrows()}
 
     u = raw[raw["Supply_Use"] == "Use"].copy()
-    key = [_icsg_sector_key(p, t, su) for p, t, su
+    key = [icsg_sector_key(p, t, su) for p, t, su
            in zip(u["Process"], u["Type"], u["Supply_Use"])]
     u["root_sector_from"] = [smap.get(k, (None, None))[0] for k in key]
     u["root_sector_to"]   = [smap.get(k, (None, None))[1] for k in key]
