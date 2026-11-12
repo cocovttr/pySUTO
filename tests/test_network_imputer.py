@@ -989,3 +989,97 @@ def test_flow_balance_never_refills_an_observed_zero(stock_acc, tmp_path):
     e_fu = stock_acc.eid("Cathode", "FU", "CC")
     f, method = _run2(_stock_imputer(tmp_path, stock_acc, ("MESC",)), stock_acc, seeds)
     assert f[e_fu] == 0.0 and e_fu not in method
+
+
+# =============================================================================
+# Relaxed-close tags and exposure (#150)
+# =============================================================================
+
+def _run_logged(imputer, acc, seeds):
+    """Like ``_run`` but also returns the imputer's log entries."""
+    f = np.full(acc.n_edges, np.nan)
+    sigma = np.full(acc.n_edges, np.nan)
+    for (fs, ts, v), val in seeds.items():
+        e = acc.eid(fs, ts, v)
+        f[e], sigma[e] = val, 0.01 * abs(val)
+    return f, sigma, run_imputer(imputer, f, sigma, 0, acc)
+
+
+def test_relaxed_close_is_tagged_with_its_assumed_absent_primary(imputer, acc):
+    # CER known, CSXEW underivable -> CP closes relaxed with CSXEW counted as 0.
+    f, _, entries = _run_logged(imputer, acc, {("CER", "CP", "CC"): 70.0})
+    absent = acc.eid("CSXEW", "CP", "CC")
+    by_edge = {e["edge_id"]: e for e in entries}
+    cp = by_edge[acc.eid("CP", "Cathode", "CC")]
+    assert cp["relaxed"] is True
+    assert cp["assumed_absent"] == [absent]
+    assert all(isinstance(i, int) for i in cp["assumed_absent"])
+    assert np.isnan(f[absent])
+    # a strict fill (Cathode -> Mass twin is not a recipe close) is never tagged
+    assert not any(e["relaxed"] for e in entries if e["edge_id"] not in
+                   {acc.eid("CP", "Cathode", "CC"), acc.eid("CP", "PSC", "CC")})
+
+
+def test_strict_close_is_not_tagged(imputer, acc):
+    _, _, entries = _run_logged(imputer, acc, {("CO", "Mining", "CC"): 100.0})
+    assert entries and not any(e["relaxed"] for e in entries)
+    assert all(e["assumed_absent"] == [] for e in entries)
+
+
+def test_pure_secondary_close_lists_the_absent_primary(imputer, acc):
+    _, _, entries = _run_logged(imputer, acc, {("Scrap", "Smelting", "CC"): 50.0})
+    matte = next(e for e in entries if e["edge_id"] == acc.eid("Smelting", "Matte", "CC"))
+    assert matte["relaxed"] is True
+    assert matte["assumed_absent"] == [acc.eid("Concentrate", "Smelting", "CC")]
+
+
+def test_tags_do_not_move_the_arrays(imputer, acc):
+    from pysuto.impute.base import _log
+    f, sigma, _ = _run_logged(imputer, acc, {("CER", "CP", "CC"): 70.0})
+    e = _log(3, 0, "m", [], [], 1.0, 0.1, "", None)
+    assert e["relaxed"] is False and e["assumed_absent"] == []
+    assert np.isfinite(f[acc.eid("CP", "Cathode", "CC")])
+
+
+def _log_with_later_fill(imputer, acc, fill_later: bool):
+    from pysuto.impute import ImputationLog, PriorLedger
+    f, sigma, entries = _run_logged(imputer, acc, {("CER", "CP", "CC"): 70.0})
+    log = ImputationLog()
+    log.extend([dict(e, imputer_id="network", **{"pass": 1}) for e in entries])
+    if fill_later:
+        ledger = PriorLedger(f, sigma)
+        ledger.open("conc", 1, np.ones(acc.n_edges, dtype=bool))
+        ledger.write(acc.eid("CSXEW", "CP", "CC"), 5.0, 1.0, 1, "conc_x", [], [])
+        log.extend(ledger.close())
+    return log.as_dataframe()
+
+
+def test_exposure_counts_a_close_whose_absent_primary_is_filled_later(imputer, acc):
+    from pysuto.diag.imp import relaxed_close_exposure, relaxed_close_exposure_summary
+    df = _log_with_later_fill(imputer, acc, fill_later=True)
+    assert df["assumed_absent"].map(type).eq(list).all()
+    val = acc.edge_index["valuation"].to_numpy()
+    exp = relaxed_close_exposure(df, val)
+    cp = acc.eid("CP", "Cathode", "CC")
+    assert set(exp["edge_id"]) == {cp, acc.eid("CP", "PSC", "CC")}   # product + waste leg
+    assert exp["later_edges"].iloc[0] == [acc.eid("CSXEW", "CP", "CC")]
+    s = relaxed_close_exposure_summary(df, val).set_index("valuation")
+    assert s.loc["CC", "n_exposed"] == 2
+    assert s.loc["CC", "kt_exposed"] == pytest.approx(70.0)
+
+
+def test_exposure_is_empty_when_the_absent_primary_stays_a_gap(imputer, acc):
+    from pysuto.diag.imp import relaxed_close_exposure
+    df = _log_with_later_fill(imputer, acc, fill_later=False)
+    assert (df["relaxed"]).any()
+    assert relaxed_close_exposure(df).empty
+
+
+def test_log_with_list_columns_round_trips_parquet(imputer, acc, tmp_path):
+    df = _log_with_later_fill(imputer, acc, fill_later=False)
+    path = tmp_path / "log.parquet"
+    df.to_parquet(path, index=False)
+    back = pd.read_parquet(path)
+    assert list(back.columns) == list(df.columns)
+    assert back["relaxed"].tolist() == df["relaxed"].tolist()
+    assert [list(a) for a in back["assumed_absent"]] == df["assumed_absent"].tolist()

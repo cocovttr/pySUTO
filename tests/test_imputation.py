@@ -203,7 +203,7 @@ class TestImputationLog:
             "edge_id","step","imputer_id","pass","method",
             "source_edges","coefficients",
             "f_before","f_after","sigma_before","sigma_after",
-            "description","param_id",
+            "description","param_id","relaxed","assumed_absent",
         }
 
     def test_for_edge_filters_correctly(self):

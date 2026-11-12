@@ -91,10 +91,14 @@ class PriorLedger:
     def write(
         self, e: int, val: float, sig: float, step: int, method: str,
         sources, coeffs, desc: str = "", param_id: str | None = None,
+        relaxed: bool = False, assumed_absent=(),
     ) -> bool:
         """
         Write one edge; True when written, False when the edge already held a value
         (checked first, as no-overwrite) or (non-strict) lay outside scope.
+
+        ``relaxed`` / ``assumed_absent`` tag a relaxed recipe close and the primary
+        edges it counted as 0 (provenance only; the arrays are unaffected).
         """
         if not np.isnan(self.f[e]):
             return False
@@ -104,7 +108,7 @@ class PriorLedger:
         self.f[e] = val
         self.sigma[e] = sig
         self._append(_log(int(e), step, method, sources, coeffs, val, sig, desc,
-                          param_id))
+                          param_id, relaxed, list(assumed_absent)))
         return True
 
     def write_many(
