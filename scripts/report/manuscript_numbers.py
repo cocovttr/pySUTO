@@ -77,7 +77,7 @@ from pysuto.acc import AccountingStructure              # noqa: E402
 from pysuto.constraints.naming import upgrade_legacy_row_meta  # noqa: E402
 from pysuto.diag.stats.sweep import influential, rank_statistic, top_axis  # noqa: E402
 from pysuto.diag.uncprop import UncPropDiag             # noqa: E402
-from pysuto.param_relation import expand_edge_index     # noqa: E402
+from pysuto.relation.param_relation import expand_edge_index     # noqa: E402
 
 # =============================================================================
 # USER CONFIGURATION

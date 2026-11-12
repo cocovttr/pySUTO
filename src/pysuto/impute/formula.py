@@ -20,11 +20,15 @@ import pandas as pd
 
 from pysuto.logging import get_logger
 from pysuto.lp import lp_combine
-from pysuto.param_relation import get_edge_cache
+from pysuto.relation.param_relation import get_edge_cache
+from pysuto.relation.params import read_params
 
 from .base import BaseImputer, _apply_cv_cap, _log
 
 logger = get_logger(__name__)
+
+# The param_types a ParamRef can name: the ratios a formula uses as coefficients.
+ACCEPTS = frozenset({"concentration", "efficiency", "stripping_ratio"})
 
 
 @dataclass
@@ -159,14 +163,8 @@ class FormulaImputer(BaseImputer):
         ]
 
     def _load_params_csv(self, path: str) -> None:
-        df = pd.read_csv(path, sep=None, engine="python", comment="#", dtype=str)
-        df = df.dropna(subset=["param_id"])
-        df = df[~df["param_id"].str.startswith("#")]
-        for _, row in df.iterrows():
-            try:
-                self._params[str(row["param_id"])] = float(row["value_nominal"])
-            except (ValueError, KeyError):
-                pass
+        for row in read_params(path, ACCEPTS):
+            self._params[row.param_id] = row.require_nominal()
 
     def _resolve_coeff(self, coeff: Union[float, ParamRef]) -> Optional[float]:
         if isinstance(coeff, ParamRef):

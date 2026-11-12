@@ -27,7 +27,7 @@ import numpy as np
 
 from pysuto.logging import get_logger
 from pysuto.lp import lp_combine
-from pysuto.param_relation import ParamRelationResolver, conc_twin_map, get_edge_cache
+from pysuto.relation.param_relation import ParamRelationResolver, conc_twin_map, get_edge_cache
 
 from .base import BaseImputer, _apply_cv_cap, _log
 

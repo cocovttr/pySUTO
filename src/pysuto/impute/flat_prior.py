@@ -14,7 +14,7 @@ from typing import Optional
 import numpy as np
 
 from pysuto.logging import get_logger
-from pysuto.param_relation import expand_edge_index
+from pysuto.relation.param_relation import expand_edge_index
 
 from .base import BaseImputer, _log
 

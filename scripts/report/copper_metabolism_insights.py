@@ -39,7 +39,7 @@ sys.path.insert(0, "scripts/report")
 from pysuto.acc import AccountingStructure                      # noqa: E402
 from pysuto.config import load_config                           # noqa: E402
 from pysuto.input_registry import InputRegistries               # noqa: E402
-from pysuto.param_relation import expand_edge_index             # noqa: E402
+from pysuto.relation.param_relation import expand_edge_index             # noqa: E402
 import india_concentrate_diag as D                              # noqa: E402
 import roundN_concentrate_grade_diag as N                       # noqa: E402
 import supervisor_figs_20260907 as SF                           # noqa: E402

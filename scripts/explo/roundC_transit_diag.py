@@ -47,7 +47,7 @@ sys.path.insert(0, str(ROOT / "scripts"))
 
 from pysuto.acc import AccountingStructure                    # noqa: E402
 from pysuto.config import load_config                         # noqa: E402
-from pysuto.param_relation import expand_edge_index           # noqa: E402
+from pysuto.relation.param_relation import expand_edge_index           # noqa: E402
 from build_trade_shares import (                              # noqa: E402
     TRADED_SECTORS, _conc_by_sector, build_edges_frame,
 )

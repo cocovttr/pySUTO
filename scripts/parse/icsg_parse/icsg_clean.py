@@ -8,7 +8,7 @@ import numpy as np
 import pandas as pd
 
 from pysuto.input_registry import InputRegistries
-from pysuto.param_relation import conc_for, conc_nominal_lookup
+from pysuto.relation.param_relation import conc_for, conc_nominal_lookup
 
 CLEAN_DIR = 'data/proc/feedprep/icsg_clean'
 FEED_VALUES = 'data/input/feed/icsg/current/values.csv'

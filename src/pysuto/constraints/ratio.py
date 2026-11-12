@@ -17,16 +17,12 @@ import pandas as pd
 import scipy.sparse as sp
 
 from pysuto.logging import get_logger
-from pysuto.param_relation import (
-    A_FIELDS,
-    B_FIELDS,
-    WILDCARD,
+from pysuto.relation.param_relation import (
     ParamRelationResolver,
     expand_edge_index,
-    float_or,
     get_edge_cache,
-    sigma_from_row,
 )
+from pysuto.relation.params import A_FIELDS, B_FIELDS, WILDCARD, read_params
 
 from .base import BaseConstraintBuilder, ConstraintBlock, _empty_block
 from .naming import TYPE_RATIO, _safe, build_constraint_id, empty_row_meta_dict, render_edge
@@ -35,7 +31,13 @@ from .sum  import SIGMA_C_INACTIVE, BOUND_C_INACTIVE
 _log = get_logger(__name__)
 
 
-_AGG_TRUE = {"true", "1", "yes", "y", "t"}
+# The param_types each builder reads. The stripping ratio gets no band: its equality row
+# WR = k·Ore already ties WR to Ore (ADR 0038), and [value_min, value_max] is the
+# uncertainty band of k, reported beside the flow, not a bound — so RatioBoundBuilder
+# does not accept it.
+ACCEPTS_EQ = frozenset({"concentration", "efficiency", "stripping_ratio", "stock_bound",
+                        "scrap_share"})
+ACCEPTS_BOUND = ACCEPTS_EQ - {"stripping_ratio"}
 
 # Net-stock bands are centred at 0 (value_nominal=0) with a symmetric ±p95 half-band
 # (value_max). Read that half-band as the ratio-space σ_r via p95 ≈ Z95·σ, treating
@@ -72,7 +74,7 @@ def _ratio_struct_cols(num: dict, denom: dict) -> dict:
 
 
 def _relative_sigma(sigma: float, r: float, param_id: str | None) -> float:
-    """σ in ratio units (``sigma_from_row``) → the relative σ_r = σ/|r| (#29).
+    """σ in ratio units (``ParamRow.sigma``) → the relative σ_r = σ/|r| (#29).
 
     At a prior that sits on the ratio the symmetric scale
     ``max(Σ|a₀,num|, |r|·Σ|a₀,denom|)`` is |r|·Σ|a₀,denom|, so only σ/|r| gives the
@@ -90,13 +92,8 @@ def _relative_sigma(sigma: float, r: float, param_id: str | None) -> float:
     return sigma / abs(r)
 
 
-def _is_agg(row) -> bool:
-    """True if the row's `agg` cell evaluates to a true-ish value."""
-    return str(row.get("agg", "")).strip().lower() in _AGG_TRUE
-
-
 def _match_side_edges(row, prefix: str, acc_struct) -> np.ndarray:
-    """Return edge_ids matching the ``{a_|b_}``-prefixed selectors on `row`.
+    """Return edge_ids matching the ``{a_|b_}``-prefixed selectors on `row` (a ParamRow).
 
     Wildcards / "same" are treated as 'match any value' — `agg` rows do not
     pair sides per-edge, so the cross-side "same" constraint has no meaning
@@ -107,7 +104,7 @@ def _match_side_edges(row, prefix: str, acc_struct) -> np.ndarray:
     fields = A_FIELDS if prefix == "a" else B_FIELDS
     mask = np.ones(len(ei_exp), dtype=bool)
     for col_key, ei_col, _ in fields:
-        val = str(row.get(col_key, "*")).strip()
+        val = row.selectors[col_key]
         if val in WILDCARD or val == "same":
             continue
         mask &= (ei_exp[ei_col].astype(str).to_numpy() == val)
@@ -202,8 +199,8 @@ class RatioConstraintBuilder(BaseConstraintBuilder):
         """
         Load from params CSV (same schema as ParametricImputer.from_csv).
         Resolves A→B edge pairs and computes the relative σ_r = σ/|r| from unc_type
-        (σ in ratio units, as ``sigma_from_row`` returns it). Raises ``ValueError``
-        on a zero ratio with σ > 0.
+        (σ in ratio units, as ``ParamRow.sigma`` returns it). Raises ``ValueError``
+        on a zero ratio with σ > 0, and on a soft row with no σ rule (``unc_type`` empty).
 
         ``mask`` (optional): name of a mask in ``acc_struct.masks``. Pairs
         where either edge falls outside the mask are dropped.
@@ -213,7 +210,6 @@ class RatioConstraintBuilder(BaseConstraintBuilder):
         a feed reports its stock leg (the numerator, b side) it would pull that report
         toward zero: no row is emitted there (#98, ADR 0040 am.).
         """
-        df = pd.read_csv(path, sep=None, engine="python", dtype=str).fillna("*")
         resolver = ParamRelationResolver(acc_struct)
         ei_idx = expand_edge_index(acc_struct.edge_index, acc_struct.node_index).set_index("edge_id")
 
@@ -228,28 +224,24 @@ class RatioConstraintBuilder(BaseConstraintBuilder):
             scope = None
 
         pairs = []
-        for _, row in df.iterrows():
-            nominal = float_or(row.get("value_nominal", "nan"), np.nan)
+        for row in read_params(path, ACCEPTS_EQ):
+            nominal = row.value_nominal
             if np.isnan(nominal):
                 continue
-            param_id = str(row.get("param_id", "")).strip() or None
+            param_id = row.param_id or None
             # Net-stock bands (param_type=="stock_bound", nominal r=0, centred at 0):
             # read the symmetric ±p95 half-band (value_max) as the ratio-space σ_r and
             # tag scale_mode="denominator" so build_dynamic scales σ_c off the THROUGHPUT
             # denominator (|r|·den = 0 here would otherwise collapse it to the abs floor
             # → quasi-hard). All other ratios keep the CSV unc modes + symmetric scale.
-            is_stock = str(row.get("param_type", "")).strip() == "stock_bound"
+            is_stock = row.param_type == "stock_bound"
             if is_stock:
-                vmax = float_or(row.get("value_max", "nan"), np.nan)
+                vmax = row.value_max
                 sigma = abs(vmax) / Z95_STOCK if not np.isnan(vmax) else 0.0
                 scale_mode = "denominator"
             else:
-                try:
-                    sigma = sigma_from_row(row, nominal)
-                except Exception:
-                    sigma = 0.0
-                if not hard:            # a hard row carries σ_c = 0 whatever σ is
-                    sigma = _relative_sigma(sigma, nominal, param_id)
+                # a hard row carries σ_c = 0 whatever σ is; a soft row needs a σ rule
+                sigma = 0.0 if hard else _relative_sigma(row.sigma(), nominal, param_id)
                 scale_mode = "symmetric"
             # a zero-centred net-stock row has no place on a reported stock leg (#98)
             skip_reported = is_stock and covered is not None
@@ -261,7 +253,7 @@ class RatioConstraintBuilder(BaseConstraintBuilder):
             # agg rows pool every matched a-side edge against every matched
             # b-side edge per (region_to, time, valuation) bucket → one soft row
             #   Σ b − r·Σ a = ε   (pooled denominator; set-scoped).
-            if _is_agg(row):
+            if row.agg:
                 buckets, asz, bsz = _agg_buckets(row, acc_struct, scope)
                 if not buckets:
                     _log.warning(
@@ -459,7 +451,8 @@ class RatioBoundBuilder(BaseConstraintBuilder):
     """
     Hard non-negative-cone ratio bound constraints from the same params CSV.
 
-    For each row with finite bound_lower / bound_upper:
+    For each row with a finite value_min / value_max (the ratio band; bound_lower and
+    bound_upper are read by nobody):
       Upper: a_i − r_u · a_j ≤ 0  →  G row: +1 at edge_i, −r_u at edge_j
       Lower: −a_i + r_l · a_j ≤ 0 →  G row: −1 at edge_i, +r_l at edge_j
     """
@@ -476,7 +469,6 @@ class RatioBoundBuilder(BaseConstraintBuilder):
         mask: str | None = None,
         kind: str = "unknown",
     ) -> "RatioBoundBuilder":
-        df = pd.read_csv(path, sep=None, engine="python", dtype=str).fillna("*")
         resolver = ParamRelationResolver(acc_struct)
 
         if mask is not None:
@@ -495,29 +487,24 @@ class RatioBoundBuilder(BaseConstraintBuilder):
         # structural lower bound < 0 ⇔ a signed edge (acc bounds; ADR 0039)
         signed           = np.asarray(acc_struct.bounds.l, dtype=float) < 0.0
         n_signed_skipped = 0
-        for _, row in df.iterrows():
-            # Stripping ratio gets no band: its equality row WR = k·Ore already ties WR to
-            # Ore (ADR 0038), and [value_min, value_max] is the uncertainty band of k,
-            # reported beside the flow, not a bound. Skip it.
-            if str(row.get("param_type", "")).strip() == "stripping_ratio":
-                continue
-            nominal = float_or(row.get("value_nominal", "nan"), np.nan)
-            bl      = float_or(row.get("value_min", "nan"), np.nan)
-            bu      = float_or(row.get("value_max", "nan"), np.nan)
+        for row in read_params(path, ACCEPTS_BOUND):
+            nominal = row.value_nominal
+            bl      = row.value_min
+            bu      = row.value_max
             if np.isnan(bl) and np.isnan(bu):
                 continue
             if not np.isnan(bl) and not np.isnan(bu) and bl > bu:
                 raise ValueError(
-                    f"RatioBoundBuilder: param {row.get('param_id', '?')!r} has "
+                    f"RatioBoundBuilder: param {row.param_id!r} has "
                     f"value_min={bl} > value_max={bu} — empty ratio band."
                 )
 
             # A user param_id, if present, becomes the grammar `variant` slot
             # (underscore-free); otherwise the bound variant is "bound".
-            param_id = str(row.get("param_id", "")).strip() or None
+            param_id = row.param_id or None
             variant  = _safe(param_id, field="param_id") if param_id else "bound"
 
-            if _is_agg(row):
+            if row.agg:
                 buckets, asz, bsz = _agg_buckets(row, acc_struct, scope)
                 if asz == 0 or bsz == 0:
                     _log.warning(

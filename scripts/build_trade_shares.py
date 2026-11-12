@@ -82,7 +82,7 @@ from pysuto.acc import AccountingStructure
 from pysuto.cases.copper import icsg_sector_key
 from pysuto.config import load_config
 from pysuto.input_registry import PARAMS_PARENTS, InputRegistries
-from pysuto.param_relation import conc_for, conc_nominal_lookup
+from pysuto.relation.param_relation import conc_for, conc_nominal_lookup
 
 # ---------------------------------------------------------------------------
 # USER CONFIGURATION

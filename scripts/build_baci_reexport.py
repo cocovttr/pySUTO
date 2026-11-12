@@ -108,7 +108,7 @@ import numpy as np
 import pandas as pd
 
 from pysuto.input_registry import InputRegistries
-from pysuto.param_relation import conc_for
+from pysuto.relation.param_relation import conc_for
 
 sys.path.insert(0, os.path.dirname(__file__))
 

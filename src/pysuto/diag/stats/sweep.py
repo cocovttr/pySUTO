@@ -44,7 +44,7 @@ import pandas as pd
 from scipy.stats import rankdata, spearmanr
 
 from pysuto.acc import AccountingStructure
-from pysuto.param_relation import expand_edge_index
+from pysuto.relation.param_relation import expand_edge_index
 from pysuto.registry import OptimRunRegistry, SweepRunRegistry
 from pysuto.solver import ClarabelSolver
 

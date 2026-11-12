@@ -15,7 +15,8 @@ import scipy.sparse as sp
 
 from pysuto.acc import BALANCE_ENTITIES
 from pysuto.logging import get_logger
-from pysuto.param_relation import WILDCARD, ParamRelationResolver, expand_edge_index
+from pysuto.relation.param_relation import ParamRelationResolver, expand_edge_index
+from pysuto.relation.params import SELECTOR_KEYS, WILDCARD, ParamRow
 
 from .base import BaseConstraintBuilder, ConstraintBlock, _empty_block
 from .naming import TYPE_SUM, _safe, build_constraint_id, empty_row_meta_dict
@@ -362,9 +363,10 @@ class SumConstraintBuilder(BaseConstraintBuilder):
 
             for _, row in grp.iterrows():
                 # Build a pseudo-row with "a_*" keys for the resolver.
-                a_row = pd.Series({
-                    dst: str(row.get(src, "*")).strip()
-                    for src, dst in _col_map.items()
+                a_row = ParamRow(selectors={
+                    **dict.fromkeys(SELECTOR_KEYS, "*"),
+                    **{dst: str(row.get(src, "*")).strip()
+                       for src, dst in _col_map.items()},
                 })
                 coeff = float(row["coefficient"])
 

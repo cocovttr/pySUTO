@@ -3,26 +3,23 @@ param_relation.py
 =================
 CSV-driven A→B parametric edge-relation resolver.
 
-Owns the params-template CSV column schema (A/B selector fields,
-wildcards, "same" directive), the edge-index expansion + cache, the
-A/B enumeration, and the σ-from-row recipe.
+Owns the edge-index expansion + cache and the A/B enumeration. The params-template
+column schema (A/B selector fields, wildcards, "same" directive) and the typed rows
+live in :mod:`pysuto.relation.params`.
 
 Consumed as a shared seam by Stage 2 (`ParametricImputer.from_csv`)
 and Stage 3 (`RatioConstraintBuilder.from_csv`,
-`RatioBoundBuilder.from_csv`). Each adapter iterates a CSV and calls
-`ParamRelationResolver.resolve_row(row)`; the resolver yields a
-`ResolvedRelation` per matched `(a_edge_id, b_edge_id)` pair without
+`RatioBoundBuilder.from_csv`). Each adapter reads its rows with
+`read_params` and calls `ParamRelationResolver.resolve_row(row)`; the resolver
+yields a `ResolvedRelation` per matched `(a_edge_id, b_edge_id)` pair without
 deriving σ, deduping, or applying any skip policy. Adapters apply
 their own row-projection and policy.
 
 Public API
 ----------
-WILDCARD, A_FIELDS, B_FIELDS, A_PRODUCT_THRESHOLD     Schema constants
+A_PRODUCT_THRESHOLD                                   Enumeration-strategy switch
 expand_edge_index(edge_index, node_index)             Decode sector/entity/region
 get_edge_cache(acc_struct)                            Per-acc_struct edge cache
-sigma_from_row(row, nominal)                          σ via unc_type ∈ {sd, min_max, pedigree}
-float_or(val, default)                                Lenient float parse
-specificity(row)                                      Count non-wildcard A-fields
 conc_nominal_lookup(*paths, gross)                    (sector, region) → conc nominal
 conc_sectors(lookup)                                  Sectors a lookup covers
 conc_for(lookup, sectors, regions)                    Vectorised lookup, region-wildcard fallback
@@ -39,47 +36,17 @@ from typing import Iterator
 import numpy as np
 import pandas as pd
 
-from .logging import get_logger
-from .unc import PedigreeScores
+from pysuto.logging import get_logger
+
+from .params import A_FIELDS, B_FIELDS, WILDCARD, ParamRow, read_params
 
 logger = get_logger(__name__)
 
-
-# ---------------------------------------------------------------------------
-# Column schema
-# ---------------------------------------------------------------------------
-
-WILDCARD = {"*", "nan", "None", ""}
-
-# A-selector field → (ei_exp column, counterpart column for "same" constraint)
-A_FIELDS = [
-    ("a_sector_from", "sector_from", "sector_to"),
-    ("a_entity_from", "entity_from", "entity_to"),
-    ("a_region_from", "region_from", "region_to"),
-    ("a_sector_to",   "sector_to",   "sector_from"),
-    ("a_entity_to",   "entity_to",   "entity_from"),
-    ("a_region_to",   "region_to",   "region_from"),
-    ("a_time",        "time",        None),
-    ("a_valuation",   "valuation",   None),
-]
-
-# B-selector field → (ei_exp column, corresponding A-edge column for "same")
-B_FIELDS = [
-    ("b_sector_from", "sector_from", "sector_from"),
-    ("b_entity_from", "entity_from", "entity_from"),
-    ("b_region_from", "region_from", "region_from"),
-    ("b_sector_to",   "sector_to",   "sector_to"),
-    ("b_entity_to",   "entity_to",   "entity_to"),
-    ("b_region_to",   "region_to",   "region_to"),
-    ("b_time",        "time",        "time"),
-    ("b_valuation",   "valuation",   "valuation"),
-]
 
 # Above which estimated A-product size to switch from enumerate-with-dict-lookup
 # to a numpy bitwise-mask strategy (faster for very wildcard-heavy selectors).
 A_PRODUCT_THRESHOLD = 100_000
 
-_A_SPEC_KEYS = [k for k, _, _ in A_FIELDS]
 _A_EI_POS    = {ec: i for i, (_, ec, _) in enumerate(A_FIELDS)}
 
 _MASK_COLS = [ec for _, ec, _ in A_FIELDS]  # same 8 columns as A's ei_exp side
@@ -89,51 +56,8 @@ _MASK_COLS = [ec for _, ec, _ in A_FIELDS]  # same 8 columns as A's ei_exp side
 # Schema-level helpers (public)
 # ---------------------------------------------------------------------------
 
-def float_or(val, default: float) -> float:
-    """Lenient float parse: returns `default` for blank / 'nan' / 'None' / wildcard / non-numeric."""
-    s = str(val).strip()
-    if not s or s in WILDCARD:
-        return default
-    try:
-        return float(s)
-    except ValueError:
-        return default
-
-
-def sigma_from_row(row: pd.Series, nominal: float) -> float:
-    """
-    Derive σ from a params-CSV row according to its `unc_type` column.
-
-    Modes:
-      "sd"       — σ = value_sd
-      "min_max"  — σ = (value_max − value_min) / 4
-      "pedigree" — σ = nominal · PedigreeScores(...).total_cv()  (Laner et al. 2016)
-
-    σ is in the units of `value_nominal`: ratio units for a ratio.
-    """
-    unc = str(row.get("unc_type", "")).strip()
-    if unc == "sd":
-        return float(row["value_sd"])
-    if unc == "min_max":
-        return (float(row["value_max"]) - float(row["value_min"])) / 4.0
-    if unc == "pedigree":
-        ps = PedigreeScores(
-            reliability              = int(row["pedigree_reliability"]),
-            completeness             = int(row["pedigree_completeness"]),
-            temporal_correlation     = int(row["pedigree_temporal_correlation"]),
-            geographical_correlation = int(row["pedigree_geographical_correlation"]),
-            other_correlation        = int(row["pedigree_other_correlation"]),
-        )
-        return ps.total_cv() * nominal
-    raise ValueError(f"Unknown unc_type: {unc!r}")
-
-
-def specificity(row: pd.Series) -> int:
-    """Count A-selector fields that are not wildcards (higher = more specific)."""
-    return sum(
-        str(row.get(k, "*")).strip() not in WILDCARD
-        for k in _A_SPEC_KEYS
-    )
+# The param_type of a concentration (content / gross mass) file: conc and ore_grade.
+CONC_ACCEPTS = frozenset({"concentration"})
 
 
 def conc_nominal_lookup(*paths, gross: str) -> dict:
@@ -160,16 +84,14 @@ def conc_nominal_lookup(*paths, gross: str) -> dict:
     for path in paths:
         if path is None:
             continue
-        p = pd.read_csv(path, sep=None, engine="python", comment="#", dtype=str)
-        p = p[p["param_type"] == "concentration"]
-        for _, row in p.iterrows():
-            sector = str(row.get("a_sector_from", "*")).strip()
-            if sector in WILDCARD or str(row.get("a_valuation", "")).strip() != gross:
+        for row in read_params(path, CONC_ACCEPTS):
+            sector = row.selectors["a_sector_from"]
+            if sector in WILDCARD or row.selectors["a_valuation"] != gross:
                 continue
-            region = str(row.get("a_region_from", "*")).strip()
+            region = row.selectors["a_region_from"]
             if region in WILDCARD:
                 region = "*"
-            out[(sector, region)] = float(row["value_nominal"])
+            out[(sector, region)] = row.require_nominal()
     return out
 
 
@@ -207,18 +129,10 @@ def conc_twin_map(path, resolver, into: dict | None = None) -> dict:
     (used to overlay ore_grade onto conc); omit it for a fresh map. Returns the map.
     """
     into = {} if into is None else into
-    df = pd.read_csv(path, sep=None, engine="python", comment="#", dtype=str)
-    df = df.dropna(subset=["param_id"])
-    df = df[~df["param_id"].str.startswith("#")]
     best: dict[int, tuple] = {}  # cc_edge -> (mass_edge, conc, σ, specificity)
-    for _, row in df.iterrows():
-        try:
-            nominal = float(row["value_nominal"])
-            sig = sigma_from_row(row, nominal)
-        except Exception as exc:  # noqa: BLE001
-            logger.warning("conc_twin_map %s: row %s skipped (%s)",
-                           path, row.get("param_id"), exc)
-            continue
+    for row in read_params(path, CONC_ACCEPTS):
+        nominal = row.require_nominal()
+        sig = row.sigma()
         for rr in resolver.resolve_row(row):
             cc = rr.b_edge_id
             if cc not in best or rr.specificity > best[cc][3]:
@@ -312,7 +226,7 @@ def get_edge_cache(acc_struct) -> tuple:
 # A/B enumeration
 # ---------------------------------------------------------------------------
 
-def _enumerate_a_edges(row: pd.Series, field_vals: dict):
+def _enumerate_a_edges(row: ParamRow, field_vals: dict):
     """
     Yield all 8-tuples that match the A-selector of a CSV row.
     Fixed fields → single value; wildcard → all unique values; same → copy counterpart.
@@ -321,7 +235,7 @@ def _enumerate_a_edges(row: pd.Series, field_vals: dict):
     dims: list = []
     same_to: dict = {}
     for i, (col_key, ei_col, counterpart) in enumerate(A_FIELDS):
-        v = str(row.get(col_key, "*")).strip()
+        v = row.selectors[col_key]
         if v in WILDCARD:
             dims.append(field_vals[ei_col])
         elif v == "same" and counterpart is not None:
@@ -342,14 +256,14 @@ def _enumerate_a_edges(row: pd.Series, field_vals: dict):
             yield tuple(t)
 
 
-def _resolve_b_ids(row: pd.Series, a_tuple: tuple, edge_lookup: dict, field_vals: dict) -> list:
+def _resolve_b_ids(row: ParamRow, a_tuple: tuple, edge_lookup: dict, field_vals: dict) -> list:
     """
     Enumerate all B-tuples matching the B-selector given a resolved A-edge tuple,
     and return the corresponding edge_ids via O(1) dict lookup.
     """
     dims: list = []
     for col_key, ei_col, a_col in B_FIELDS:
-        v = str(row.get(col_key, "*")).strip()
+        v = row.selectors[col_key]
         if v in WILDCARD:
             dims.append(field_vals[ei_col])
         elif v == "same":
@@ -377,13 +291,13 @@ class ResolvedRelation:
     b_edge_id    Edge id matched by the row's B-selector under that A.
     specificity  Count of non-wildcard A-fields on the originating row.
                  Constant across all yields from a single row.
-    row          The originating pd.Series. Adapters project to their own
+    row          The originating ParamRow. Adapters project to their own
                  record format from here.
     """
     a_edge_id:   int
     b_edge_id:   int
     specificity: int
-    row:         pd.Series
+    row:         ParamRow
 
 
 class ParamRelationResolver:
@@ -403,7 +317,7 @@ class ParamRelationResolver:
     def __init__(self, acc_struct) -> None:
         self._cache = get_edge_cache(acc_struct)
 
-    def _match_a(self, row: pd.Series) -> list:
+    def _match_a(self, row: ParamRow) -> list:
         """Return [(a_edge_id, a_tuple), …] for the row's A-selector."""
         ei_exp, edge_lookup, id_to_tuple, field_vals, mask_cache, edge_ids_arr = self._cache
         n = len(ei_exp)
@@ -411,7 +325,7 @@ class ParamRelationResolver:
         # Estimate product size to choose enumeration strategy.
         prod_size = 1
         for col_key, ei_col, _ in A_FIELDS:
-            v = str(row.get(col_key, "*")).strip()
+            v = row.selectors[col_key]
             if v in WILDCARD or v == "same":
                 prod_size *= len(field_vals[ei_col])
                 if prod_size > A_PRODUCT_THRESHOLD:
@@ -426,7 +340,7 @@ class ParamRelationResolver:
 
         a_mask_np = np.ones(n, dtype=bool)
         for col_key, ei_col, counterpart in A_FIELDS:
-            val = str(row.get(col_key, "*")).strip()
+            val = row.selectors[col_key]
             if val in WILDCARD:
                 continue
             if val == "same" and counterpart is not None:
@@ -442,7 +356,7 @@ class ParamRelationResolver:
             for aid in edge_ids_arr[a_mask_np]
         ]
 
-    def match_a_edges(self, row: pd.Series) -> list[int]:
+    def match_a_edges(self, row: ParamRow) -> list[int]:
         """
         Return the list of A edge_ids matching this row's A-selector.
 
@@ -451,10 +365,10 @@ class ParamRelationResolver:
         """
         return [aid for aid, _ in self._match_a(row)]
 
-    def resolve_row(self, row: pd.Series) -> Iterator[ResolvedRelation]:
+    def resolve_row(self, row: ParamRow) -> Iterator[ResolvedRelation]:
         edge_lookup = self._cache[1]
         field_vals  = self._cache[3]
-        spec = specificity(row)
+        spec = row.specificity
         for a_id, a_tuple in self._match_a(row):
             for b_id in _resolve_b_ids(row, a_tuple, edge_lookup, field_vals):
                 yield ResolvedRelation(

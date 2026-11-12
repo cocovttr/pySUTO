@@ -53,7 +53,8 @@ from pysuto.impute import (
 )
 from pysuto.feedpipe import FeedSpec, check_file
 from pysuto.flow_node_balance import K_CLOSE as UNCLOSED_K, contradicted_flow_nodes
-from pysuto.param_relation import expand_edge_index
+from pysuto.relation.param_relation import CONC_ACCEPTS, expand_edge_index
+from pysuto.relation.params import read_params
 from pysuto.unc import PedigreeScores
 from pysuto.logging import get_logger
 
@@ -757,10 +758,10 @@ def nodata_anchor_exempt(ctx) -> tuple:
     # ore-grade row (the copper case's "a relation sets this magnitude").
     anchor_exempt, n_grade_ry = None, 0
     if spec.NODATA_ANCHOR_DATA_AWARE:
-        _og = pd.read_csv(inputs.params.resolve("ore_grade") / "params.csv",
-                          sep=None, engine="python", dtype=str)
-        _co = _og[_og["param_id"].str.startswith("oregradecosupply")]
-        _grade_ry = set(zip(_co["a_region_from"], _co["a_time"].astype(str)))
+        _og = read_params(inputs.params.resolve("ore_grade") / "params.csv",
+                          CONC_ACCEPTS)
+        _grade_ry = {(r.selectors["a_region_from"], r.selectors["a_time"])
+                     for r in _og if r.param_id.startswith("oregradecosupply")}
         n_grade_ry = len(_grade_ry)
         anchor_exempt = nodata_exempt_mask(acc, spec.NODATA_ANCHOR_EXCLUDE,
                                            spec.NODATA_ANCHOR_DATA_AWARE, _grade_ry)

@@ -21,39 +21,24 @@ import pandas as pd
 
 from pysuto.logging import get_logger
 from pysuto.lp import lp_combine
-from pysuto.param_relation import (
-    ParamRelationResolver,
-    expand_edge_index,
-    float_or,
-    sigma_from_row,
-)
+from pysuto.relation.param_relation import ParamRelationResolver, expand_edge_index
+from pysuto.relation.params import read_params
 
 from .base import BaseImputer, _apply_cv_cap, _log
 
 logger = get_logger(__name__)
 
 
-_AGG_TRUE = {"true", "1", "yes", "y", "t"}
-
-
-def _parametric_consumes(row) -> bool:
-    """True if ParametricImputer should build per-pair fills from this params row.
-
-    The ``agg`` flag is the **relation-type marker** that partitions the shared
-    params CSV between consumers (the single place this is decided): an
-    ``agg=true`` row is a *pooled, set-scoped recipe relation* (wildcarded a-side,
-    ``Σb = r·Σa`` per bucket) owned by ``NetworkImputer`` (Stage 2 prior) and the
-    agg ratio-constraint builder (Stage 3); a non-agg row is a *per-pair relation*
-    consumed here and by the per-pair ratio builder. ParametricImputer therefore
-    skips agg rows (and the ``stripping_ratio`` family) — resolving a pooled
-    wildcard row per-pair would, e.g., backfill a spurious ``Scrap = Matte / eff``
-    from a broadened ``a_sector_from=*`` eff row. The eff/conc per-pair rows still flow.
-    """
-    if str(row.get("agg", "")).strip().lower() in _AGG_TRUE:
-        return False
-    if str(row.get("param_type", "")).strip() == "stripping_ratio":
-        return False
-    return True
+# The param_types this imputer reads. The ``agg`` flag is the **relation-type marker**
+# that partitions the rest of the shared params CSV between consumers: an ``agg=true``
+# row is a *pooled, set-scoped recipe relation* (wildcarded a-side, ``Σb = r·Σa`` per
+# bucket) owned by ``NetworkImputer`` (Stage 2 prior) and the agg ratio-constraint
+# builder (Stage 3); a non-agg row is a *per-pair relation* consumed here and by the
+# per-pair ratio builder. Resolving a pooled wildcard row per-pair would, e.g.,
+# backfill a spurious ``Scrap = Matte / eff`` from a broadened ``a_sector_from=*`` eff
+# row, so ``from_csv`` skips agg rows. The ``stripping_ratio`` family is outside
+# ACCEPTS; the eff/conc per-pair rows still flow.
+ACCEPTS = frozenset({"concentration", "efficiency"})
 
 
 def _reg_sensitivity(coeff: float, q: float, alpha_min: float) -> float:
@@ -141,9 +126,6 @@ class ParametricImputer(BaseImputer):
         self.id          = id or type(self).__name__
         self._relations  = relations or []
         # Each tuple: (a_id, b_id, coeff, sigma_param, epsilon, param_id, desc)
-        # Note: per-row `bound_lower / bound_upper` from the CSV are *ratio bounds*
-        # (consumed by RatioBoundBuilder in constraints.py); they are NOT absolute
-        # caps on the filled target flow and are deliberately not read here.
         self._csv_pairs  = _csv_pairs or []
         self._source_path: Optional[str] = _source_path
         self._ei_exp:    Optional[pd.DataFrame] = None  # lazy cache for lambda relations
@@ -183,12 +165,8 @@ class ParametricImputer(BaseImputer):
         Load a params-template CSV (semicolon-delimited) and precompute
         (edge_a_id, edge_b_id) pairs for bidirectional imputation.
 
-        Comment lines (starting with #) and rows with blank param_id are skipped.
+        Rows outside :data:`ACCEPTS` and pooled (``agg=true``) rows are skipped.
         """
-        df = pd.read_csv(path, sep=None, engine="python", comment="#", dtype=str)
-        df = df.dropna(subset=["param_id"])
-        df = df[~df["param_id"].str.startswith("#")]
-
         resolver = ParamRelationResolver(acc_struct)
 
         # dict[(a_id, b_id)] → (pair_tuple, specificity)
@@ -197,20 +175,14 @@ class ParametricImputer(BaseImputer):
         # a deliberately narrow one.
         best: dict[tuple, tuple] = {}
 
-        for _, row in df.iterrows():
-            if not _parametric_consumes(row):
+        for row in read_params(path, ACCEPTS):
+            if row.agg:
                 continue
-            nominal = float(row["value_nominal"])
-            try:
-                sigma_p = sigma_from_row(row, nominal)
-            except Exception as exc:
-                logger.warning("param_id=%s: sigma error (%s) — skipped", row["param_id"], exc)
-                continue
-            epsilon  = float_or(row.get("epsilon"), 0.0)
-            # bound_lower / bound_upper are *ratio* bounds — consumed by
-            # RatioBoundBuilder for constraint building, not by this imputer.
-            param_id = str(row["param_id"])
-            desc     = str(row.get("description", ""))
+            nominal  = row.require_nominal()
+            sigma_p  = row.sigma()
+            epsilon  = row.epsilon
+            param_id = row.param_id
+            desc     = row.description
             n_pairs  = 0
 
             for rr in resolver.resolve_row(row):

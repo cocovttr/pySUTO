@@ -31,7 +31,7 @@ import issue69_aggregate_gap_diag as P69                  # noqa: E402
 import issue75_scandinavia_split_diag as P75              # noqa: E402
 from pysuto.acc import AccountingStructure                # noqa: E402
 from pysuto.config import load_config                     # noqa: E402
-from pysuto.param_relation import expand_edge_index       # noqa: E402
+from pysuto.relation.param_relation import expand_edge_index       # noqa: E402
 
 Z_BIG   = 5.0
 REGIONS = ["Austria", "Kazakhstan", "Russia"]

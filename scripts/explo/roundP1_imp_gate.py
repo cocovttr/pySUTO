@@ -20,7 +20,7 @@ def main(old: str, new: str) -> int:
     sys.path.insert(0, "src")
     from pysuto.acc import AccountingStructure
     from pysuto.config import load_config
-    from pysuto.param_relation import expand_edge_index
+    from pysuto.relation.param_relation import expand_edge_index
 
     a = np.nan_to_num(np.asarray(
         np.load(ROOT / "imp" / old / "agg_result.npz", allow_pickle=True)["f_agg"], float))

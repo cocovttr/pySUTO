@@ -1,7 +1,7 @@
 """
 test_param_relation.py
 ======================
-Unit tests for pysuto.param_relation — CSV-driven A→B parametric edge
+Unit tests for pysuto.relation.param_relation — CSV-driven A→B parametric edge
 relation resolver, shared by Stage-2 ParametricImputer and Stage-3
 RatioConstraintBuilder / RatioBoundBuilder.
 """
@@ -11,20 +11,14 @@ import numpy as np
 import pandas as pd
 import pytest
 
-import pysuto.param_relation as pr
-from pysuto.param_relation import (
-    A_FIELDS,
-    A_PRODUCT_THRESHOLD,
-    B_FIELDS,
-    WILDCARD,
+import pysuto.relation.param_relation as pr
+from pysuto.relation.param_relation import (
     ParamRelationResolver,
     ResolvedRelation,
     expand_edge_index,
-    float_or,
     get_edge_cache,
-    sigma_from_row,
-    specificity,
 )
+from pysuto.relation.params import SELECTOR_KEYS, ParamRow
 
 
 # =============================================================================
@@ -78,66 +72,13 @@ def acc():
     return MockAcc()
 
 
-def _row(**kwargs) -> pd.Series:
-    """Build a CSV-shaped row with wildcards on every unspecified selector."""
-    base: dict = {}
-    for col_key, _, _ in A_FIELDS:
-        base[col_key] = "*"
-    for col_key, _, _ in B_FIELDS:
-        base[col_key] = "*"
-    base.update(kwargs)
-    return pd.Series(base)
-
-
-# =============================================================================
-# sigma_from_row — moved from tests/test_imputation.py::TestSigmaFromRow
-# =============================================================================
-
-class TestSigmaFromRow:
-
-    def test_sd(self):
-        row = {"unc_type": "sd", "value_sd": "0.5"}
-        assert sigma_from_row(pd.Series(row), 1.0) == pytest.approx(0.5)
-
-    def test_min_max(self):
-        row = {"unc_type": "min_max", "value_min": "0.2", "value_max": "0.6"}
-        # (0.6 − 0.2) / 4 = 0.1
-        assert sigma_from_row(pd.Series(row), 0.4) == pytest.approx(0.1)
-
-    def test_pedigree_positive(self):
-        row = {
-            "unc_type": "pedigree",
-            "pedigree_reliability": "2",
-            "pedigree_completeness": "2",
-            "pedigree_temporal_correlation": "1",
-            "pedigree_geographical_correlation": "1",
-            "pedigree_other_correlation": "2",
-        }
-        sigma = sigma_from_row(pd.Series(row), 1.0)
-        assert sigma > 0
-
-    def test_unknown_unc_type_raises(self):
-        with pytest.raises(ValueError):
-            sigma_from_row(pd.Series({"unc_type": "unknown"}), 1.0)
-
-
-# =============================================================================
-# float_or — lenient float parse
-# =============================================================================
-
-class TestFloatOr:
-
-    def test_returns_float_for_numeric(self):
-        assert float_or("1.5", default=0.0) == 1.5
-
-    def test_returns_default_for_blank(self):
-        assert float_or("", default=0.0) == 0.0
-
-    def test_returns_default_for_nan_string(self):
-        assert np.isnan(float_or("nan", default=np.nan))
-
-    def test_returns_default_for_none_string(self):
-        assert float_or("None", default=42.0) == 42.0
+def _row(**kwargs) -> ParamRow:
+    """Build a ParamRow with wildcards on every unspecified selector; keywords that are
+    not selectors set the row's other fields."""
+    selectors = dict.fromkeys(SELECTOR_KEYS, "*")
+    selectors.update({k: v for k, v in kwargs.items() if k in SELECTOR_KEYS})
+    rest = {k: v for k, v in kwargs.items() if k not in SELECTOR_KEYS}
+    return ParamRow(selectors=selectors, **rest)
 
 
 # =============================================================================
@@ -147,10 +88,13 @@ class TestFloatOr:
 class TestSpecificity:
 
     def test_all_wildcards_is_zero(self):
-        assert specificity(_row()) == 0
+        assert _row().specificity == 0
 
     def test_one_concrete_field_is_one(self):
-        assert specificity(_row(a_sector_from="Mining")) == 1
+        assert _row(a_sector_from="Mining").specificity == 1
+
+    def test_b_fields_do_not_count(self):
+        assert _row(b_sector_from="Mining").specificity == 0
 
     def test_all_concrete_is_eight(self):
         row = _row(
@@ -158,7 +102,7 @@ class TestSpecificity:
             a_sector_to="Ore",     a_entity_to="Flow",      a_region_to="A",
             a_time="2020",         a_valuation="Mass",
         )
-        assert specificity(row) == 8
+        assert row.specificity == 8
 
 
 # =============================================================================
@@ -301,15 +245,16 @@ class TestResolverRowPassthrough:
             a_sector_from="Mining", a_entity_from="Process", a_region_from="A",
             a_sector_to="Ore",      a_entity_to="Flow",      a_region_to="A",
             a_time="2020",          a_valuation="Mass",
-            value_nominal="2.5", unc_type="sd", value_sd="0.1",
+            value_nominal=2.5, unc_type="sd", value_sd=0.1,
         )
         results = list(resolver.resolve_row(row))
         assert len(results) >= 1
         for r in results:
             assert isinstance(r, ResolvedRelation)
-            # Resolver yields the same pd.Series object → adapters can read extra fields
-            assert r.row["value_nominal"] == "2.5"
-            assert r.row["unc_type"] == "sd"
+            # Resolver yields the same ParamRow object → adapters can read extra fields
+            assert r.row is row
+            assert r.row.value_nominal == 2.5
+            assert r.row.unc_type == "sd"
 
 
 class TestResolverBValuation:

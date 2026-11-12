@@ -43,7 +43,13 @@ import roundL_reexport_diag as L                          # noqa: E402
 from pysuto.acc import AccountingStructure                # noqa: E402
 from pysuto.config import load_config                     # noqa: E402
 from pysuto.diag import SolverDiag, SolverStatsDiagnostic  # noqa: E402
-from pysuto.param_relation import sigma_from_row          # noqa: E402
+from pysuto.relation.params import _parse_row             # noqa: E402
+
+
+def sigma_from_row(row: pd.Series, nominal: float) -> float:
+    """σ in ratio units of one versioned params row (``ParamRow.sigma``)."""
+    return _parse_row(row.to_dict()).sigma()
+
 
 ROOT      = Path("data/proc")
 PARAMS_IN = Path("data/input/params")
