@@ -246,6 +246,15 @@ def run_const(case: CaseSpec, imp_run_id: str, label: str,
         )
     check_case(imp_sidecar, case)
 
+    # ── A3. Cross-stage consistency: the Lp exponent of Stage 2 and Stage 3 ─
+    imp_p = imp_sidecar.get("stage_config", {}).get("p")
+    if imp_p is None:
+        raise ValueError(f"imp run {imp_run_id} records no stage_config['p']; cannot "
+                         f"check it against this const run's P_PROP={spec.P_PROP}.")
+    if float(imp_p) != float(spec.P_PROP):
+        raise ValueError(f"P_PROP mismatch: imp run {imp_run_id} was aggregated with "
+                         f"p={imp_p}, but this const run has P_PROP={spec.P_PROP}.")
+
     ctx = CaseContext(case=case, acc=acc, inputs=inputs, data_dir=data_dir,
                       agg_result=agg_result, logger=_log)
     anchor_exempt, ctx.n_anchor_exempt = (spec.nodata_anchor_exempt(ctx)

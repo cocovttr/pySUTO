@@ -909,6 +909,7 @@ def builders(ctx) -> list:
         sigma_cv      = spec.ANCHOR_CV,
         id_prefix     = "supplytotout",
         sigma_cv_resolver = _scale_total_cv,
+        p             = spec.P_PROP,
     ))
     out.append(SumConstraintBuilder.from_mask_anchor(
         acc,
@@ -918,6 +919,7 @@ def builders(ctx) -> list:
         sigma_cv      = spec.ANCHOR_CV,
         id_prefix     = "usetotout",
         sigma_cv_resolver = _scale_total_cv,
+        p             = spec.P_PROP,
     ))
 
     # 2b. Soft sum — ICSG SCRAP LEVEL anchors (Round P, ADR 0031).
@@ -987,6 +989,7 @@ def builders(ctx) -> list:
                 sigma_cv      = spec.ANCHOR_CV,
                 id_prefix     = _prefix,
                 sigma_cv_resolver = _scale_total_cv,
+                p             = spec.P_PROP,
             ))
     else:
         _log.info("SCRAP_LEVEL_ANCHOR off — scrap levels unstated (Round O config)")
