@@ -52,6 +52,18 @@ def recorded_conditioning(stage_config: dict, run_id: str = "") -> dict:
     A run that predates the record (any key missing) gets the library defaults
     in :data:`DEFAULT_CONDITIONING` and a logged warning; the defaults never
     changed, so this is exact for every such run.
+
+    Parameters
+    ----------
+    stage_config : dict
+        The opt sidecar's ``stage_config``.
+    run_id : str
+        The opt run id, named in the warning.
+
+    Returns
+    -------
+    dict
+        The four :data:`DEFAULT_CONDITIONING` keys, as floats.
     """
     cfg = stage_config or {}
     missing = [k for k in DEFAULT_CONDITIONING if k not in cfg]
