@@ -114,6 +114,14 @@ class ParametricImputer(BaseImputer):
     1. from_csv(path, acc_struct)  — precomputes bidirectional (a_id, b_id, coeff, σ)
        pairs from a params-template CSV.  Each pair is filled in whichever
        direction the missing mask requires: f_b = coeff·f_a or f_a = f_b/coeff.
+       The stored σ_param is in the ratio's units; the fill's σ is in the filled
+       edge's flow units (kt), every term of the Lp combination:
+
+       * propagated source σ: forward |coeff|·σ_a, backward s(1/coeff)·σ_b;
+       * parameter σ: forward |f_a|·σ_param, backward |f_a|·σ_param/|coeff|, i.e.
+         |f_target|·σ_param/|coeff| (first-order, the form of ``TradeImputer`` and
+         the Mass twin);
+       * ε term: ε·|f_target|.
 
     2. ParametricImputer(relations=[...])  — directed fills from ParametricRelation
        lambda objects.  Sources are matched per target by region_from and time.
@@ -253,9 +261,13 @@ class ParametricImputer(BaseImputer):
 
             if not a_nan and b_nan:
                 f_b = float(coeff * f[a_id])
-                # Forward (A→B): bare coefficient. σ_b = Lp(|coeff|·σ_a, σ_param, ε·f_b)
+                # Forward (A→B): bare coefficient. All terms in B's flow units (kt):
+                #   σ_b = Lp(|coeff|·σ_a, |f_a|·σ_param, ε·f_b)
+                # σ_param is in ratio units; |f_a|·σ_param (= |f_b|·σ_param/|coeff|)
+                # is its first-order image in flow units, as in TradeImputer, and
+                # stays defined for coeff == 0 (#148).
                 s_b   = lp_combine(
-                    [coeff * sigma[a_id], sig_p, epsilon * f_b], p,
+                    [coeff * sigma[a_id], abs(f[a_id]) * sig_p, epsilon * f_b], p,
                 )
                 s_b, capped = _apply_cv_cap(s_b, f_b, cv_cap)
                 f[b_id]     = f_b
@@ -273,10 +285,13 @@ class ParametricImputer(BaseImputer):
                 inv = 1.0 / coeff
                 f_a = float(inv * f[b_id])
                 # Backward (B→A): regularized sensitivity caps σ amplification
-                # when |inv| ≫ 1 (e.g. 1/ore_grade ≈ 100s).
+                # when |inv| ≫ 1 (e.g. 1/ore_grade ≈ 100s). All terms in A's flow
+                # units (kt):  σ_a = Lp(s(inv)·σ_b, |f_a|·σ_param/|coeff|, ε·f_a)
+                # with |f_a|·σ_param/|coeff| = |f_b|·σ_param/coeff² (#148).
                 s_inv = _reg_sensitivity(inv, q, am)
                 s_a   = lp_combine(
-                    [s_inv * sigma[b_id], sig_p, epsilon * f_a], p,
+                    [s_inv * sigma[b_id], abs(f_a) * sig_p / abs(coeff),
+                     epsilon * f_a], p,
                 )
                 s_a, capped = _apply_cv_cap(s_a, f_a, cv_cap)
                 f[a_id]     = f_a

@@ -497,14 +497,45 @@ class TestParametricImputerCSV:
         assert np.isnan(f[0]) and np.isnan(f[2])
 
     def test_sigma_propagation_includes_sigma_param(self, acc):
-        """σ_b² = coeff² σ_a² + σ_param²."""
+        """σ_param (ratio units) enters in flow units: |f_b|·σ_r/|r| = |a|·σ_r (#148)."""
         f     = np.full(10, np.nan);  f[0]     = 10.0
         sigma = np.full(10, np.nan);  sigma[0] = 0.0
         missing = np.isnan(f)
         imp = ParametricImputer(_csv_pairs=[(0, 2, 2.0, 3.0, 0.0, "p", "d")])
         imp.impute(f, sigma, missing, 0, acc)
-        # σ_b = sqrt(4*0 + 9) = 3
-        assert sigma[2] == pytest.approx(3.0)
+        # σ_b = |a|·σ_r = 10 · 3 = 30 kt (was σ_r = 3, a ratio unit added to kt)
+        assert sigma[2] == pytest.approx(30.0, rel=1e-12)
+
+    @pytest.mark.parametrize("size", [1000.0, 0.1])
+    def test_sigma_param_forward_is_analytic_and_scale_free(self, acc, size):
+        """Forward: σ_b = |a|·σ_r with the other terms zero, so CV_b = σ_r/|r| at any size."""
+        r, sig_r = 0.28, 0.0375
+        f     = np.full(10, np.nan);  f[0]     = size
+        sigma = np.full(10, np.nan);  sigma[0] = 0.0
+        imp = ParametricImputer(_csv_pairs=[(0, 2, r, sig_r, 0.0, "p", "d")])
+        imp.impute(f, sigma, np.isnan(f), 0, acc)
+        assert sigma[2] == pytest.approx(size * sig_r, rel=1e-12)
+        assert sigma[2] / abs(f[2]) == pytest.approx(sig_r / r, rel=1e-12)
+
+    @pytest.mark.parametrize("size", [1000.0, 0.1])
+    def test_sigma_param_backward_is_analytic_and_scale_free(self, acc, size):
+        """Backward: σ_a = |b|·σ_r/r² with the other terms zero, so CV_a = σ_r/|r|."""
+        r, sig_r = 0.28, 0.0375
+        f     = np.full(10, np.nan);  f[2]     = size
+        sigma = np.full(10, np.nan);  sigma[2] = 0.0
+        imp = ParametricImputer(_csv_pairs=[(0, 2, r, sig_r, 0.0, "p", "d")])
+        imp.impute(f, sigma, np.isnan(f), 0, acc)
+        assert sigma[0] == pytest.approx(size * sig_r / r ** 2, rel=1e-12)
+        assert sigma[0] / abs(f[0]) == pytest.approx(sig_r / r, rel=1e-12)
+
+    def test_sigma_param_forward_with_zero_ratio_keeps_the_parameter_term(self, acc):
+        """A zero ratio (WR is copperless) fills 0 with σ = |a|·σ_r, not a σ-0 pin."""
+        f     = np.full(10, np.nan);  f[0]     = 500.0
+        sigma = np.full(10, np.nan);  sigma[0] = 0.0
+        imp = ParametricImputer(_csv_pairs=[(0, 2, 0.0, 0.001, 0.0, "p", "d")])
+        imp.impute(f, sigma, np.isnan(f), 0, acc)
+        assert f[2] == 0.0
+        assert sigma[2] == pytest.approx(500.0 * 0.001, rel=1e-12)
 
     def test_epsilon_added_in_quadrature(self, acc):
         f     = np.full(10, np.nan);  f[0]     = 10.0
