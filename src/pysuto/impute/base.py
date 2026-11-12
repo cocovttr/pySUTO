@@ -53,7 +53,7 @@ def _log(
         "sigma_after":  float(sigma_after),
         "description":  description,
         "param_id":     param_id,
-        "relaxed":        bool(relaxed),
+        "relaxed":      bool(relaxed),
         "assumed_absent": [int(i) for i in (assumed_absent or [])],
     }
 

@@ -1054,7 +1054,7 @@ def _log_with_later_fill(imputer, acc, fill_later: bool):
     return log.as_dataframe()
 
 
-def test_exposure_counts_a_relaxed_close_whose_absent_primary_is_filled_later(imputer, acc):
+def test_exposure_counts_a_close_whose_absent_primary_is_filled_later(imputer, acc):
     from pysuto.diag.imp import relaxed_close_exposure, relaxed_close_exposure_summary
     df = _log_with_later_fill(imputer, acc, fill_later=True)
     assert df["assumed_absent"].map(type).eq(list).all()

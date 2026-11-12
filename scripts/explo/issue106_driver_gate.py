@@ -134,9 +134,9 @@ def compare_dirs(new: str, ref: str, ignore_columns=()) -> list:
                                              np.load(q, allow_pickle=True))))
             elif f.endswith(".parquet"):
                 drop = list(ignore_columns)
-                rows.append((rel, "", pd.read_parquet(p).drop(columns=drop, errors="ignore")
-                             .equals(pd.read_parquet(q).drop(columns=drop,
-                                                             errors="ignore"))))
+                a = pd.read_parquet(p).drop(columns=drop, errors="ignore")
+                b = pd.read_parquet(q).drop(columns=drop, errors="ignore")
+                rows.append((rel, "", a.equals(b)))
             else:
                 with open(p, "rb") as fa, open(q, "rb") as fb:
                     rows.append((rel, "<bytes>", fa.read() == fb.read()))

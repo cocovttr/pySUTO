@@ -969,7 +969,8 @@ def relaxed_close_exposure(log_df: pd.DataFrame,
         pos.setdefault(int(e), i)
     rows = []
     for i in np.flatnonzero(log_df["relaxed"].to_numpy(dtype=bool)):
-        later = [int(e) for e in log_df["assumed_absent"].iat[i] if pos.get(int(e), -1) > i]
+        later = [int(e) for e in log_df["assumed_absent"].iat[i]
+                 if pos.get(int(e), -1) > i]
         if later:
             e = int(log_df["edge_id"].iat[i])
             rows.append({
@@ -988,7 +989,7 @@ def relaxed_close_exposure(log_df: pd.DataFrame,
 def relaxed_close_exposure_summary(log_df: pd.DataFrame,
                                    edge_valuation: Optional[np.ndarray] = None
                                    ) -> pd.DataFrame:
-    """Count and kt of the exposed relaxed fills per valuation, beside all relaxed fills."""
+    """Count and kt of the exposed relaxed fills per valuation, beside all relaxed."""
     exp = relaxed_close_exposure(log_df, edge_valuation)
     rel = log_df[log_df["relaxed"].astype(bool)]
     if edge_valuation is None:
