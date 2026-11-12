@@ -34,7 +34,7 @@ from .network    import NetworkImputer
 from .trade      import TradeImputer
 from .time       import TimeImputer, time_interp_scope
 from .screens    import damp_leg_sigma, screen_contradicted_nodes, screen_outlier_trade_legs
-from .share      import ShareImputer
+from .share      import ShareImputer, StockLeg
 from .flat_prior import FlatPriorImputer
 
 __all__ = [
@@ -55,6 +55,7 @@ __all__ = [
     "SourceTerm",
     "TimeImputer",
     "ShareImputer",
+    "StockLeg",
     "FlatPriorImputer",
     "time_interp_scope",
     "damp_leg_sigma",

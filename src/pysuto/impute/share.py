@@ -7,9 +7,11 @@ instead of ``noisy_zero`` flat priors. The flat prior (f=0, σ=1e6) leaves the
 Part-A soft-bound σ_c under-scaled (its den_scale reads the *prior* throughput)
 and jags the cold time series; a throughput-scaled prior fixes both.
 
-Two per-indicator modes:
+Each stock leg is declared as a ``StockLeg`` (its stock sector, its mode, the net
+edge's selector and its base selectors), so the sector labels are the caller's;
+the copper instances are in ``pysuto.cases.copper``. Two per-leg modes:
 
-* ``"transfer"`` (PSC): ``share(t) = f[net(t)] / f[base(t)]`` computed where the
+* ``"transfer"`` (copper: PSC): ``share(t) = f[net(t)] / f[base(t)]`` computed where the
   net edge is already covered, interpolated across the region's time series and
   extrapolated to the boundaries (so 1995 — an ICSG baseline year with no NAS —
   is seeded), then ``f[net(t)] = share(t)·f[base(t)]`` for the still-missing
@@ -17,7 +19,7 @@ Two per-indicator modes:
   to the CP pool (= total cathode production; NOT CP→Cathode, which is
   production−PSC and circular).
 
-* ``"seed"`` (MESC / USC): the net change is centred at 0 and held there —
+* ``"seed"`` (copper: MESC / USC): the net change is centred at 0 and held there —
   ``f[net]=0``, ``σ = max(seed_cv·|f[base_colocated]|, seed_abs_floor)`` — replacing
   ``noisy_zero``. MESC/USC are 47×47 source→dest matrices whose signed central
   share ≈ 0, so a zero-mean seed is the honest informative prior, and a stock
@@ -30,15 +32,18 @@ Two per-indicator modes:
   base = the co-located Cathode(i)→FU(j) consumption edge; a no-trade pair is
   pinned at the floor.
 
-PSC keeps ``σ = (p95/Z95)·base`` (the empirical band, consistent with the Part-A
-soft bound); ``p95`` (value_max) is read per (indicator, region) from the
-stock_bounds params CSV. MESC/USC read no p95 since Round X.
+A transfer leg keeps ``σ = (p95/Z95)·base`` (the empirical band, consistent with the
+Part-A soft bound); ``p95`` (value_max) is read per (stock sector, region) from the
+stock_bounds params CSV, the stock sector being the row's ``b_sector_to`` selector —
+declared in the row, not parsed from its ``param_id``. Seed legs read no p95 since
+Round X.
 """
 
 from __future__ import annotations
 
 import bisect
-from typing import Optional
+from dataclasses import dataclass
+from typing import Optional, Sequence
 
 import numpy as np
 
@@ -57,30 +62,49 @@ ACCEPTS = frozenset({"stock_bound"})
 #: Z95_STOCK in constraints/ratio.py so the imputed prior and the soft bound agree).
 Z95 = 1.645
 
-# (sector_from, entity_from, sector_to, entity_to) selectors.
-_NET = {
-    "psc":  ("CP",      "Process", "PSC",  "SB"),
-    "mesc": ("Cathode", "Flow",    "MESC", "SB"),
-    "usc":  ("Cathode", "Flow",    "USC",  "SB"),
-}
-_BASE = {
-    # PSC base = total cathode production = CSXEW + CER inputs to CP (intra-region).
-    "psc":  [("CSXEW", "Flow", "CP", "Process"), ("CER", "Flow", "CP", "Process")],
-    # MESC/USC base = final-use consumption, co-located by (region_from, region_to).
-    "mesc": [("Cathode", "Flow", "FU", "SB")],
-    "usc":  [("Cathode", "Flow", "FU", "SB")],
-}
-_MODE = {"psc": "transfer", "mesc": "seed", "usc": "seed"}
+_MODES = ("transfer", "seed")
+
+
+@dataclass(frozen=True)
+class StockLeg:
+    """One stock-change indicator of the account.
+
+    sector  The stock sector the net edge points to (``net[2]``); the key of the p95
+            table and, lower-cased, of the log's ``share_<sector>_<region>`` tags.
+    mode    ``"transfer"`` (share of a base carried across years) or ``"seed"``
+            (zero-mean, σ priced on the co-located base).
+    net     ``(sector_from, entity_from, sector_to, entity_to)`` of the net edge.
+    base    The base selectors, same layout: any number for ``"transfer"`` (summed,
+            intra-region), exactly one for ``"seed"`` (co-located by region pair).
+    """
+
+    mode: str
+    net:  tuple
+    base: tuple
+
+    def __post_init__(self) -> None:
+        if self.mode not in _MODES:
+            raise ValueError(f"StockLeg {self.net!r}: mode {self.mode!r} not in {_MODES}")
+        if len(self.net) != 4 or not self.base or any(len(b) != 4 for b in self.base):
+            raise ValueError(f"StockLeg {self.net!r}: selectors are 4-tuples "
+                             "(sector_from, entity_from, sector_to, entity_to)")
+        if self.mode == "seed" and len(self.base) != 1:
+            raise ValueError(f"StockLeg {self.net!r}: a seed leg takes one base selector")
+
+    @property
+    def sector(self) -> str:
+        return self.net[2]
 
 
 class ShareImputer(BaseImputer):
-    """Impute Δstock edges as share×base (PSC) or a zero-mean throughput-scaled
-    seed (MESC/USC). Runs late in the cascade (after time interpolation, before
+    """Impute Δstock edges, per declared ``StockLeg``, as share×base (transfer) or a
+    zero-mean throughput-scaled seed (seed). Runs late in the cascade (after time interpolation, before
     the flat-prior fallback) so the base flows are already covered."""
 
     def __init__(
         self,
         p95: dict,
+        legs: Sequence[StockLeg],
         scale_abs_floor: float = 100.0,
         p: float = 1.3,
         id: Optional[str] = None,
@@ -88,7 +112,8 @@ class ShareImputer(BaseImputer):
         seed_abs_floor: float = 0.3,
     ) -> None:
         self.id              = id or "share"
-        self._p95            = p95           # dict[(indicator, region_to)] -> p95 (PSC)
+        self._p95            = p95           # dict[(sector, region_to)] -> p95 (transfer legs)
+        self.legs            = tuple(legs)
         self.scale_abs_floor = float(scale_abs_floor)
         self.p               = float(p)
         # MESC/USC seed σ = max(seed_cv·|FU leg|, seed_abs_floor) — kt (ADR 0040).
@@ -98,27 +123,27 @@ class ShareImputer(BaseImputer):
     # ------------------------------------------------------------------
     @classmethod
     def from_stock_bounds_csv(
-        cls, path: str, scale_abs_floor: float = 100.0,
+        cls, path: str, legs: Sequence[StockLeg], scale_abs_floor: float = 100.0,
         p: float = 1.3, id: Optional[str] = None,
         seed_cv: float = 0.01, seed_abs_floor: float = 0.3,
     ) -> "ShareImputer":
-        """Read the per-(indicator, region) p95 (value_max) from the stock_bounds
+        """Read the per-(stock sector, region) p95 (value_max) from the stock_bounds
         params CSV — the same file that defines the Part-A soft bounds, so the
-        imputed PSC band and the constraint band are the same number. The MESC/USC
-        seed does not use p95 (see ``seed_cv`` / ``seed_abs_floor``)."""
+        imputed transfer band and the constraint band are the same number. A row
+        belongs to the leg whose sector is its ``b_sector_to`` selector; rows of any
+        other sector are skipped. The seed legs do not use p95 (see ``seed_cv`` /
+        ``seed_abs_floor``)."""
+        sectors = {leg.sector for leg in legs}
         p95: dict = {}
         for row in read_params(path, ACCEPTS):
-            pid    = row.param_id.lower()
+            sector = row.selectors["b_sector_to"]
             region = row.selectors["b_region_to"]
             vmax   = row.value_max
-            if np.isnan(vmax) or region in WILDCARD:
+            if np.isnan(vmax) or region in WILDCARD or sector not in sectors:
                 continue
-            for ind in ("mesc", "usc", "psc"):     # mesc/usc before psc (substring safety)
-                if f"bound{ind}" in pid:
-                    p95[(ind, region)] = abs(vmax)
-                    break
-        logger.info("ShareImputer.from_stock_bounds_csv: %d (indicator,region) p95 entries", len(p95))
-        return cls(p95, scale_abs_floor=scale_abs_floor, p=p, id=id,
+            p95[(sector, region)] = abs(vmax)
+        logger.info("ShareImputer.from_stock_bounds_csv: %d (sector,region) p95 entries", len(p95))
+        return cls(p95, legs, scale_abs_floor=scale_abs_floor, p=p, id=id,
                    seed_cv=seed_cv, seed_abs_floor=seed_abs_floor)
 
     def config(self) -> dict:
@@ -128,20 +153,20 @@ class ShareImputer(BaseImputer):
 
     # ------------------------------------------------------------------
     def writer_scope(self, acc) -> np.ndarray:
-        """The stock legs: every PSC, MESC and USC net-change edge."""
+        """The stock legs: every declared net-change edge."""
         ei = expand_edge_index(acc.edge_index, acc.node_index)
         scope = np.zeros(acc.n_edges, dtype=bool)
-        for ind in _NET:
-            scope[self._sel(ei, _NET[ind])["edge_id"].to_numpy(dtype=np.int64)] = True
+        for leg in self.legs:
+            scope[self._sel(ei, leg.net)["edge_id"].to_numpy(dtype=np.int64)] = True
         return scope
 
     def impute(self, ledger, step, acc_struct) -> None:
         ei = expand_edge_index(acc_struct.edge_index, acc_struct.node_index)
-        for ind in ("psc", "mesc", "usc"):
-            if _MODE[ind] == "transfer":
-                self._transfer(ind, ledger, ei, step)
+        for leg in self.legs:
+            if leg.mode == "transfer":
+                self._transfer(leg, ledger, ei, step)
             else:
-                self._seed(ind, ledger, ei, step)
+                self._seed(leg, ledger, ei, step)
 
     # ------------------------------------------------------------------
     def _sel(self, ei, spec):
@@ -155,11 +180,13 @@ class ShareImputer(BaseImputer):
         k = p95 / Z95
         return max(k * abs(base_val), k * self.scale_abs_floor)
 
-    # ---- PSC: share = net/base transferred across the region's years ----
-    def _transfer(self, ind, ledger, ei, step) -> None:
+    # ---- transfer: share = net/base carried across the region's years ----
+    def _transfer(self, leg, ledger, ei, step) -> None:
         f = ledger.f
-        net  = self._sel(ei, _NET[ind])
-        base_sel = [self._sel(ei, s) for s in _BASE[ind]]
+        ind  = leg.sector
+        net  = self._sel(ei, leg.net)
+        base_sel = [self._sel(ei, s) for s in leg.base]
+        base_txt = "+".join(s[0] for s in leg.base)
 
         for (region, val), grp in net.groupby(["region_to", "valuation"]):
             p95 = self._p95.get((ind, region))
@@ -167,7 +194,7 @@ class ShareImputer(BaseImputer):
                 continue
             net_ser = {str(t): int(e) for t, e in zip(grp["time"], grp["edge_id"])}
 
-            # base[time] = list of edge_ids (CSXEW + CER) for this (region, val)
+            # base[time] = list of edge_ids (the base selectors) for this (region, val)
             base_ser: dict[str, list[int]] = {}
             for bsel in base_sel:
                 b = bsel[(bsel["region_to"] == region) & (bsel["valuation"] == val)]
@@ -210,16 +237,17 @@ class ShareImputer(BaseImputer):
                 s_new = self._floor_sigma(p95, base_val)
                 ledger.write(
                     e, f_new, s_new, step, "share_transfer", base_ids,
-                    [sh] * len(base_ids), f"{ind.upper()} = share·(CSXEW+CER)",
-                    f"share_{ind}_{region}",
+                    [sh] * len(base_ids), f"{ind.upper()} = share·({base_txt})",
+                    f"share_{ind.lower()}_{region}",
                 )
 
-    # ---- MESC/USC: zero-mean seed per co-located edge, held at 1 % / 0.3 kt ----
-    def _seed(self, ind, ledger, ei, step) -> None:
+    # ---- seed: zero-mean per co-located edge, held at seed_cv / seed_abs_floor ----
+    def _seed(self, leg, ledger, ei, step) -> None:
         f = ledger.f
+        ind  = leg.sector
         keys = ["region_from", "region_to", "time", "valuation"]
-        net  = self._sel(ei, _NET[ind])[["edge_id"] + keys]
-        base = self._sel(ei, _BASE[ind][0])[["edge_id"] + keys].rename(
+        net  = self._sel(ei, leg.net)[["edge_id"] + keys]
+        base = self._sel(ei, leg.base[0])[["edge_id"] + keys].rename(
             columns={"edge_id": "base_id"})
         m = net.merge(base, on=keys, how="inner")
         if m.empty:
@@ -231,10 +259,10 @@ class ShareImputer(BaseImputer):
         fill = (np.isnan(f[net_ids]) & ~np.isnan(f[base_ids]))
         e_fill, b_fill = net_ids[fill], base_ids[fill]
         s_new = np.maximum(self.seed_cv * np.abs(f[b_fill]), self.seed_abs_floor)
-        desc = f"{ind.upper()} zero-mean, σ=max(cv·|FU|, floor)"
+        desc = f"{ind.upper()} zero-mean, σ=max(cv·|{leg.base[0][2]}|, floor)"
         ledger.write_many(
             e_fill, np.zeros(e_fill.size), s_new, step, "share_seed", desc,
-            f"seed_{ind}", sources=[[int(b)] for b in b_fill],
+            f"seed_{ind.lower()}", sources=[[int(b)] for b in b_fill],
             coeffs=[[0.0]] * e_fill.size,
         )
 
