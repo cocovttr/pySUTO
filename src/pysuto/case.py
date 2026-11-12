@@ -102,8 +102,8 @@ class ConstSection(Section):
     diagnostics (``None``: the first timestep). The knobs the stage body hands to
     ``ConstraintEngine`` are ``P_PROP``, ``SIGMA_A_CV_MIN``, ``SIGMA_A_ABS_FLOOR``,
     ``SIGMA_C_CV_MIN``, ``SIGMA_C_ABS_FLOOR``, ``PRIOR_BOX_K``, ``NODATA_ANCHOR_CV``,
-    ``NODATA_ANCHOR_EXCLUDE``, ``PIN_FLAT_PRIOR_ZEROS`` and ``DIAG_PLOT``; every case's
-    section declares them.
+    ``NODATA_ANCHOR_EXCLUDE``, ``PIN_FLAT_PRIOR_ZEROS``, ``PIN_EXCLUDE_SECTORS`` and
+    ``DIAG_PLOT``; every case's section declares them.
     """
     builders:             Callable
     nodata_anchor_exempt: Optional[Callable] = None

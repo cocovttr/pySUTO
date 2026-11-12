@@ -712,6 +712,7 @@ class ToyConst(ConstSection):
     # is spared.
     NODATA_ANCHOR_EXCLUDE: tuple = ()
     PIN_FLAT_PRIOR_ZEROS:  bool  = False
+    PIN_EXCLUDE_SECTORS:   tuple = ()
     DIAG_PLOT:             bool  = False
     SUM_SIGMA_FRACTION:    float = 0.05
     # Ratio rows' flow-space scale floor. Copper's 100 kt would swamp the toy, whose

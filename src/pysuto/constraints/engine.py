@@ -291,7 +291,7 @@ class ConstraintEngine:
         nodata_anchor_flat_threshold: float = 1e5,
         nodata_anchor_exempt_mask: Optional[np.ndarray] = None,
         pin_flat_prior_zeros: bool = False,
-        pin_exclude_sectors: tuple = ("CO", "Mining", "Ore", "WR", "Tailings", "Slag", "PSC"),
+        pin_exclude_sectors: tuple = (),
     ):
         self.acc_struct  = acc_struct
         self._builders:  list[BaseConstraintBuilder] = []
