@@ -231,7 +231,7 @@ Section 5.5.1 bounds the method's conclusions; Section 5.5.2 lists the limitatio
 **Numerical floor** (issues #99, #81).
 
 - At a gap of $10^{-8}$, hard rows still close only to $1.1\times10^{-6}$ kt.
-- 1,658–2,858 zero-prior cross-region cathode legs a year end within $10^{-4}$ kt of their lower bound, where Stage 5's slack threshold sorts them by rounding; pinning or freeing all of them moves no interval bound of Table 3 by more than 0.002.
+- 1,658–2,858 zero-prior cross-region cathode legs a year end within $10^{-4}$ kt of their lower bound, where Stage 5's slack threshold sorts them by rounding; pinning or freeing all of them moves no interval bound of Table 3 by more than 0.004.
 
 <a id="sec-disc-outlook"></a>
 

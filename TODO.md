@@ -79,7 +79,14 @@ Branch `diag/parametric-sigma-units-measure`, REP
   `uncprop_20261112_144236_f79da518`, `psut_20261112_144358_449d34b5`. **Reference chain.**
 - **Result:** prior σ moves on 6,687 edges, `f_agg` bit-identical; Round-E items equal to three decimals; common-set Σz²
   −0.001 % vs `opt_20261022_112855_928da10c`; Σσ* +0.03 %.
-- **Open:** the manuscript still reads `opt_20261022_112855_928da10c` — re-point and re-check its keyed numbers.
+- **#152 DONE 2026-11-16:** the manuscript reads this chain. Stage-5 ablation `uncprop_20261116_100548_78dc5344`;
+  the knob sweep `sweep_20261102_145601_8413cace` stays on `opt_20261022_112855_928da10c` (`--sweep-base`). Of 516 keyed
+  numbers 109 move at the script's precision (76 of them SI Table S6's solver iterations, times and gaps); in the prose:
+  net mine-output gain 4,039 → 4,040 kt CC, the 2017 Birge ratio 11.94 → 11.83, the ablation's gross-mass κ 0.719 → 0.718,
+  common-set Σz² 700,082 → 700,073, the active-set ranges, acc copper v4 → v5; of the intervals (`table3_intervals.py`)
+  China's embodied/direct [1.42, 1.55] → [1.42, 1.56], #99's family 67,180 → 67,210 edge-years and its largest
+  bound move 0.002 → 0.004 (same quantity). Table 3's verdicts are unchanged.
+- **Next:** #153 (ADR 0010's guard covers flow balances) → measure #154; a manuscript re-point follows if it ships.
 
 ## manuscript_ready_2 (label, 2026-10-20) — rounds shipped 2026-10-20/21
 

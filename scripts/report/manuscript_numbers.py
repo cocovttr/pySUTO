@@ -7,6 +7,7 @@ optimisation run, so the text can be refreshed onto a new reference chain.
 
     python scripts/report/manuscript_numbers.py <opt_run_id> [--json OUT]
         [--data-dir data] [--base OPT] [--base-retol OPT] [--numbers PATH]
+        [--sweep-base OPT]
 
 The JSON goes to ``docs/manuscript/figs/manuscript_numbers.json`` by default and is
 committed with the manuscript, so a refresh onto a later chain diffs the new file
@@ -161,7 +162,7 @@ class Chain:
     feeds:    dict                  # feed id → feed run id
     psut:     list
     uncprop:  list
-    sweep:    list                  # sweep runs whose base is the opt run
+    sweep:    list                  # sweep runs whose base is the opt run (or --sweep-base)
     meta:     dict                  # "opt" / "const" / "imp" / feed id → sidecar
     versions: dict                  # input id → version
     years:    list
@@ -183,7 +184,7 @@ def _built_from(stage_dir: Path, opt: str) -> list:
     return out
 
 
-def walk_chain(proc: Path, opt: str) -> Chain:
+def walk_chain(proc: Path, opt: str, sweep_base: str = None) -> Chain:
     """opt → const → imp → feed runs, with every input version on the way."""
     om = _sidecar(proc / "opt" / opt)
     const = om["parents"]["upstream"]["const_run_id"]
@@ -204,7 +205,7 @@ def walk_chain(proc: Path, opt: str) -> Chain:
     return Chain(opt=opt, const=const, imp=imp, feeds=feeds,
                  psut=_built_from(proc / "psut", opt),
                  uncprop=_built_from(proc / "uncprop", opt),
-                 sweep=_built_from(proc / "sweep", opt),
+                 sweep=_built_from(proc / "sweep", sweep_base or opt),
                  meta=meta, versions=versions,
                  years=[str(y) for y in om["stage_summary"]["timesteps"]])
 
@@ -1496,9 +1497,10 @@ def render(N: Numbers, ch: Chain) -> str:
     return "\n".join(out)
 
 
-def main(opt: str, out_json, data_dir: str, base: str, retol: str, numbers: str) -> None:
+def main(opt: str, out_json, data_dir: str, base: str, retol: str, numbers: str,
+         sweep_base: str = None) -> None:
     proc, inp = Path(data_dir) / "proc", Path(data_dir) / "input"
-    ch = walk_chain(proc, opt)
+    ch = walk_chain(proc, opt, sweep_base)
     acc_id = ch.meta["const"]["parents"]["inputs"]["acc"]["id"]
     acc = AccountingStructure.load(id=acc_id, storage_dir=str(proc / "acc"))
     ei = expand_edge_index(acc.edge_index, acc.node_index)
@@ -1543,6 +1545,7 @@ def main(opt: str, out_json, data_dir: str, base: str, retol: str, numbers: str)
         payload = {"opt_run_id": opt, "generated": date.today().isoformat(),
                    "chain": {"const": ch.const, "imp": ch.imp, "feeds": ch.feeds,
                              "psut": ch.psut, "uncprop": ch.uncprop, "sweep": ch.sweep,
+                             "sweep_base": sweep_base or opt,
                              "versions": ch.versions},
                    "base_runs": {"base": base, "base_retol": retol},
                    "numbers": {k: {"label": it.label, "value": it.value, "unit": it.unit}
@@ -1564,5 +1567,8 @@ if __name__ == "__main__":
                     help="the base re-solved at the reference tolerance")
     ap.add_argument("--numbers", default=NUMBERS_JSON,
                     help="results_figs numbers.json to take ratios from, if it is this run's")
+    ap.add_argument("--sweep-base", default=None, metavar="OPT",
+                    help="read group 12 from the sweep built on this opt run, an earlier chain a "
+                         "REP shows equal to this one (#152); default: the opt run itself")
     a = ap.parse_args()
-    main(a.opt_run_id, a.json, a.data_dir, a.base, a.base_retol, a.numbers)
+    main(a.opt_run_id, a.json, a.data_dir, a.base, a.base_retol, a.numbers, a.sweep_base)

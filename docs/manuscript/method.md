@@ -25,36 +25,36 @@ Word budgets of the later prose (approx.): contribution block 350 (or move to th
 Introduction's last paragraph) / 3.1 1,400 / 3.2 1,250 / 3.3 600 / 3.4 150.
 
 Corrected on 2026-11-12 while converting: Figure 1 said Stage 5 was "not run on
-copper" (it runs on the reference chain, uncprop_20261029_090754_0446e784); the
+copper" (it runs on the reference chain, uncprop_20261112_144236_f79da518); the
 concordance matrix W was missing from Stage 1; SI Table S13 lists 44 decision
 records (0001–0044), not 39 (the SI's own text says 43, also a slip); the software
 size is re-counted on main 24a37e9 (80 modules, 29,700 lines, 1,798 collected tests;
 was 22,052 / 68 / 1,284); "no transformation may drop sigma" now excludes Stage 6,
 which carries point estimates.
 
-Every number is from the reference chain, the final chain of the
-manuscript-ready-3 milestone (#111's ICSG zero-revision fix),
-  opt_20261022_112855_928da10c <- const_20261022_111531_df61bf5c
-  <- imp_20261022_111102_1b49a2b3
+Every number is from the reference chain of the metal-agnostic 2 milestone (#148's
+parametric sigma-units fix; equal at solver noise to the manuscript-ready-3 chain
+opt_20261022_112855_928da10c, #149),
+  opt_20261112_135523_88fa69f3 <- const_20261112_134032_b6802ef3
+  <- imp_20261112_133434_22fc54b3
   <- feed_icsg_20261022_110826_8a031806 (icsg v18, trade_shares v41),
      feed_baci_20261022_110715_fdf3b4ac (baci v33, netted from gross v28),
      feed_crude_ore_20260603_095651_558f7369 (crude_ore v3);
-  acc copper v4; params conc v10, eff v4, stripping_ratio v2, ore_grade v8,
-  stock_bounds v6, scrap_share v3; PSUT psut_20261029_095807_61a70a1a,
-re-derived from the run sidecars and arrays on 2026-10-29 (manuscript-ready-3
-milestone) with scripts/report/manuscript_numbers.py; the limitation numbers
+  acc copper v5 (the feeds on v4, same edge index); params conc v10, eff v4, stripping_ratio v2, ore_grade v8,
+  stock_bounds v6, scrap_share v3; PSUT psut_20261112_144358_449d34b5,
+re-derived from the run sidecars and arrays on 2026-11-16 (#152) with scripts/report/manuscript_numbers.py; the limitation numbers
 (Section 3.2.8 until 2026-11-12, now Discussion 5.5 in discussion.md) from the same
 script on the same run, the cited REPs (#31/#96 via
 #97, #95, #98, #111) and #81's intervals (scripts/report/table3_intervals.py).
-Stage-4 iterations and times re-read from the opt sidecar on 2026-11-12
-(solve_wall_s 534.85). N7's reproduction is ADR 0034's measurement
+Stage-4 iterations and times re-read from the opt sidecar on 2026-11-16
+(solve_wall_s 608.29). N7's reproduction is ADR 0034's measurement
 (opt_20261112_092114_c8cb8b74 at acc copper v5, bit-identical in imp, const, opt).
 Common-set comparisons are against the base re-solved at the
 ADR 0039 tolerance (opt_20260930_093914_523d57d7) and the base as originally
 solved (opt_20260916_124721_c4d1d944). A number attributed to an ADR or a
 round is that record's own measurement. Stage-5 (posterior) numbers are from
-uncprop_20261029_090754_0446e784 on the same chain (issue #27, ADR 0044), the
-calibration and ablation (#87) from it and uncprop_20261029_095641_3837af29.
+uncprop_20261112_144236_f79da518 on the same chain (issue #27, ADR 0044), the
+calibration and ablation (#87) from it and uncprop_20261116_100548_78dc5344.
 "ADR nnnn" points to docs/adr/ in the repository and to SI Table S13.
 
 Positioning paragraph (state of the art) for the Introduction (moved out of
@@ -335,7 +335,7 @@ $$
 
 **Copper.**
 
-- All 30 years return *Solved* in 60–74 iterations and 17–22 s each, 585 s of solve time in all. With the years solved concurrently on eight threads, Stage 4 takes 535 s of wall-clock time, about 7 min of it the first-year feasibility probe (SI Table S6).
+- All 30 years return *Solved* in 60–74 iterations and 20–31 s each, 746 s of solve time in all. With the years solved concurrently on eight threads, Stage 4 takes 608 s of wall-clock time, about 7 min of it the first-year feasibility probe (SI Table S6).
 
 <a id="sec-stage5"></a>
 
@@ -372,7 +372,7 @@ $$
 **Copper.**
 
 - Every year completes.
-- Per year, 8,492–9,836 edges are pinned at a binding lower bound, 13,406–13,943 bands bind, and 60–102 dependent hard rows are dropped.
+- Per year, 8,491–9,836 edges are pinned at a binding lower bound, 13,407–13,942 bands bind, and 60–107 dependent hard rows are dropped.
 - $\sigma_{a^*} \le \sigma_a$ holds on every edge-year.
 
 **Interpretation and calibration** (issue #87).
@@ -726,8 +726,8 @@ Each run is judged with a fixed set of quantities (formulas in SI S13).
 
 **Reference-run values.**
 
-- Common-set objective 700,082: 52.7% below the base run re-solved at the ADR 0039 tolerance (58.0% below the base as originally solved, a figure that mixes the modelling rounds with the solver's termination).
-- 8,068 kt CC of mine output is deleted over 30 years in the region-years that lose output, 3,270 kt CC (40.5%) of it forced; gains elsewhere more than offset it, so mine output rises by 4,039 kt CC net.
+- Common-set objective 700,073: 52.7% below the base run re-solved at the ADR 0039 tolerance (58.0% below the base as originally solved, a figure that mixes the modelling rounds with the solver's termination).
+- 8,068 kt CC of mine output is deleted over 30 years in the region-years that lose output, 3,270 kt CC (40.5%) of it forced; gains elsewhere more than offset it, so mine output rises by 4,040 kt CC net.
 - World concentrate retention over 1995–2024 is 1.010; 254 region-years sit on the export-grade cap.
 
 **Uncertainty and sensitivity protocol.** Three items answer RQ2: the posterior uncertainty, exploratory, and the termination pair and the knob sweep, against expected answers fixed before their numbers were read (SI S15):
