@@ -5,6 +5,12 @@
 option-C "a single upstream gap blocks everything below" case). Verified in
 [analysis_imp_…trade-seed-er-cer-revival.md](../rep/analysis_imp_20260616_074410_9b387727_trade-seed-er-cer-revival.md).
 
+**Amended 2026-11-16 (#153) — the guard covers balances and every cascade pass.** A primary a
+relaxed close counted as 0 is never filled by a Flow balance either, and both guard sets now live
+for the whole Stage 2 run, not one `impute()` call. Before, copper's imp `imp_20261112_154659_f4ec08ae`
+re-derived all 359 assumed-absent primaries: 23 by a balance in pass 1 (13 nonzero, 98.6 kt CC) and
+336 by `network_backward` in pass 2 as an explicit 0, at σ 0.24–88 kt. To be measured (#154).
+
 **Amended 2026-11-12 (#135, #136) — the partition is two writer scopes; `trade.py` is gone.**
 `TradeImputer` is the trade `Fill` of the conc relation source (`FillImputer`, forward, σ rule
 `trade`, method `trade_seed`), and the trade/network partition is no longer a rule the code
