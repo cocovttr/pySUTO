@@ -71,12 +71,27 @@ Results still read the W.1 chain, as they have since Round X.t:** pending.
 Branch `diag/qp-backend-measure`, REP `docs/rep/analysis_opt_20261112_144603_1256b16b_20261112_issue56-qp-backend-measure.md`.
 - **Run:** `opt_20261112_144603_1256b16b` on `const_20261022_111531_df61bf5c`: 240/240 arrays bit-identical to
   `opt_20261022_112855_928da10c`, 30/30 solved; per-period probe of all 30 years 14.8 s; Stage 4 3 min 9 s (was ≈ 12 min).
+## #154 MEASURED 2026-11-16 — ADR 0010's guard holds across cascade passes (#153) and ships; reference chain opt_20261116_134050_b54f65dc
+
+Branch `diag/balance-guard-measure`, REP
+`docs/rep/analysis_opt_20261116_134050_b54f65dc_20261116_issue154-balance-guard.md`.
+- **Runs:** `imp_20261116_133053_ad1191d2` → `const_20261116_133444_28ef32f2` → `opt_20261116_134050_b54f65dc` →
+  `uncprop_20261116_141543_6be9fa25`, `psut_20261116_141702_37174685`. **Reference chain.**
+- **Result:**
+  - The guard had held for one cascade pass only. Pass 2 re-derived 336 assumed-absent primaries as zeros, and from
+    them built phantom mine chains: 1,093 kt CC of CO→Mining in 13 regions, seven of which mine nothing.
+  - With those gone, the common-set sum-row Σz² rises 5.95 % vs `opt_20261112_135523_88fa69f3`, on the re-export anchors
+    the chains had supplied.
+  - Round-E 3a–c hold, and 30/30 years solved.
+- **Next:** a manuscript re-point (like #152); the follow-ups in the REP §4 (hub mining has no observed zero; 7
+  `time_interp` fills of assumed-absent primaries).
+
 ## #149 MEASURED 2026-11-12 — the parametric σ-units fix (#148) ships; reference chain opt_20261112_135523_88fa69f3
 
 Branch `diag/parametric-sigma-units-measure`, REP
 `docs/rep/analysis_opt_20261112_135523_88fa69f3_20261112_issue149-parametric-sigma-units.md`.
 - **Runs:** `imp_20261112_133434_22fc54b3` → `const_20261112_134032_b6802ef3` → `opt_20261112_135523_88fa69f3` →
-  `uncprop_20261112_144236_f79da518`, `psut_20261112_144358_449d34b5`. **Reference chain.**
+  `uncprop_20261112_144236_f79da518`, `psut_20261112_144358_449d34b5`. Reference chain until #154.
 - **Result:** prior σ moves on 6,687 edges, `f_agg` bit-identical; Round-E items equal to three decimals; common-set Σz²
   −0.001 % vs `opt_20261022_112855_928da10c`; Σσ* +0.03 %.
 - **#152 DONE 2026-11-16:** the manuscript reads this chain. Stage-5 ablation `uncprop_20261116_100548_78dc5344`;
