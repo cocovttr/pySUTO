@@ -1062,17 +1062,23 @@ def test_tags_do_not_move_the_arrays(imputer, acc):
     assert np.isfinite(f[acc.eid("CP", "Cathode", "CC")])
 
 
-def test_a_balance_never_fills_a_primary_a_relaxed_close_counted_absent(tmp_path):
-    """#153: Matte also feeds CP, so CP's primaries are CER, CSXEW and Matte. CER 70 and
-    Scrap 50 are known: the relaxed phase closes Smelting on scrap alone (Matte 48.25)
-    and CP with CSXEW and Matte→CP counted as 0. The Matte balance would then derive
-    Matte→CP = 48.25, so the prior held both 0 and 48.25 for that leg; it stays NaN."""
+def _matte_to_cp_imputer(tmp_path):
+    """The chain with Matte also feeding CP, so CP pools CER, CSXEW and Matte (#153)."""
     acc = MockAcc(edges=EDGES + [("Matte", "CP")])
     eff, conc = tmp_path / "eff.csv", tmp_path / "conc.csv"
     write_eff_csv(eff, stripping_ratio=None)
     write_conc_csv(conc)
     imp = NetworkImputer(str(eff), str(conc), p=1.3, cv_cap=float("inf"))
     imp.prepare(acc)
+    return imp, acc
+
+
+def test_a_balance_never_fills_a_primary_a_relaxed_close_counted_absent(tmp_path):
+    """#153: Matte also feeds CP, so CP's primaries are CER, CSXEW and Matte. CER 70 and
+    Scrap 50 are known: the relaxed phase closes Smelting on scrap alone (Matte 48.25)
+    and CP with CSXEW and Matte→CP counted as 0. The Matte balance would then derive
+    Matte→CP = 48.25, so the prior held both 0 and 48.25 for that leg; it stays NaN."""
+    imp, acc = _matte_to_cp_imputer(tmp_path)
     f, _, entries = _run_logged(imp, acc, {("CER", "CP", "CC"): 70.0,
                                            ("Scrap", "Smelting", "CC"): 50.0})
     e_matte_cp = acc.eid("Matte", "CP", "CC")
@@ -1088,12 +1094,7 @@ def test_both_guards_hold_across_cascade_passes(tmp_path):
     forget the first pass's relaxed closes: neither the balance (Matte→CP = 48.25) nor
     ``network_backward`` (Concentrate→Smelting = 0, then a zero mining chain upstream)
     may fill a primary the closes counted absent."""
-    acc = MockAcc(edges=EDGES + [("Matte", "CP")])
-    eff, conc = tmp_path / "eff.csv", tmp_path / "conc.csv"
-    write_eff_csv(eff, stripping_ratio=None)
-    write_conc_csv(conc)
-    imp = NetworkImputer(str(eff), str(conc), p=1.3, cv_cap=float("inf"))
-    imp.prepare(acc)
+    imp, acc = _matte_to_cp_imputer(tmp_path)
     f, sigma, _ = _run_logged(imp, acc, {("CER", "CP", "CC"): 70.0,
                                          ("Scrap", "Smelting", "CC"): 50.0})
     assert run_imputer(imp, f, sigma, 0, acc, pass_no=2) == []
