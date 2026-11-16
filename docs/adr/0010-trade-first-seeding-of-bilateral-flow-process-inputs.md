@@ -9,7 +9,10 @@ option-C "a single upstream gap blocks everything below" case). Verified in
 relaxed close counted as 0 is never filled by a Flow balance either, and both guard sets now live
 for the whole Stage 2 run, not one `impute()` call. Before, copper's imp `imp_20261112_154659_f4ec08ae`
 re-derived all 359 assumed-absent primaries: 23 by a balance in pass 1 (13 nonzero, 98.6 kt CC) and
-336 by `network_backward` in pass 2 as an explicit 0, at σ 0.24–88 kt. To be measured (#154).
+336 by `network_backward` in pass 2 as an explicit 0, at σ 0.24–88 kt. Shipped on measurement (#154,
+`opt_20261116_134050_b54f65dc`): from those zeros pass 2 had built phantom mine chains, 1,093 kt CC of CO→Mining in 13
+regions, seven of which mine nothing. Without them, the re-export anchors they supplied are violated: common-set
+sum-row Σz² +5.95 % vs `opt_20261112_135523_88fa69f3`, with Round-E unchanged to 0.01.
 
 **Amended 2026-11-12 (#135, #136) — the partition is two writer scopes; `trade.py` is gone.**
 `TradeImputer` is the trade `Fill` of the conc relation source (`FillImputer`, forward, σ rule
