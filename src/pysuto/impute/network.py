@@ -163,6 +163,7 @@ class NetworkImputer(BaseImputer):
         self._stripping: list[_Stripping] = []
         self._recipes: list[_RRecipe] = []
         self._relaxed_fills: set[int] = set()
+        self._assumed_absent: set[int] = set()   # primaries a relaxed close counted as 0
         self._flow_nodes: list[tuple[Relation, np.ndarray]] = []  # (CC balance, uses)
         self._edge_time: np.ndarray | None = None
         self._content: str = ""
@@ -189,6 +190,11 @@ class NetworkImputer(BaseImputer):
     def prepare(self, acc) -> None:
         get_edge_cache(acc)  # warm the per-acc edge cache used by the resolver
         resolver = ParamRelationResolver(acc)
+        # The ADR 0010 guard sets live for the whole Stage 2 run: the engine re-runs
+        # impute() in every cascade pass, and a pass that forgot the earlier relaxed
+        # closes re-derived 336 of copper's 359 absent primaries as 0 (#153).
+        self._relaxed_fills = set()
+        self._assumed_absent = set()
 
         # same-region flag per edge (ownership: write only same-region edges)
         em = acc.edge_meta
@@ -322,7 +328,6 @@ class NetworkImputer(BaseImputer):
         f, sigma = ledger.f, ledger.sigma
         self._n_clipped = 0
         self._n_written = 0
-        self._relaxed_fills = set()
         # Two-phase fixpoint. Strict phase: keep sweeping recipes + flow
         # balances until a full sweep fills nothing new (the engine cascade
         # re-runs us too, but converging here keeps chain propagation within
@@ -528,6 +533,11 @@ class NetworkImputer(BaseImputer):
         if fill is None:
             return
         e = fill.edge
+        # A primary a relaxed close counted as 0 is never re-derived by a balance either:
+        # the prior would hold both its 0 (inside the close's output) and the balance's
+        # value. The route stays an honest NaN gap, as for network_backward (#153).
+        if e in self._assumed_absent:
+            return
         # every other *writable* edge is therefore known; missing cross-region legs
         # and missing stock-change legs (non-writable) are treated as 0 (no trade on
         # that route / no stock change) — symmetric with the recipe's
@@ -586,4 +596,5 @@ class NetworkImputer(BaseImputer):
         ):
             return False
         self._n_written += 1
+        self._assumed_absent.update(assumed_absent)   # its 0s now sit in the prior
         return True
