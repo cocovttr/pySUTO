@@ -225,8 +225,8 @@ def _outcome_label(o: str) -> str:
 
 
 def sweep_frames(sweep_id: str, opt: str) -> dict:
-    """The knob sweep built on ``opt``, from the tables ``scripts/sweep_diag.py`` wrote:
-    the points' criterion outcomes (Fig. 5d) and, over the knobs influential on at
+    """The knob sweep built on ``opt`` (``--sweep-base``), from the tables
+    ``scripts/sweep_diag.py`` wrote: the points' criterion outcomes (Fig. 5d) and, over the knobs influential on at
     least one of them, the rank statistic and swing per outcome (5e)."""
     d = Path("data/proc/sweep") / sweep_id
     meta = json.load(open(d / "metadata.json"))
@@ -1226,7 +1226,7 @@ def write_outputs(out: Path, ledger: pd.DataFrame, numbers: dict, tables: dict) 
 # ---------------------------------------------------------------------------
 
 def main(opt: str, psut_id: str, tol_pair=None, uncprop_id=None, sweep_id=None,
-         out: Path = OUT_DIR) -> None:
+         out: Path = OUT_DIR, sweep_base=None) -> None:
     out.mkdir(parents=True, exist_ok=True)
     if bool(uncprop_id) != bool(sweep_id):
         raise ValueError("Fig. 5 needs both --uncprop-run-id and --sweep-id (or neither)")
@@ -1283,7 +1283,7 @@ def main(opt: str, psut_id: str, tol_pair=None, uncprop_id=None, sweep_id=None,
 
     # ---- Stage 5 and the knob sweep (Fig. 5) ---------------------------------------------
     U = stage5_frames(uncprop_id, opt) if uncprop_id else None
-    S = sweep_frames(sweep_id, opt) if sweep_id else None
+    S = sweep_frames(sweep_id, sweep_base or opt) if sweep_id else None
     cats = drawn_categories(U, S) if U and S else None
 
     # ---- ledger, figures, outputs -----------------------------------------------------
@@ -1297,6 +1297,7 @@ def main(opt: str, psut_id: str, tol_pair=None, uncprop_id=None, sweep_id=None,
     h24 = B["hhi"][B["hhi"].year == "2024"]
     numbers = {
         "opt_run_id": opt, "psut_run_id": psut_id, "tolerance_pair": list(tol_pair or []),
+        "sweep_base_run_id": (sweep_base or opt) if sweep_id else None,
         "n_rows": int(len(cf)), "n_edges": int(len(ef) // len(YEARS)) if len(ef) else None,
         "zsq_total_30y": float(dec.zsq_total.sum()),
         "zsq_by_family_30y": {f: float(dec[f"zsq_{f}"].sum()) for f in ("edges", "sum_rows", "soft_ratios")},
@@ -1372,6 +1373,10 @@ if __name__ == "__main__":
     ap.add_argument("--tol-pair", nargs=2, metavar=("OPT_OLD", "OPT_NEW"), default=None)
     ap.add_argument("--uncprop-run-id", default=None, help="Stage-5 run propagated from the opt run (Fig. 5a–c)")
     ap.add_argument("--sweep-id", default=None, help="knob sweep built on the opt run, scored by sweep_diag.py (Fig. 5d–e)")
+    ap.add_argument("--sweep-base", default=None, metavar="OPT",
+                    help="the opt run the sweep is built on, when it is an earlier chain a REP shows "
+                         "equal to this one (#152); default: the opt run itself")
     ap.add_argument("--out", default=str(OUT_DIR))
     a = ap.parse_args()
-    main(a.opt_run_id, a.psut_run_id, a.tol_pair, a.uncprop_run_id, a.sweep_id, Path(a.out))
+    main(a.opt_run_id, a.psut_run_id, a.tol_pair, a.uncprop_run_id, a.sweep_id, Path(a.out),
+         a.sweep_base)
