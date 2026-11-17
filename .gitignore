@@ -4,7 +4,6 @@
 *.pyo
 *.pyd
 *.egg-info/
-*.toml
 
 # Virtual environment
 .venv/
