@@ -43,14 +43,14 @@ TIMESTEPS   = None              # None → all years pooled in UD-R-01; or e.g. 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
 from pysuto.diag    import UncPropDiag
-from pysuto.logging import get_logger, add_run_handler
+from pysuto.logging import configure, get_logger, add_run_handler
 
 _log = get_logger("init_uncprop_diag")
 
 
 def main(uncprop_run_id: str, label: str = "", regions=None) -> None:
-    os.makedirs("logs", exist_ok=True)
-    add_run_handler(f"logs/init_uncprop_diag_{datetime.now():%Y%m%d_%H%M%S}.log")
+    configure(os.path.join("data", "logs"))
+    add_run_handler(os.path.join("data", "logs", f"init_uncprop_diag_{datetime.now():%Y%m%d_%H%M%S}.log"))
 
     _log.info("=== init_uncprop_diag START ===")
     _log.info("Loading UncPropDiag from uncprop_run_id='%s'", uncprop_run_id)

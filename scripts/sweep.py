@@ -27,7 +27,7 @@ from datetime import datetime
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
-from pysuto.logging  import get_logger, add_run_handler
+from pysuto.logging  import configure, get_logger, add_run_handler
 from pysuto.pipeline import RESERVE_GB, Axis, Chain, Pipeline, Sweep
 
 # ---------------------------------------------------------------------------
@@ -138,8 +138,8 @@ def main() -> None:
     if args.dry_run:
         dry_run(sweep)
         return
-    os.makedirs("logs", exist_ok=True)
-    add_run_handler(f"logs/sweep_{datetime.now():%Y%m%d_%H%M%S}.log")
+    configure(os.path.join("data", "logs"))
+    add_run_handler(os.path.join("data", "logs", f"sweep_{datetime.now():%Y%m%d_%H%M%S}.log"))
     dry_run(sweep)
     sid = sweep.run(label=LABEL, resume=args.resume)
     _log.info("sweep run %s under data/proc/sweep/", sid)

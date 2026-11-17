@@ -43,7 +43,7 @@ from pysuto.cases import add_case_arg, case_from_args
 from pysuto.cases.copper import CASE
 from pysuto.config import load_config
 from pysuto.registry import stage_lock
-from pysuto.logging import get_logger, add_run_handler
+from pysuto.logging import configure, get_logger, add_run_handler
 from pysuto.knobs import add_knob_args, overrides_from_cli, write_run_id
 from pysuto.stages import run_const
 
@@ -68,7 +68,10 @@ def main(imp_run_id: str, label: str, overrides: dict | None = None, *,
     and the run written to ``const_dir`` (default ``<data_dir>/proc/const``).
     """
     from datetime import datetime
-    add_run_handler(f"logs/init_copper_constraints_{datetime.now():%Y%m%d_%H%M%S}.log")
+    log_dir = os.path.join(data_dir, "logs")
+    configure(log_dir)
+    add_run_handler(os.path.join(
+        log_dir, f"init_copper_constraints_{datetime.now():%Y%m%d_%H%M%S}.log"))
     if config is not None:
         case = replace(case, acc_id=load_config(config).pipeline.acc_id)
     return run_const(case, imp_run_id, label, overrides, data_dir=data_dir,

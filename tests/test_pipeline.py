@@ -28,6 +28,7 @@ from pysuto.registry import SweepRunRegistry
 
 FAKE_DRIVER = r'''
 import argparse, json, os, sys, uuid
+D = sys.argv[sys.argv.index("--data-dir") + 1] if "--data-dir" in sys.argv else "data"
 STAGE = {"collect_aggregate_impute.py": "imp", "constraints.py": "const",
          "run_solver.py": "opt"}[os.path.basename(__file__)]
 p = argparse.ArgumentParser()
@@ -39,10 +40,11 @@ if STAGE == "const":
     p.add_argument("pos_label")
 p.add_argument("--set", action="append", default=[], dest="sets")
 p.add_argument("--run-id-file")
+p.add_argument("--data-dir", default="data")
 if STAGE in ("imp", "const"):
-    p.add_argument("--imp-dir", default=os.path.join("data", "proc", "imp"))
+    p.add_argument("--imp-dir", default=os.path.join(D, "proc", "imp"))
 if STAGE in ("const", "opt"):
-    p.add_argument("--const-dir", default=os.path.join("data", "proc", "const"))
+    p.add_argument("--const-dir", default=os.path.join(D, "proc", "const"))
 a = p.parse_args()
 print(f"{STAGE} starting", flush=True)
 if os.environ.get("FAKE_FAIL") == STAGE or os.environ.get("FAKE_FAIL_SET") in a.sets:
@@ -57,7 +59,7 @@ rid = f"{STAGE}_20261021_120000_{uuid.uuid4().hex[:8]}"
 up = {"imp": {"feed_run_ids": a.feed_ids}, "const": {"imp_run_id": a.imp_run_id},
       "opt": {"const_run_id": a.const_run_id}}[STAGE]
 out = {"imp": getattr(a, "imp_dir", None), "const": getattr(a, "const_dir", None),
-       "opt": os.path.join("data", "proc", "opt")}[STAGE]
+       "opt": os.path.join(D, "proc", "opt")}[STAGE]
 d = os.path.join(out, rid)
 os.makedirs(d)
 label = a.pos_label if STAGE == "const" else a.label
@@ -151,6 +153,27 @@ class TestPipelineRun:
         assert exc.value.step == "const" and exc.value.returncode == 3
         assert "const starting" in exc.value.tail
         assert len(_runs(repo, "opt")) == 1                       # the base only
+
+
+class TestPipelineDataDir:
+
+    def test_a_sweep_writes_under_its_pipelines_data_dir_and_nowhere_else(self, repo):
+        elsewhere = repo.root / "elsewhere"
+        for stage, rid in (("imp", repo.base.imp), ("const", repo.base.const),
+                           ("opt", repo.base.opt)):
+            d = elsewhere / "proc" / stage
+            d.mkdir(parents=True)
+            (repo.root / "data" / "proc" / stage / rid).rename(d / rid)
+        before = {p for p in repo.root.rglob("*") if "elsewhere" not in p.parts}
+        pipeline = Pipeline(steps=STEPS, base=repo.base, cwd=str(repo.root),
+                            scripts_dir=str(repo.root / "scripts"),
+                            data_dir=str(elsewhere))
+        sweep = Sweep(pipeline, [Axis("imp.TIME_WINDOW", [2, 3])], mode="grid")
+        sid = sweep.run(label="dd")
+        assert (elsewhere / "proc" / "sweep" / sid).is_dir()
+        assert len(list((elsewhere / "proc" / "opt").iterdir())) == 3   # base + 2 points
+        assert (elsewhere / "logs" / "pipeline").is_dir()
+        assert {p for p in repo.root.rglob("*") if "elsewhere" not in p.parts} == before
 
 
 class TestPipelineRunDirs:

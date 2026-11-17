@@ -48,7 +48,7 @@ from pysuto.cases    import add_case_arg, case_from_args
 from pysuto.cases.copper import CASE
 from pysuto.config   import load_config
 from pysuto.registry import stage_lock
-from pysuto.logging  import get_logger, add_run_handler
+from pysuto.logging  import configure, get_logger, add_run_handler
 from pysuto.knobs    import add_knob_args, overrides_from_cli, write_run_id
 from pysuto.stages   import run_imp
 
@@ -77,12 +77,10 @@ def main(feed_ids: list[str], label: str, overrides: dict | None = None, *,
     ``pin_inputs_from`` names an imp run in ``<data_dir>/proc/imp`` whose recorded input
     versions this run uses (#53).
     """
-    log_path = os.path.join(
-        "logs",
-        f"collect_aggregate_impute_{datetime.now().strftime('%Y%m%d_%H%M%S')}.log",
-    )
-    os.makedirs("logs", exist_ok=True)
-    add_run_handler(log_path)
+    log_dir = os.path.join(data_dir, "logs")
+    configure(log_dir)
+    add_run_handler(os.path.join(
+        log_dir, f"collect_aggregate_impute_{datetime.now().strftime('%Y%m%d_%H%M%S')}.log"))
     logger = get_logger("collect_aggregate_impute")
     logger.info("=== collect_aggregate_impute START ===")
     if config is not None:

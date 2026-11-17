@@ -30,7 +30,6 @@ import pandas as pd
 import scipy.sparse as sp
 
 from pysuto.acc import AccountingStructure
-from pysuto.config import load_config
 from pysuto.input_registry import InputRegistries
 from pysuto.meta import DataFeedMetadata
 from pysuto.conc import ConcordanceTable, WeightMatrix
@@ -639,7 +638,7 @@ def load_acc_structure(acc_id: str, acc_dir: str) -> AccountingStructure:
         )
         raise FileNotFoundError(
             f"\nAccounting structure '{acc_id}' not found at '{acc_path}'.\n"
-            f"Set pipeline.acc_id in config/config.yaml.\n"
+            f"Register it first (scripts/acc.py).\n"
             f"Available structures:\n{available}"
         )
 
@@ -683,9 +682,8 @@ def build_feed_concordance(spec: FeedSpec, raw_df: pd.DataFrame, tables: dict, a
     return ct
 
 
-def run_feed(spec: FeedSpec, *, acc_id: Optional[str] = None, data_dir: str = "data",
-             config_path: str = "config/config.yaml", run_log: Optional[str] = None,
-             diag: bool = True):
+def run_feed(spec: FeedSpec, *, acc_id: str, data_dir: str = "data",
+             run_log: Optional[str] = None, diag: bool = True):
     """Build, propagate and register one feed run (Stage 1) from ``spec``.
 
     Steps A → F of the three copper drivers, once: the registered accounting structure,
@@ -696,8 +694,9 @@ def run_feed(spec: FeedSpec, *, acc_id: Optional[str] = None, data_dir: str = "d
     Parameters
     ----------
     spec : FeedSpec
-    acc_id : str, optional
-        The accounting structure; default ``pipeline.acc_id`` of ``config_path``.
+    acc_id : str
+        The accounting structure, registered under ``<data_dir>/proc/acc``. Required: the
+        caller names it; no config file is read.
     data_dir : str
         Holds ``input/`` (the input registries) and ``proc/`` (``proc/acc``, and the
         feed registry at ``proc/feed/registry``, where the run is written).
@@ -717,7 +716,7 @@ def run_feed(spec: FeedSpec, *, acc_id: Optional[str] = None, data_dir: str = "d
     if run_log is not None:
         handler = add_run_handler(run_log)
     try:
-        return _run_feed(spec, acc_id, data_dir, config_path, run_log, diag)
+        return _run_feed(spec, acc_id, data_dir, run_log, diag)
     finally:
         if handler is not None:
             root.removeHandler(handler)
@@ -725,9 +724,7 @@ def run_feed(spec: FeedSpec, *, acc_id: Optional[str] = None, data_dir: str = "d
             root.setLevel(root_level)
 
 
-def _run_feed(spec, acc_id, data_dir, config_path, run_log, diag):
-    if acc_id is None:
-        acc_id = load_config(config_path).pipeline.acc_id
+def _run_feed(spec, acc_id, data_dir, run_log, diag):
     input_root   = os.path.join(data_dir, "input")
     acc_dir      = os.path.join(data_dir, "proc", "acc")
     registry_dir = os.path.join(data_dir, "proc", "feed", "registry")

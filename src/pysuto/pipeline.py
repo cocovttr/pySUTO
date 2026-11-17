@@ -151,7 +151,8 @@ class Pipeline:
         which the ``feed`` step calls in this process under the stage lock.
     scripts_dir : where the drivers live; default ``<cwd>/scripts``.
     log_dir : where each step's combined stdout/stderr is written; default
-        ``<cwd>/logs/pipeline``.
+        ``<data_dir>/logs/pipeline`` (``data`` when ``data_dir`` is ``None``), relative
+        to ``cwd``.
     run_dirs : per imp or const step, the directory its run is written to and the next
         step reads it from, instead of ``data/proc/<stage>`` — a sweep's scratch store.
         A stage outside ``steps`` is always read from ``data/proc``: it is the base's.
@@ -183,7 +184,8 @@ class Pipeline:
         self.stage1      = stage1
         self.cwd         = str(cwd or REPO_ROOT)
         self.scripts_dir = str(scripts_dir or os.path.join(self.cwd, "scripts"))
-        self.log_dir     = str(log_dir or os.path.join(self.cwd, "logs", "pipeline"))
+        self.log_dir     = str(log_dir or os.path.join(
+            self.cwd, self.data_dir or "data", "logs", "pipeline"))
         self.run_dirs    = {k: str(v) for k, v in (run_dirs or {}).items()}
         bad = [k for k in self.run_dirs if k not in _DIR_STEPS or k not in steps]
         if bad:
@@ -511,7 +513,8 @@ class Sweep:
         a sweep: it refuses a sweep declared differently or a checkout at another
         commit, and reruns every point not ``done``.
         """
-        reg = SweepRunRegistry(os.path.join(self.pipeline.cwd, "data", "proc", "sweep"))
+        reg = SweepRunRegistry(os.path.join(self.pipeline.cwd,
+                                          self.pipeline.data_dir or "data", "proc", "sweep"))
         decl = self.declaration()
         commit, dirty = _git_state(self.pipeline.cwd)
         if resume is None:
@@ -575,7 +578,7 @@ class Sweep:
         dirs = {**p.run_dirs, **{s: os.path.join(self.scratch_dir, sid, s)
                                  for s in self._scratch_steps()}}
         return Pipeline(steps=p.steps, base=p.base, cwd=p.cwd, scripts_dir=p.scripts_dir,
-                        log_dir=p.log_dir, run_dirs=dirs)
+                        log_dir=p.log_dir, run_dirs=dirs, data_dir=p.data_dir)
 
     def _release(self, pt, remaining, memo, runner) -> None:
         """Delete the scratch runs of ``pt`` that no point in ``remaining`` will reuse."""
