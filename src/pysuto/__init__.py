@@ -10,4 +10,4 @@ from importlib.metadata import PackageNotFoundError, version
 try:
     __version__ = version("pysuto")
 except PackageNotFoundError:  # source tree on sys.path, package not installed
-    __version__ = "0+unknown"
+    __version__ = "0.0.0+unknown"
