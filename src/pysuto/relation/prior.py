@@ -18,6 +18,8 @@ solve_lone_unknown(rel, f, scope)       The lone unknown of ``rel`` against the 
 from __future__ import annotations
 
 from dataclasses import dataclass
+from functools import reduce
+from operator import add
 from typing import Optional
 
 import numpy as np
@@ -56,7 +58,8 @@ def solve_lone_unknown(rel: Relation, f: np.ndarray,
     (ADR 0010). ``None`` is returned unless exactly one edge is unknown.
 
     The known terms are summed in the relation's edge order, positive and negative
-    coefficients apart (``P − N``, plain Python addition, no pairwise summation), so a
+    coefficients apart (``P − N``, plain left-to-right addition on every Python: no
+    pairwise summation, and not the built-in ``sum``, compensated since 3.12), so a
     ±1 balance reproduces ``Σ in − Σ out`` and a ratio twin ``f / r`` bit for bit.
     Raises ``ValueError`` on an inequality, which has no value to solve for.
     """
@@ -74,8 +77,8 @@ def solve_lone_unknown(rel: Relation, f: np.ndarray,
     known = ~nan
     g_k = g[known]
     terms = g_k * fe[known]
-    pos = float(sum(terms[g_k > 0].tolist()))
-    neg = float(sum((-terms[g_k < 0]).tolist()))
+    pos = reduce(add, terms[g_k > 0].tolist(), 0.0)
+    neg = reduce(add, (-terms[g_k < 0]).tolist(), 0.0)
     g_e = float(g[k])
     # "+ 0.0" folds a −0.0 (from 0 − 0 over a negative g_e) to +0.0
     value = (float(rel.rhs) - (pos - neg)) / g_e + 0.0

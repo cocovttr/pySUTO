@@ -1,0 +1,10 @@
+# A development environment on any platform. Bit-identity claims are made in the
+# reference environment instead: environment-reference.yml (linux-64, every build pinned).
+name: pysuto
+channels:
+  - conda-forge
+dependencies:
+  - python=3.9
+  - pip
+  - pip:
+      - -e .[dev]

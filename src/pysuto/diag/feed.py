@@ -18,6 +18,16 @@ import pandas as pd
 from ._plot import _C, _savefig
 
 
+def _hist_bins(values: np.ndarray, n: int) -> int:
+    """``n``, or 1 when ``values`` span too narrow a range for ``n`` finite-sized bins.
+
+    NumPy ≥ 2 refuses such bins ("Too many bins for data range"); a feed with one cv
+    for every row gives CV_root values a few ulps apart.
+    """
+    edges = np.linspace(np.min(values), np.max(values), n + 1)
+    return n if np.all(np.diff(edges) > 0) else 1
+
+
 class FeedDiagnostics:
     """
     Six-panel diagnostic figure for a single data feed after Stage 1.
@@ -223,7 +233,8 @@ class FeedDiagnostics:
         cv_pct = self.result.cv_root * 100
         valid  = cv_pct[np.isfinite(cv_pct) & (cv_pct > 0)]
         if len(valid):
-            ax.hist(valid, bins=30, color=_C["red"], edgecolor="white", linewidth=0.5)
+            ax.hist(valid, bins=_hist_bins(valid, 30), color=_C["red"], edgecolor="white",
+                    linewidth=0.5)
         ax.set_title("CV_root distribution (%)", fontweight="bold")
         ax.set_xlabel("CV (%)")
         ax.set_ylabel("# root edges")
