@@ -41,3 +41,8 @@ leg/
 scripts/report/insights_artifact_page/copper_metabolism.html
 scripts/report/insights_artifact_page/inline.js
 tutorial/runs/
+
+# Hygiene (#196): local scratch and build output
+.scratch/
+build/
+dist/
