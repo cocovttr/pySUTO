@@ -51,7 +51,6 @@ from pysuto.constraints.naming import ROW_META_COLS, build_constraint_id
 from pysuto.feedpipe import register_feed
 from pysuto.impute import BaseImputer
 from pysuto.input_registry import InputRegistries
-from pysuto.logging import get_logger
 from pysuto.registry import (
     ConstraintRunRegistry,
     DataFeedRegistry,
@@ -60,8 +59,6 @@ from pysuto.registry import (
     UncPropRunRegistry,
 )
 from pysuto.solver import Solver
-
-_log = get_logger("pysuto.cases.toy_ext")
 
 
 # =============================================================================
@@ -112,36 +109,40 @@ def _feed_run_ids(run_root, imp_run_id: str) -> "dict[str, str]":
 
 def _register_feed(run_root, feed: toy.SyntheticFeed, label: str,
                    seed: int = toy.SEED) -> str:
-    """Stage 1 for one synthetic feed, under ``label`` — the body of
-    :func:`toy.run_stage1`'s loop (a feed registered as ``"customs"`` would become the
-    latest Customs feed of the core chapters)."""
+    """Stage 1 for one synthetic feed, under ``label`` (a feed registered as
+    ``"customs"`` would become the latest Customs feed of the core chapters)."""
     tree      = toy._tree(run_root)
     acc_entry = InputRegistries.initialize(root=str(tree["input"])).acc.entry(toy.ACC_ID)
-    acc       = toy._load_acc(tree)
     registry  = DataFeedRegistry(odir=str(tree["feed"]))
     registry.load_index()
-    _, wm, F_src, result, row_summary = toy._feed_steps(feed, acc)
-    entry = register_feed(
-        wm, feed.metadata, result, registry,
-        parents       = {"inputs":   {"acc": dict(acc_entry),
-                                      "feed": {"id": feed.feed_id}},
-                         "upstream": {}},
-        F_src         = F_src,
-        label         = label,
-        stage_config  = {"p": toy.CASE.imp.P_PROP, "seed": seed},
-        stage_summary = row_summary,
-    )
+    entry, _ = toy._register_synthetic_feed(feed, toy._load_acc(tree), acc_entry,
+                                            registry, label, seed)
     return entry.run_id
+
+
+def _const_of(run_root, opt_run_id: str):
+    """The loaded const run an opt run solved (the opt sidecar's ``const_run_id``)."""
+    tree = toy._tree(run_root)
+    return ConstraintRunRegistry(str(tree["const"])).load(
+        toy._upstream(OptimRunRegistry(str(tree["opt"])).load_sidecar(opt_run_id),
+                      "const_run_id"))
+
+
+def _run_stages(run_root, imp_run_id: str, uncprop: bool = False) -> dict:
+    """Stages 3–4 (and 5 with ``uncprop``) from an imp run, under the current
+    :func:`_variant`: ``{"imp", "const", "opt"[, "uncprop"]}``."""
+    const = toy.run_stage3(run_root, imp_run_id)
+    opt   = toy.run_stage4(run_root, const)
+    ids   = {"imp": imp_run_id, "const": const, "opt": opt}
+    if uncprop:
+        ids["uncprop"] = toy.run_stage5(run_root, opt)
+    return ids
 
 
 def _row_z(run_root, opt_run_id: str, soft: pd.DataFrame, **match) -> float:
     """The signed z of the soft rows whose ``row_meta`` columns equal ``match`` (the
     largest ``|z|`` of them; ``row_meta``, never a parsed ``constraint_id``)."""
-    tree = toy._tree(run_root)
-    const = ConstraintRunRegistry(str(tree["const"])).load(
-        toy._upstream(OptimRunRegistry(str(tree["opt"])).load_sidecar(opt_run_id),
-                      "const_run_id"))
-    meta = const.row_meta
+    meta = _const_of(run_root, opt_run_id).row_meta
     keep = np.ones(len(meta), dtype=bool)
     for col, value in match.items():
         keep &= (meta[col] == value).to_numpy()
@@ -155,11 +156,11 @@ def _score(run_root, ids: dict, seed: int = toy.SEED) -> dict:
     tree = toy._tree(run_root)
     diag = toy.scoreboard(run_root, ids, seed)
     acc  = toy._load_acc(tree)
-    edge = toy._edge_id(acc, *(toy.reveal()[k] for k in toy._PLANTED_EDGE))
+    planted = toy.reveal()
+    edge = toy._edge_id(acc, *(planted[k] for k in toy._PLANTED_EDGE))
     rel  = diag.error_by_stage().loc["reconciled"]
     soft = toy.soft_residuals(run_root, ids["opt"])
     rows = soft[soft["kind"] == "row"]
-    planted = toy.reveal()
     return {"planted_row_z": _row_z(run_root, ids["opt"], soft, variant="usetotout",
                                     sector=planted["from_sector"],
                                     region=planted["from_region"], time=planted["time"]),
@@ -220,10 +221,7 @@ def break_contradiction(run_root, row_cvs=(0.01, 0.1, 1.0, 10.0), anchor_cv: flo
 
     def chain(name, imp_id, builders, tag):
         with _variant(f"{label}_{tag}", _with_builders(builders)):
-            const   = toy.run_stage3(run_root, imp_id)
-            opt     = toy.run_stage4(run_root, const)
-            uncprop = toy.run_stage5(run_root, opt)
-        runs[name] = {"imp": imp_id, "const": const, "opt": opt, "uncprop": uncprop}
+            runs[name] = _run_stages(run_root, imp_id, uncprop=True)
         return runs[name]
 
     for cv in row_cvs:
@@ -244,12 +242,9 @@ def break_contradiction(run_root, row_cvs=(0.01, 0.1, 1.0, 10.0), anchor_cv: flo
     feeds["customs"] = _register_feed(run_root, customs, f"{label}_fixed_customs")
     with _variant(f"{label}_fixed", _with_builders(
             _anchored_builders(row, anchor_cv, anchor_cv))):
-        imp     = toy.run_stage2(run_root, feeds)
-        const   = toy.run_stage3(run_root, imp)
-        opt     = toy.run_stage4(run_root, const)
-        uncprop = toy.run_stage5(run_root, opt)
-    runs["fixed"] = {"imp": imp, "const": const, "opt": opt, "uncprop": uncprop,
-                     "feed": feeds}
+        runs["fixed"] = _run_stages(run_root, toy.run_stage2(run_root, feeds),
+                                    uncprop=True)
+    runs["fixed"]["feed"] = feeds
     rows.append({"variant": "fixed", "row_cv": anchor_cv,
                  **_score(run_root, runs["fixed"])})
     return {"table": pd.DataFrame(rows).set_index("variant"), "runs": runs}
@@ -262,15 +257,15 @@ def break_contradiction(run_root, row_cvs=(0.01, 0.1, 1.0, 10.0), anchor_cv: flo
 _PHANTOM_CODE = ("Isla", "Portua")      # the phantom leg's exporter and importer
 
 
-def _edge_values(run_root, opt_run_id: str, edge_id: int) -> "tuple[float, float]":
-    """``(a_prior, a*)`` of one edge: the prior the QP started from and its solution."""
-    tree = toy._tree(run_root)
-    opt  = OptimRunRegistry(str(tree["opt"]))
-    const = ConstraintRunRegistry(str(tree["const"])).load(
-        toy._upstream(opt.load_sidecar(opt_run_id), "const_run_id"))
-    a_prior, _ = condition_prior(const.a_prior_global, const.sigma_a)
+def _edge_values(run_root, opt_run_id: str, edge_id: int
+                 ) -> "tuple[float, float, float]":
+    """``(a_prior, a*, σ_prior)`` of one edge: the prior the QP started from, its
+    solution and the conditioned prior σ the solver used."""
+    const = _const_of(run_root, opt_run_id)
+    a_prior, sigma = condition_prior(const.a_prior_global, const.sigma_a)
+    opt = OptimRunRegistry(str(toy._tree(run_root)["opt"]))
     a_star = toy._global(opt.load(opt_run_id), "F_opt", a_prior.size)
-    return float(a_prior[edge_id]), float(a_star[edge_id])
+    return float(a_prior[edge_id]), float(a_star[edge_id]), float(sigma[edge_id])
 
 
 def break_phantom(run_root, year: str = "2003", factor: float = 3.0,
@@ -287,7 +282,8 @@ def break_phantom(run_root, year: str = "2003", factor: float = 3.0,
     dict
         ``{"table": one-row DataFrame, "runs": {stage: run_id}}``; ``table`` has the
         leg's ``output`` (Isla's concentrate output, truth), ``truth``, ``prior`` and
-        ``a_star`` (kt, gross mass) and ``posterior_over_prior``.
+        ``a_star`` (kt, gross mass), ``posterior_over_prior`` and ``z``, the leg's
+        edge-term z ``(a* − prior) / σ_prior`` (the conditioned prior σ the solver used).
     """
     base = base or base_ids(run_root)
     tree = toy._tree(run_root)
@@ -311,16 +307,14 @@ def break_phantom(run_root, year: str = "2003", factor: float = 3.0,
     feeds = _feed_run_ids(run_root, base["imp"])
     feeds["customs"] = _register_feed(run_root, customs, f"{label}_customs")
     with _variant(label):
-        imp   = toy.run_stage2(run_root, feeds)
-        const = toy.run_stage3(run_root, imp)
-        opt   = toy.run_stage4(run_root, const)
-    prior, a_star = _edge_values(run_root, opt, leg)
+        runs = _run_stages(run_root, toy.run_stage2(run_root, feeds))
+    prior, a_star, sigma = _edge_values(run_root, runs["opt"], leg)
     table = pd.DataFrame([{
         "leg": f"Concentrate[{exporter}] → Smelting[{importer}] {year} {toy.GROSS}",
         "output": output, "truth": float(toy.truth_vector(truth, acc)[leg]),
-        "prior": prior, "a_star": a_star, "posterior_over_prior": a_star / prior}])
-    return {"table": table,
-            "runs": {"feed": feeds, "imp": imp, "const": const, "opt": opt}}
+        "prior": prior, "a_star": a_star, "posterior_over_prior": a_star / prior,
+        "z": (a_star - prior) / sigma}])
+    return {"table": table, "runs": {"feed": feeds, **runs}}
 
 
 # =============================================================================
@@ -445,15 +439,14 @@ class NetStockRow(BaseConstraintBuilder):
         self.sigma = sigma
 
     def build_static(self, acc) -> ConstraintBlock:
-        em = acc.edge_meta
-        hit = em[(em["to_sector"] == "Stock")
-                 & (em["valuation"] == acc.valuation_roles.content)]
+        em, content = acc.edge_meta, acc.valuation_roles.content
+        hit = em[(em["to_sector"] == "Stock") & (em["valuation"] == content)]
         m, meta = len(hit), pd.DataFrame({c: [None] * len(hit) for c in ROW_META_COLS})
         meta["constraint_id"] = [build_constraint_id("sum", "netstock", r, year=t)
                                  for r, t in zip(hit["to_region"], hit["time"])]
         meta["type"], meta["variant"] = "sum", "netstock"
         meta["is_hard"], meta["sense"] = False, "eq"
-        meta["time"], meta["valuation"] = hit["time"].to_numpy(), toy.CONTENT
+        meta["time"], meta["valuation"] = hit["time"].to_numpy(), content
         meta["sector"], meta["region"] = "Stock", hit["to_region"].to_numpy()
         G = sp.csr_matrix((np.ones(m), (np.arange(m), hit["edge_id"].to_numpy())),
                           shape=(m, acc.n_edges))
@@ -497,10 +490,9 @@ def run_seams(run_root, base: Optional[dict] = None, label: str = "toy_seams") -
         toy.CASE, imp=spec, const=dataclasses.replace(
             toy.CASE.const, builders=lambda ctx: toy.builders(ctx) + [NetStockRow()]))
     with _variant(label, case):
-        imp   = toy.run_stage2(run_root, feeds)
-        const = toy.run_stage3(run_root, imp)
-        opt   = toy.run_stage4(run_root, const)
+        runs = _run_stages(run_root, toy.run_stage2(run_root, feeds))
     tree = toy._tree(run_root)
-    log  = ImputationRunRegistry(str(tree["imp"])).load(imp).imputation_log.as_dataframe()
-    return {"runs": {"feed": feeds, "imp": imp, "const": const, "opt": opt},
+    log  = ImputationRunRegistry(str(tree["imp"])).load(
+        runs["imp"]).imputation_log.as_dataframe()
+    return {"runs": {"feed": feeds, **runs},
             "n_seeded": int((log["imputer_id"] == "scrap_seed").sum())}
