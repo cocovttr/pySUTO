@@ -18,6 +18,7 @@ A modular Python framework for constructing, reconciling, and propagating uncert
 ## Table of contents
 
 1. [Overview](#overview)
+   - [What the framework assumes](#what-the-framework-assumes)
 2. [Architecture](#architecture)
    - [Stage 1 — Datafeed](#stage-1--datafeed)
    - [Stage 2 — Aggregation & Imputation](#stage-2--aggregation--imputation)
@@ -45,6 +46,26 @@ Supply–use tables and material flow accounts are assembled from multiple data 
 - **Physical consistency** — supply must equal use for every node and every material-parameter efficiency must be respected. A linear-equality / inequality QP enforces these constraints while staying as close as possible to the aggregated data, with full uncertainty quantification on the optimised values.
 
 The package is organised into **six sequential stages**: datafeed assembly (per source), aggregation + imputation (across sources), constraint building, constrained optimisation, posterior uncertainty propagation, and PSUT/PIOT construction. Each stage has a clear input, a clear output, and its own persistence layer. A **sweep** re-runs Stages 2–4 once per knob point and records the points as one run (see [Pipeline and knobs](#pipeline-and-knobs)).
+
+### What the framework assumes
+
+Commitments of pySUTO that a second case cannot change through data or parameters, each with its source (`method.md` is [docs/manuscript/method.md](docs/manuscript/method.md)).
+
+1. The prior is Gaussian with a diagonal Σ_a: no covariance between edges (`method.md` §3.1.6, Eq. 2).
+2. Feeds combine by inverse variance, and every σ composition is one power-mean rule, default p = 1.3 in every consumer (`method.md` §3.1.2, Eq. 1).
+3. Hard rows hold exactly; soft rows are priced by σ_c⁻² (`method.md` §3.1.6, Eq. 2).
+4. One QP per period; no row couples two periods, enforced at build time (GLOSSARY "No cross-time coupling").
+5. No stage before Stage 6 drops σ: every inter-stage artefact carries value and σ together (`method.md` §3.1.1).
+6. A source edge's outgoing weights in W sum to one (a guard rejects a projection more than 1 % off the matched raw total); fan-in diversifies, fan-out leaves the CV unchanged (`method.md` §3.1.3).
+7. Pedigree scores map to a CV by the Laner (2016) exponential model, the five indicators summed in quadrature (README §Pedigree → coefficient of variation).
+8. An edge no feed or imputer covers is a flat prior at value 0 with a large σ (σ = 1e6 in copper and the toy), a noisy zero; the framework never guesses a value (`method.md` §3.1.4).
+9. Imputation fills are write-once and logged with method, source edges and coefficients (`method.md` §3.1.4).
+10. Build-time validation raises; it never clips, coerces or fills a bad input (CLAUDE.md "Numerical & performance conventions").
+11. A satellite flow carries a value but sits outside its node's balance (GLOSSARY "Satellite flow").
+12. Stage 6 propagates point estimates only; Stage-5 σ is not carried into the tables in v1 (ADR 0007).
+13. Results are year-local: a period slice is `[E_t]`, scattered through `cols_t` before any `G @ F` (GLOSSARY "Period slice").
+
+Copper's modelling choices, each measured against a rejected alternative, are in Table 2 of the manuscript ([docs/manuscript/method.md](docs/manuscript/method.md) §3.2.7), not here.
 
 ---
 
