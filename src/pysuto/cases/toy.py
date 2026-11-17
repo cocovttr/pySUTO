@@ -1145,8 +1145,8 @@ def run_stage6(run_root: PathLike, opt_run_id: Optional[str] = None,
     if png:
         path = tree["psut"] / run_id / f"sankey_supply_use_{period}_{CONTENT}.png"
         try:
-            psut.sankey(period).write_image(str(path), width=1400, height=800,
-                                            scale=1.5)
+            psut.sankey(period, unit=UNITS[CONTENT]).write_image(
+                str(path), width=1400, height=800, scale=1.5)
             _log.info("stage 6: Sankey → %s", path)
         except Exception as exc:        # kaleido missing or no browser: the PSUT stands
             _log.warning("stage 6: PNG skipped (%s: %s)", type(exc).__name__,

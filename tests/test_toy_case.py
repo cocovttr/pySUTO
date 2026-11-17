@@ -339,6 +339,22 @@ def test_the_sankey_tables_sum_to_the_psut_totals(chain, caplog):
 # Diagnostics and the tutorial's hooks
 # =============================================================================
 
+def test_stage6_titles_its_sankey_png_in_the_content_unit(chain, monkeypatch):
+    seen = {}
+
+    class _Figure:
+        def write_image(self, *args, **kwargs):
+            pass
+
+    def _sankey(self, period=None, valuation=None, **spec):
+        seen.update(spec)
+        return _Figure()
+
+    monkeypatch.setattr(toy.PSUT, "sankey", _sankey)
+    toy.run_stage6(chain["root"], chain["ids"]["opt"])
+    assert seen.get("unit") == toy.UNITS[toy.CONTENT]
+
+
 def test_truth_diag_draws_its_three_figures_and_summarises(chain, tmp_path, capsys):
     board = toy.scoreboard(chain["root"], chain["ids"])
     paths = board.plot(str(tmp_path))
