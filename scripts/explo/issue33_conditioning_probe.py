@@ -33,7 +33,7 @@ under ``--out``; nothing is registered and nothing is written under the data roo
 ``--report`` reprints the table of an earlier ``probe.csv``.
 
     PYTHONPATH=src python scripts/explo/issue33_conditioning_probe.py \\
-        --data-root /home/flhuber/Projects/pySUTO/data/proc --out <dir> \\
+        --data-root data/proc --out <dir> \\
         [--years 1995 2008 …] [--forms 0 A B] [--tols prod tight] [--threads 4]
 """
 from __future__ import annotations

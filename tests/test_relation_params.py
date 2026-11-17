@@ -46,7 +46,9 @@ class TestReadParams:
                      value_max="0.3", agg="true")]
         comma = read_params(_write(tmp_path / "c.csv", recs, ","), {"concentration"})
         semi  = read_params(_write(tmp_path / "s.csv", recs, ";"), {"concentration"})
-        assert comma == semi
+        # repr, not ==: a dataclass == treats two distinct NaN objects as unequal, and
+        # Python 3.13 no longer hands both files the same one
+        assert repr(comma) == repr(semi)
         assert [r.param_id for r in comma] == ["a", "b"]
 
     def test_row_is_typed(self, tmp_path):

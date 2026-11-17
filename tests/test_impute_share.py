@@ -55,7 +55,6 @@ def test_share_transfer_seeds_1995_and_seed_is_zero_mean():
     f[2] = 50.0; f[3] = 50.0
     # MESC 1995 missing (e6); base Cathode→FU 1995 = 200 (e7)
     f[7] = 200.0
-    missing = np.isnan(f)
 
     imp = ShareImputer(
         p95={("PSC", "A"): 0.05, ("MESC", "A"): 0.10}, legs=_LEGS,
@@ -80,7 +79,6 @@ def test_share_transfer_skips_when_no_base_or_no_observed_share():
     sigma = np.full(8, np.nan)
     # No observed PSC anywhere, base present → transfer has no share to carry → skip
     f[2] = 50.0; f[3] = 50.0; f[7] = 200.0
-    missing = np.isnan(f)
     imp = ShareImputer(p95={("PSC", "A"): 0.05, ("MESC", "A"): 0.10}, legs=_LEGS,
                        scale_abs_floor=1.0)
     run_imputer(imp, f, sigma, 0, acc)
@@ -94,7 +92,6 @@ def test_seed_skipped_when_base_missing():
     sigma = np.full(8, np.nan)
     f[1] = 3.0; f[4] = 60.0; f[5] = 40.0; f[2] = 50.0; f[3] = 50.0
     # e7 (MESC base) left NaN → MESC seed must skip (leave for flat-prior)
-    missing = np.isnan(f)
     imp = ShareImputer(p95={("PSC", "A"): 0.05, ("MESC", "A"): 0.10}, legs=_LEGS,
                        scale_abs_floor=1.0)
     run_imputer(imp, f, sigma, 0, acc)
@@ -109,7 +106,6 @@ def test_seed_sigma_is_one_percent_of_the_fu_leg_floored_at_0_3_kt():
     f = np.full(8, np.nan)
     sigma = np.full(8, np.nan)
     f[7] = 200.0                       # Cathode→FU 1995 (the co-located base)
-    missing = np.isnan(f)
     imp = ShareImputer(p95={}, legs=_LEGS, scale_abs_floor=100.0, seed_cv=0.01,
                        seed_abs_floor=0.3)
     entries = run_imputer(imp, f, sigma, 0, acc)

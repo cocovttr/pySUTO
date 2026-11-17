@@ -22,7 +22,6 @@ import os
 import tempfile
 import warnings
 from dataclasses import dataclass
-from pathlib import Path
 from typing import Callable, Optional
 
 import numpy as np
@@ -848,7 +847,6 @@ def _run_feed(spec, acc_id, data_dir, run_log, diag):
 if __name__ == "__main__":
     import sys
     import json
-    import dataclasses
 
     sys.path.insert(0, os.path.dirname(__file__))
 

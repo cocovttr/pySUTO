@@ -90,7 +90,7 @@ def check_type(name: str, value: object, default: object) -> None:
 
 
 def apply_overrides(namespace: dict, overrides: Mapping[str, object]) -> None:
-    """Set each overridden knob in the driver's module globals."""
+    """Set each overridden knob in ``namespace``."""
     for name, value in overrides.items():
         namespace[name] = value
 

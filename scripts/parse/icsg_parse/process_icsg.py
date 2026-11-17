@@ -162,7 +162,7 @@ def main():
     # -- 2. NAS onto the flows schema ------------------------------------------
     nas_mapped = net_addition_to_stock(levels)
 
-    print(f"\nType / Process distribution in NAS:")
+    print("\nType / Process distribution in NAS:")
     print(nas_mapped.groupby(["Type", "Process"]).size().reset_index(name="count").to_string(index=False))
 
     # -- 3. Concatenate with flows ---------------------------------------------

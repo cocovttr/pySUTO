@@ -34,7 +34,6 @@ import pandas as pd
 import pytest
 
 from pysuto.acc import ValuationRoles
-from pysuto.agg import AggregationResult
 from pysuto.impute import NetworkImputer, run_imputer
 from pysuto.relation.structure import process_recipes
 

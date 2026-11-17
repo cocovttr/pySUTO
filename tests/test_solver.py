@@ -1281,7 +1281,8 @@ class _SlsqpBackend:
 
     @property
     def settings(self) -> dict:
-        return {"method": "SLSQP", "ftol": 1e-14}
+        # 1e-14 ends in SLSQP exit mode 8 with SciPy 1.13.1's pip wheel, at the same x (#196)
+        return {"method": "SLSQP", "ftol": 1e-12}
 
     def solve(self, problem, reuse=False, verbose=False):
         from scipy.optimize import minimize
@@ -1297,7 +1298,7 @@ class _SlsqpBackend:
                          "jac": lambda x: -A_le})
         res = minimize(lambda x: 0.5 * x @ P @ x + q @ x, np.zeros(problem.n),
                        jac=lambda x: P @ x + q, constraints=cons, method="SLSQP",
-                       options={"ftol": 1e-14, "maxiter": 500})
+                       options={"ftol": 1e-12, "maxiter": 500})
         return QPResult(x=res.x, status=self._status if res.success else "failed",
                         raw_status=str(res.message), iterations=int(res.nit),
                         solve_time_s=0.0, objective=float(res.fun))

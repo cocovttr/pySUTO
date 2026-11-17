@@ -34,28 +34,23 @@ import os
 import sys
 
 # ---------------------------------------------------------------------------
-# USER CONFIGURATION
-# ---------------------------------------------------------------------------
-DATA_DIR  = "data"          # holds proc/opt, proc/const, proc/acc; output → proc/psut
-PRIMARY   = None          # valuation the PSUT views default to (None: the acc's content
-                          # valuation; copper's case names CC); every valuation is loaded
-KNOBS     = ("PRIMARY",)  # the constants a case may set (CaseSpec.driver_knobs["psut"])
-FIGS_DIR  = os.path.join("figs", "psut")   # where --sankey writes its figures
-# ---------------------------------------------------------------------------
-# END USER CONFIGURATION
+# The body is pysuto.stages.run_psut (#186) and so are the constants it reads (PRIMARY,
+# FIGS_DIR): this driver keeps the argument parsing, the stage lock and the log handler.
 # ---------------------------------------------------------------------------
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
-from pysuto.case import CaseSpec, check_case
+from pysuto.case import CaseSpec
 from pysuto.cases import add_case_arg, case_from_args
 from pysuto.cases.copper import CASE
 from pysuto.knobs import write_run_id
-from pysuto.psut import PSUT
-from pysuto.registry import OptimRunRegistry, PsutRunRegistry, stage_lock
+from pysuto.registry import stage_lock
 from pysuto.logging import get_logger, start_run_log
+from pysuto.stages import FIGS_DIR, PRIMARY, PSUT_KNOBS as KNOBS, run_psut
 
 _log = get_logger("init_psut")
+
+DATA_DIR = "data"          # holds proc/opt, proc/const, proc/acc; output → proc/psut
 
 
 def main(
@@ -70,63 +65,8 @@ def main(
     case:       CaseSpec = CASE,         # recorded in the sidecar; must have made the opt run
 ) -> str:
     start_run_log(data_dir, "init_psut")
-
-    _log.info("=== init_psut START ===")
-    _log.info("opt_run_id=%s  primary=%s  timesteps=%s  data_dir=%s",
-              opt_run_id, primary, timesteps or "all", data_dir)
-
-    case_knobs = case.driver_knobs_for("psut", KNOBS, globals())
-    if primary is None:
-        primary = case_knobs.get("PRIMARY", PRIMARY)
-    proc = os.path.join(data_dir, "proc")
-    check_case(OptimRunRegistry(os.path.join(proc, "opt")).load_sidecar(opt_run_id), case)
-    psut = PSUT.from_opt_run(
-        opt_run_id,
-        timesteps = timesteps,
-        primary   = primary,
-        opt_dir   = os.path.join(proc, "opt"),
-        const_dir = os.path.join(proc, "const"),
-        acc_dir   = os.path.join(proc, "acc"),
-        input_dir = os.path.join(data_dir, "input"),
-    )
-
-    registry    = PsutRunRegistry(os.path.join(proc, "psut"))
-    psut_run_id = registry.register(
-        psut,
-        parents = {
-            "inputs":   {"acc": psut.acc_ref},
-            "upstream": {"opt_run_id": opt_run_id, "const_run_id": psut.const_run_id},
-        },
-        stage_config = {"primary": psut.primary, "case_knobs": case_knobs,
-                         "case": case.ref()},
-        label = label,
-    )
-
-    _log.info("PsutRun '%s' persisted under %s  %r", psut_run_id, registry.storage_dir, psut)
-
-    if sankey is not None:
-        world = psut.aggregate(region="World", keep_crossings=True)
-        piot  = world.to_piot("market_share", level="Z")
-        os.makedirs(figs_dir, exist_ok=True)
-        for period in (sankey or [world.latest()]):
-            for name, view in (("supply_use", world), ("process_network", piot)):
-                fig  = view.sankey(period)
-                stem = os.path.join(figs_dir, f"sankey_{name}_World_{period}_{psut.primary}")
-                fig.write_html(stem + ".html", include_plotlyjs="cdn")
-                _log.info("Sankey → %s.html", stem)
-                if png:
-                    _write_png(fig, stem + ".png")
-    _log.info("=== init_psut DONE ===")
-    return psut_run_id
-
-
-def _write_png(fig, path: str) -> None:
-    """A static copy when kaleido (and its browser) can render; otherwise a note."""
-    try:
-        fig.write_image(path, width=1400, height=800, scale=1.5)
-        _log.info("Sankey → %s", path)
-    except Exception as exc:                    # kaleido missing or no browser: the HTML stands
-        _log.warning("PNG skipped for %s (%s: %s)", path, type(exc).__name__, str(exc)[:120])
+    return run_psut(case, opt_run_id, label, primary, timesteps, data_dir=data_dir,
+                    sankey=sankey, figs_dir=figs_dir, png=png, logger=_log)
 
 
 if __name__ == "__main__":
@@ -155,7 +95,7 @@ if __name__ == "__main__":
     args = parser.parse_args()
     case = case_from_args(parser, args)
     try:
-        case.driver_knobs_for("psut", KNOBS, globals())     # a bad case value is a usage error
+        case.driver_knobs_for("psut", KNOBS, {"PRIMARY": PRIMARY})     # a bad case value is a usage error
     except (KeyError, TypeError) as exc:
         parser.error(exc.args[0] if exc.args else str(exc))
     with stage_lock("psut", root=os.path.join(args.data_dir, "proc")):   # #101

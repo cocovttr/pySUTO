@@ -9,10 +9,8 @@ Per-feed coverage, Omega weights, f_agg/σ_agg distributions.
 from __future__ import annotations
 
 import os
-from typing import Any, Optional
 
 import numpy as np
-import pandas as pd
 
 from ._plot import _C, _savefig
 

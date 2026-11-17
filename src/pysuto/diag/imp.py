@@ -10,7 +10,7 @@ evolution, TimeImputer timeseries.
 from __future__ import annotations
 
 import os
-from typing import Any, Optional
+from typing import Optional
 
 import numpy as np
 import pandas as pd
@@ -297,7 +297,7 @@ class ImpDiagnostic:
         ]
 
         if not log_df.empty:
-            lines.append(f"\n  Fills per step:")
+            lines.append("\n  Fills per step:")
             for step, grp in log_df.groupby("step"):
                 dom = grp["method"].value_counts().index[0]
                 sid = self._step_label(int(step))
@@ -604,7 +604,7 @@ class ImpDiagnostic:
 
         bp = ax.boxplot(
             data,
-            labels=labels,
+            tick_labels=labels,
             patch_artist=True,
             showfliers=True,
             flierprops=dict(
@@ -692,7 +692,7 @@ class ImpDiagnostic:
 
         bp = ax.boxplot(
             data,
-            labels=labels,
+            tick_labels=labels,
             patch_artist=True,
             showfliers=True,
             flierprops=dict(

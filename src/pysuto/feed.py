@@ -21,17 +21,13 @@ variation derived from the pedigree matrix (Laner et al. 2016).
 
 from __future__ import annotations
 
-import os
-import pickle
-import warnings
 from abc import ABC, abstractmethod
 from typing import Optional
 
 import numpy as np
-import pandas as pd
 import scipy.sparse as sp
 
-from pysuto.unc import UncertaintyMixin, PedigreeScores, PropagationResult
+from pysuto.unc import UncertaintyMixin, PedigreeScores
 
 
 # =============================================================================

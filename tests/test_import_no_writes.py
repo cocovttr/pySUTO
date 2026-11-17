@@ -28,12 +28,32 @@ def test_importing_every_module_from_an_empty_directory_writes_nothing(tmp_path)
         "import importlib, pkgutil, pysuto\n"
         "for m in pkgutil.walk_packages(pysuto.__path__, 'pysuto.'):\n"
         "    importlib.import_module(m.name)\n"
+        "import sys\n"
+        "assert 'pysuto._step' in sys.modules\n"
     )
     env = {**os.environ, "PYTHONPATH": str(SRC)}
     proc = subprocess.run([sys.executable, "-c", code], cwd=tmp_path, env=env,
                           capture_output=True, text=True)
     assert proc.returncode == 0, proc.stderr[-2000:]
     assert list(tmp_path.iterdir()) == []
+
+
+def test_step_child_starts_its_run_log_under_the_data_dir(tmp_path, monkeypatch):
+    """The child of a pipeline step (#186) logs the #190 way: ``<data_dir>/logs``."""
+    import json
+    from dataclasses import asdict
+    from pysuto import _step
+    from pysuto import logging as plog
+    seen = []
+    monkeypatch.setattr(plog, "start_run_log", lambda d, name: seen.append((d, name)))
+    monkeypatch.setattr(_step, "run_spec", lambda spec: "imp_x")
+    spec = _step.StepSpec(step="imp", case="toy", label="l", upstream=None,
+                          data_dir=str(tmp_path / "d"), config=None,
+                          run_id_file=str(tmp_path / "rid"))
+    path = tmp_path / "spec.json"
+    path.write_text(json.dumps(asdict(spec)))
+    assert _step.main([str(path)]) == 0
+    assert seen == [(str(tmp_path / "d"), "step_imp")]
 
 
 def test_python_m_pysuto_run_without_data_dir_exits_2(capsys):
