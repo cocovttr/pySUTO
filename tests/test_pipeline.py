@@ -179,6 +179,32 @@ class TestPipelineRunDirs:
             _pipeline(repo, steps=("const", "opt"), run_dirs=dirs)
 
 
+class TestPipelineRelativePaths:
+
+    def test_a_relative_config_and_run_dir_resolve_against_the_pipelines_cwd(
+            self, repo, monkeypatch, tmp_path_factory):
+        """The drivers once ran with ``cwd=cwd``; a path is relative to it, not to the
+        process's working directory (#186 review)."""
+        from pysuto.cases import toy
+        elsewhere = tmp_path_factory.mktemp("process_cwd")
+        (repo.root / "c.yaml").write_text("pipeline:\n  acc_id: other\n")
+        seen = {}
+        orig = pipeline_module.run_imp
+
+        def spy(case, *args, **kwargs):
+            seen["acc_id"], seen["imp_dir"] = case.acc_id, kwargs.get("imp_dir")
+            return orig(StubCase(), *args, **kwargs)
+
+        monkeypatch.setattr(pipeline_module, "run_imp", spy)
+        monkeypatch.chdir(elsewhere)
+        Pipeline(steps=("imp",), base=repo.base, cwd=str(repo.root), case=toy.CASE,
+                 config="c.yaml", run_dirs={"imp": "scratch/imp"},
+                 log_dir=str(repo.root / "logs")).run({}, label="rel")
+        assert seen["acc_id"] == "other"
+        assert seen["imp_dir"] == str(repo.root / "scratch" / "imp")
+        assert not (elsewhere / "scratch").exists()
+
+
 class TestPipelineRefusals:
 
     def test_steps_must_be_a_contiguous_slice_of_the_stages(self, repo):

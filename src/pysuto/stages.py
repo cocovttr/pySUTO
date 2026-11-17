@@ -322,7 +322,6 @@ def run_const(case: CaseSpec, imp_run_id: str, label: str,
     return constraint_run.run_id
 
 
-
 # =============================================================================
 # Stages 4–6: the drivers' tuning constants (moved here from scripts/run_solver.py,
 # uncertainty_propagation.py and psut.py so that the library runs without them, #186)
@@ -358,7 +357,8 @@ MAX_ITER = 2000
 # and accept that floor as AlmostSolved through the reduced tolerances (gap_rel
 # 1e-5 is not reached there, 1e-4 is).
 # #33 (ADR 0039 am. 2026-10-21): solved for the defects, every year of the final chain
-# reaches Solved at gap 1e-8 in 64–81 iterations within 0.2 of a certified lower bound on J
+# reaches Solved at gap 1e-8 in 64–81 iterations within 0.2 of a certified lower bound on
+# J
 # (opt_20261020_112726_2f451f31 vs opt_20261019_171746_3272682b: Σ_t J −66,702).
 TOL_FEAS            = 1e-8
 TOL_GAP_REL         = 1e-8
@@ -393,7 +393,8 @@ DIRECT_SOLVE_METHOD = "faer"
 # relative to Clarabel's own cost, so TOL_GAP_REL is ~10× tighter in absolute terms
 # under "defects". Measured on the full chain (#33, ADR 0039 am. 2026-10-21):
 # opt_20261020_112726_2f451f31 lowers Σ_t J by 66,702 (−2.13 % vs
-# opt_20261019_171746_3272682b) in 30/30 years; the feasibility probe has no σ-weighted cost
+# opt_20261019_171746_3272682b) in 30/30 years; the feasibility probe has no σ-weighted
+# cost
 # and is unaffected.
 QP_VARIABLES        = "defects"
 
@@ -407,8 +408,10 @@ OPT_KNOBS = (
 
 # Stage 5 (no knobs: the uncprop step takes none).
 ALPHA                = 0.05
-BIND_TOL             = 1e-6    # kt — a hard inequality row binds when G·a* − c ≥ −BIND_TOL (#27)
-RANK_TOL             = 1e-10   # pivot tolerance for hard rows dependent on the others (#27)
+BIND_TOL             = 1e-6    # kt — a hard inequality row binds when G·a* − c ≥ −BIND_TOL
+                               # (#27)
+RANK_TOL             = 1e-10   # pivot tolerance for hard rows dependent on the others
+                               # (#27)
 EXCLUDE_SCALE_TOTALS = False   # True leaves the scale totals out of S(t) — ablation (#87)
 
 # Stage 6.
@@ -471,7 +474,8 @@ def run_opt(case: CaseSpec, const_run_id: str, label: str = "",
     _log.info("Loading Solver with ClarabelBackend (const_dir=%s)", const_dir)
     # Termination tolerances: see the constants above (Round W.1).
     backend = ClarabelBackend(tol_feas=cfg["TOL_FEAS"],
-                              tol_gap_rel=cfg["TOL_GAP_REL"], tol_gap_abs=cfg["TOL_GAP_ABS"],
+                              tol_gap_rel=cfg["TOL_GAP_REL"],
+                              tol_gap_abs=cfg["TOL_GAP_ABS"],
                               reduced_tol_feas=cfg["REDUCED_TOL_FEAS"],
                               reduced_tol_gap_rel=cfg["REDUCED_TOL_GAP_REL"],
                               reduced_tol_gap_abs=cfg["REDUCED_TOL_GAP_ABS"],
@@ -578,7 +582,8 @@ def run_uncprop(case: CaseSpec, opt_run_id: str, label: str = "", *,
     )
 
     _log.info(
-        "UncPropRun '%s' persisted under %s  (n_t=%d, mean_trace_contraction=%.3f, max_resid_hard=%.3e)",
+        "UncPropRun '%s' persisted under %s  (n_t=%d, mean_trace_contraction=%.3f, "
+        "max_resid_hard=%.3e)",
         uncprop_run_id, uncprop_dir, len(result.per_timestep),
         mean_contraction, max_resid_hard,
     )
@@ -647,7 +652,8 @@ def run_psut(case: CaseSpec, opt_run_id: str, label: str = "",
         label = label,
     )
 
-    _log.info("PsutRun '%s' persisted under %s  %r", psut_run_id, registry.storage_dir, psut)
+    _log.info("PsutRun '%s' persisted under %s  %r", psut_run_id, registry.storage_dir,
+              psut)
 
     if sankey is not None:
         world = psut.aggregate(region="World", keep_crossings=True)
@@ -656,7 +662,8 @@ def run_psut(case: CaseSpec, opt_run_id: str, label: str = "",
         for period in (sankey or [world.latest()]):
             for name, view in (("supply_use", world), ("process_network", piot)):
                 fig  = view.sankey(period)
-                stem = os.path.join(figs_dir, f"sankey_{name}_World_{period}_{psut.primary}")
+                stem = os.path.join(
+                    figs_dir, f"sankey_{name}_World_{period}_{psut.primary}")
                 fig.write_html(stem + ".html", include_plotlyjs="cdn")
                 _log.info("Sankey → %s.html", stem)
                 if png:
@@ -670,5 +677,6 @@ def _write_png(fig, path: str, _log: logging.Logger) -> None:
     try:
         fig.write_image(path, width=1400, height=800, scale=1.5)
         _log.info("Sankey → %s", path)
-    except Exception as exc:                    # kaleido missing or no browser: the HTML stands
-        _log.warning("PNG skipped for %s (%s: %s)", path, type(exc).__name__, str(exc)[:120])
+    except Exception as exc:          # kaleido missing or no browser: the HTML stands
+        _log.warning("PNG skipped for %s (%s: %s)", path, type(exc).__name__,
+                     str(exc)[:120])

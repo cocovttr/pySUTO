@@ -50,7 +50,9 @@ import numpy as np
 import pandas as pd
 
 sys.path.insert(0, "src")
+from pysuto.cases.copper import CASE                              # noqa: E402
 from pysuto.pipeline import Chain, Pipeline                       # noqa: E402
+from pysuto.stages import opt_defaults                            # noqa: E402
 
 REF      = "opt_20261021_131744_58504ad3"      # the final reference chain (#110)
 PROC     = os.path.join("data", "proc")
@@ -74,20 +76,20 @@ def driver_defaults() -> dict:
                                                       os.path.join("scripts", script))
         mod = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(mod)
-        # Stages 2 and 3 read their knobs from the case spec (#120)
+        # Stages 2 and 3 read their knobs from the case spec (#120), Stage 4 from pysuto.stages
         ns = (getattr(mod.CASE, stage).knobs() if stage in ("imp", "const")
-              else {k: getattr(mod, k) for k in mod.KNOBS})
+              else opt_defaults())
         out.update({f"{stage}.{k}": ns[k] for k in mod.KNOBS})
     return out
 
 
 def run_chains(ref: str) -> tuple:
     base = Chain.from_opt_run(ref)
-    two = Pipeline(base=base, cwd=os.getcwd()).run({}, label="r106 zero overrides")
+    two = Pipeline(base=base, cwd=os.getcwd(), case=CASE).run({}, label="r106 zero overrides")
     print(f"chain 2: {two}", flush=True)
     lock_after = [os.path.exists(os.path.join(PROC, ".stage.lock"))]
     dirs = {s: os.path.join(SCRATCH, s) for s in ("imp", "const")}
-    three = Pipeline(base=base, cwd=os.getcwd(), run_dirs=dirs).run(
+    three = Pipeline(base=base, cwd=os.getcwd(), run_dirs=dirs, case=CASE).run(
         driver_defaults(), label="r106 explicit defaults")
     print(f"chain 3: {three}", flush=True)
     lock_after.append(os.path.exists(os.path.join(PROC, ".stage.lock")))

@@ -35,12 +35,8 @@ import sys
 from datetime import datetime
 
 # ---------------------------------------------------------------------------
-# USER CONFIGURATION
-# ---------------------------------------------------------------------------
-DATA_DIR  = "data"          # holds proc/opt, proc/const, proc/acc; output → proc/psut
-# The body is pysuto.stages.run_psut (#186), with its constants (PRIMARY, FIGS_DIR).
-# ---------------------------------------------------------------------------
-# END USER CONFIGURATION
+# The body is pysuto.stages.run_psut (#186) and so are the constants it reads (PRIMARY,
+# FIGS_DIR): this driver keeps the argument parsing, the stage lock and the log handler.
 # ---------------------------------------------------------------------------
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
@@ -54,6 +50,8 @@ from pysuto.logging import get_logger, add_run_handler
 from pysuto.stages import FIGS_DIR, PRIMARY, PSUT_KNOBS as KNOBS, run_psut
 
 _log = get_logger("init_psut")
+
+DATA_DIR = "data"          # holds proc/opt, proc/const, proc/acc; output → proc/psut
 
 
 def main(

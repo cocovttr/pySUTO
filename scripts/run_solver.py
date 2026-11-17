@@ -94,7 +94,8 @@ if __name__ == "__main__":
     args = parser.parse_args()
     case = case_from_args(parser, args)
     try:
-        case.driver_knobs_for("opt", KNOBS, opt_defaults())      # a bad case value is a usage error
+        # a bad case value is a usage error
+        case.driver_knobs_for("opt", KNOBS, opt_defaults())
     except (KeyError, TypeError) as exc:
         parser.error(exc.args[0] if exc.args else str(exc))
     overrides = overrides_from_cli(parser, args, KNOBS, opt_defaults())

@@ -46,6 +46,7 @@ import os
 import re
 import shutil
 import subprocess
+import sys
 import time
 import traceback
 from dataclasses import dataclass, replace
@@ -134,8 +135,8 @@ class Pipeline:
     base : the chain the first step's upstream comes from; stages outside ``steps``
         keep the base chain's runs in the result. A chain whose first step is ``feed``
         needs none.
-    cwd : the directory ``data_dir`` and ``log_dir`` are relative to; default the
-        working directory.
+    cwd : the directory ``data_dir``, ``config``, ``log_dir`` and ``run_dirs`` are
+        relative to; default the working directory.
     case : the :class:`~pysuto.case.CaseSpec` every step runs, passed to the stage
         functions as the object (required).
     data_dir : the data root of every step, holding ``proc/`` and ``input/`` (default
@@ -153,14 +154,11 @@ class Pipeline:
 
     def __init__(self, steps: tuple = STEPS, base: Optional[Chain] = None,
                  cwd: Optional[str] = None, log_dir: Optional[str] = None,
-                 run_dirs: Optional[Mapping[str, str]] = None,
-                 case: Optional[CaseSpec] = None, data_dir: Optional[str] = None,
-                 config: Optional[str] = None) -> None:
+                 run_dirs: Optional[Mapping[str, str]] = None, *, case: CaseSpec,
+                 data_dir: Optional[str] = None, config: Optional[str] = None) -> None:
         steps = tuple(steps)
         if not _is_contiguous_slice(steps):
             raise ValueError(f"steps {steps} must be a contiguous slice of {ALL_STEPS}")
-        if case is None:
-            raise ValueError("a pipeline needs the CaseSpec its steps run")
         if base is None and steps[0] == "feed":
             base = Chain(feed_run_ids=())
         if base is None:
@@ -174,11 +172,10 @@ class Pipeline:
         self.base        = base
         self.case        = case
         self.data_dir    = None if data_dir is None else str(data_dir)
-        self.config      = None if config is None else str(config)
-        self.stage1      = case.stage1
         self.cwd         = str(cwd or os.getcwd())
+        self.config      = None if config is None else self._under_cwd(config)
         self.log_dir     = str(log_dir or os.path.join(self.cwd, "logs", "pipeline"))
-        self.run_dirs    = {k: str(v) for k, v in (run_dirs or {}).items()}
+        self.run_dirs    = {k: self._under_cwd(v) for k, v in (run_dirs or {}).items()}
         bad = [k for k in self.run_dirs if k not in _DIR_STEPS or k not in steps]
         if bad:
             raise ValueError(f"run_dirs {bad}: only the pipeline's imp and const steps "
@@ -221,6 +218,10 @@ class Pipeline:
             chain = replace(chain, **{step: rid})
         return chain
 
+    def _under_cwd(self, path) -> str:
+        """``path`` resolved against ``cwd`` (an absolute path stays as it is)."""
+        return os.path.abspath(os.path.join(self.cwd, str(path)))
+
     def _data_root(self) -> str:
         return os.path.abspath(os.path.join(self.cwd, self.data_dir or "data"))
 
@@ -230,7 +231,7 @@ class Pipeline:
         data_dir = self._data_root()
         os.makedirs(os.path.join(data_dir, "proc"), exist_ok=True)
         with stage_lock("pipeline_feed", root=os.path.join(data_dir, "proc")):
-            run_ids = self.stage1(data_dir)
+            run_ids = self.case.stage1(data_dir)
         _log.info("step feed: %s", ", ".join(run_ids.values()))
         return tuple(run_ids.values())
 
@@ -285,14 +286,11 @@ def _stdout_to(log):
     """Send the step's stdout — its ``print`` calls and the console handlers of the
     loggers, which bind ``sys.stdout`` when created — to ``log``; the command's own
     stdout then carries its result only. Handlers are pointed back afterwards."""
-    import sys
     out = sys.stdout
-    moved = []
     for lg in [logging.getLogger(), *logging.Logger.manager.loggerDict.values()]:
         for h in getattr(lg, "handlers", ()):
             if type(h) is logging.StreamHandler and h.stream is out:
                 h.setStream(log)
-                moved.append(h)
     sys.stdout = log
     try:
         yield
