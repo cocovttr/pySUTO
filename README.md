@@ -66,10 +66,9 @@ Commitments of pySUTO that a second case cannot change through data or parameter
 7. Pedigree scores map to a CV by the Laner (2016) exponential model, the five indicators summed in quadrature (README §Pedigree → coefficient of variation).
 8. An edge no feed or imputer covers is a flat prior at value 0 with a large σ (σ = 1e6 in copper and the toy), a noisy zero; the framework never guesses a value (`method.md` §3.1.4).
 9. Imputation fills are write-once and logged with method, source edges and coefficients (`method.md` §3.1.4).
-10. Build-time validation raises; it never clips, coerces or fills a bad input (CLAUDE.md "Numerical & performance conventions").
-11. A satellite flow carries a value but sits outside its node's balance (GLOSSARY "Satellite flow").
-12. Stage 6 propagates point estimates only; Stage-5 σ is not carried into the tables in v1 (ADR 0007).
-13. Results are year-local: a period slice is `[E_t]`, scattered through `cols_t` before any `G @ F` (GLOSSARY "Period slice").
+10. A satellite flow carries a value but sits outside its node's balance (GLOSSARY "Satellite flow").
+11. Stage 6 propagates point estimates only; Stage-5 σ is not carried into the tables in v1 (ADR 0007).
+12. Results are year-local: a period slice is `[E_t]`, scattered through `cols_t` before any `G @ F` (GLOSSARY "Period slice").
 
 Copper's modelling choices, each measured against a rejected alternative, are in Table 2 of the manuscript ([docs/manuscript/method.md](docs/manuscript/method.md) §3.2.7), not here.
 
