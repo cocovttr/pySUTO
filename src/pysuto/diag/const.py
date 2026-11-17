@@ -10,7 +10,7 @@ G-matrix sparsity, prior distribution, constraint residuals
 from __future__ import annotations
 
 import os
-from typing import Any, Optional
+from typing import Optional
 
 import numpy as np
 import pandas as pd

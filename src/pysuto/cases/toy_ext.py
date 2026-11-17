@@ -48,7 +48,6 @@ from pysuto.clarabel_backend import ClarabelBackend
 from pysuto.constraints import (BaseConstraintBuilder, ConstraintBlock, FlowBoundsBuilder,
                                 anchors)
 from pysuto.constraints.naming import ROW_META_COLS, build_constraint_id
-from pysuto.feedpipe import register_feed
 from pysuto.impute import BaseImputer
 from pysuto.input_registry import InputRegistries
 from pysuto.registry import (

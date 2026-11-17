@@ -19,8 +19,7 @@ import pytest
 from pysuto.cases import toy, toy_ext
 from pysuto.impute.ledger import run_imputer
 from pysuto.registry import (ConstraintRunRegistry, DataFeedRegistry,
-                             ImputationRunRegistry, OptimRunRegistry,
-                             UncPropRunRegistry)
+                             OptimRunRegistry)
 
 
 @pytest.fixture(scope="module")

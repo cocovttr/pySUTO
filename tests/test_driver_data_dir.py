@@ -20,7 +20,6 @@ import matplotlib
 matplotlib.use("Agg")  # headless backend before any pyplot import
 
 import numpy as np
-import pandas as pd
 import pytest
 
 from pysuto.registry import stage_lock

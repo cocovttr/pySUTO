@@ -11,16 +11,14 @@ Covers:
 """
 from __future__ import annotations
 
-import io
 import textwrap
-from typing import Optional
 
 import numpy as np
 import pandas as pd
 import pytest
 
 from pysuto.acc import ValuationRoles
-from pysuto.agg import AggregationResult, AggregationMath
+from pysuto.agg import AggregationResult
 from pysuto.impute import (
     ImputationLog,
     ImputationEngine,
@@ -149,7 +147,6 @@ def acc():
 
 def _agg_result(f_values, sigma_values=None, n_feeds=1):
     """Build a minimal AggregationResult from flat arrays."""
-    N = len(f_values)
     f     = np.array(f_values, dtype=float)
     sigma = np.array(sigma_values if sigma_values is not None
                      else [1.0 if not np.isnan(v) else np.nan for v in f_values], dtype=float)
@@ -424,7 +421,6 @@ class TestFillImputerPairs:
         f     = np.full(10, np.nan)
         sigma = np.full(10, np.nan)
         f[0]  = 100.0;  sigma[0] = 5.0
-        missing = np.isnan(f)
         imp = _fill([(0, 2, 0.3, 0.0, 0.0, "p", "d")])
         run_imputer(imp, f, sigma, 0, acc)
         assert f[2] == pytest.approx(30.0)
@@ -436,7 +432,6 @@ class TestFillImputerPairs:
         f     = np.full(10, np.nan)
         sigma = np.full(10, np.nan)
         f[2]  = 30.0;  sigma[2] = 1.5
-        missing = np.isnan(f)
         imp = _fill([(0, 2, 0.3, 0.0, 0.0, "p", "d")])
         run_imputer(imp, f, sigma, 0, acc)
         assert f[0] == pytest.approx(100.0)
@@ -449,7 +444,6 @@ class TestFillImputerPairs:
         """Forward branch with very small α: σ propagation is NOT regularized."""
         f     = np.full(10, np.nan);  f[0]     = 1.0
         sigma = np.full(10, np.nan);  sigma[0] = 1.0
-        missing = np.isnan(f)
         imp = _fill([(0, 2, 1e-3, 0.0, 0.0, "p", "d")],
             q=3.0, alpha_min=0.05,
         )
@@ -463,7 +457,6 @@ class TestFillImputerPairs:
         """Forward branch with large α: σ amplifies linearly (no cap)."""
         f     = np.full(10, np.nan);  f[0]     = 1.0
         sigma = np.full(10, np.nan);  sigma[0] = 1.0
-        missing = np.isnan(f)
         imp = _fill([(0, 2, 100.0, 0.0, 0.0, "p", "d")],
             q=3.0, alpha_min=0.05,
         )
@@ -476,7 +469,6 @@ class TestFillImputerPairs:
         """Both A and B known → no fill, values unchanged."""
         f = np.array([10.0, 20.0] + [np.nan]*8)
         sigma = np.array([1.0, 2.0] + [np.nan]*8)
-        missing = np.isnan(f)
         imp = _fill([(0, 1, 2.0, 0.0, 0.0, "p", "d")])
         run_imputer(imp, f, sigma, 0, acc)
         assert f[0] == pytest.approx(10.0)
@@ -485,7 +477,6 @@ class TestFillImputerPairs:
     def test_both_missing_no_fill(self, acc):
         f = np.full(10, np.nan)
         sigma = np.full(10, np.nan)
-        missing = np.isnan(f)
         imp = _fill([(0, 2, 0.5, 0.0, 0.0, "p", "d")])
         run_imputer(imp, f, sigma, 0, acc)
         assert np.isnan(f[0]) and np.isnan(f[2])
@@ -494,7 +485,6 @@ class TestFillImputerPairs:
         """σ_param (ratio units) enters in flow units: |f_b|·σ_r/|r| = |a|·σ_r (#148)."""
         f     = np.full(10, np.nan);  f[0]     = 10.0
         sigma = np.full(10, np.nan);  sigma[0] = 0.0
-        missing = np.isnan(f)
         imp = _fill([(0, 2, 2.0, 3.0, 0.0, "p", "d")])
         run_imputer(imp, f, sigma, 0, acc)
         # σ_b = |a|·σ_r = 10 · 3 = 30 kt (was σ_r = 3, a ratio unit added to kt)
@@ -534,7 +524,6 @@ class TestFillImputerPairs:
     def test_epsilon_added_in_quadrature(self, acc):
         f     = np.full(10, np.nan);  f[0]     = 10.0
         sigma = np.full(10, np.nan);  sigma[0] = 0.0
-        missing = np.isnan(f)
         imp = _fill([(0, 2, 1.0, 0.0, 0.1, "p", "d")])
         run_imputer(imp, f, sigma, 0, acc)
         # f_b = 10, sigma_b = sqrt(0 + (0.1*10)²) = 1.0
@@ -546,7 +535,6 @@ class TestFillImputerPairs:
         consumed by RatioBoundBuilder, not absolute caps on the target flow)."""
         f     = np.full(10, np.nan);  f[0]     = 100.0
         sigma = np.full(10, np.nan);  sigma[0] = 1.0
-        missing = np.isnan(f)
         # coeff=2 → natural fill 200; the imputer no longer reads bound_upper.
         imp = _fill([(0, 2, 2.0, 0.0, 0.0, "p", "d")])
         run_imputer(imp, f, sigma, 0, acc)
@@ -555,7 +543,6 @@ class TestFillImputerPairs:
     def test_log_entries_returned(self, acc):
         f     = np.full(10, np.nan);  f[0]     = 5.0
         sigma = np.full(10, np.nan);  sigma[0] = 0.5
-        missing = np.isnan(f)
         imp = _fill([(0, 2, 1.0, 0.0, 0.0, "pid", "desc")])
         entries = run_imputer(imp, f, sigma, 3, acc)
         assert len(entries) == 1
@@ -570,7 +557,6 @@ class TestFillImputerPairs:
         """Backward branch with small coeff (1/coeff large): σ capped at σ_b."""
         f     = np.full(10, np.nan);  f[2]     = 1.0
         sigma = np.full(10, np.nan);  sigma[2] = 1.0
-        missing = np.isnan(f)
         # coeff = 0.01 → inv = 100 (large); s(100) ≈ 1, so σ_a is capped at σ_b.
         imp = _fill([(0, 2, 0.01, 0.0, 0.0, "p", "d")],
             q=3.0, alpha_min=0.05,
@@ -585,7 +571,6 @@ class TestFillImputerPairs:
         """Backward branch with very large coeff (1/coeff small): σ floored, not bare α."""
         f     = np.full(10, np.nan);  f[2]     = 1.0
         sigma = np.full(10, np.nan);  sigma[2] = 1.0
-        missing = np.isnan(f)
         # coeff = 1000 → inv = 1e-3; s(1e-3) ≈ 1e-3 / α_min = 0.02
         imp = _fill([(0, 2, 1000.0, 0.0, 0.0, "p", "d")],
             q=3.0, alpha_min=0.05,
@@ -635,7 +620,6 @@ class TestParamSourceFromCSV:
         imp = _from_csv(path, acc)
         # Edges 0 and 1 have to_node = Ore/Flow; each should pair with CC counterpart
         a_ids = {pair[0] for pair in _pairs(imp)}
-        b_ids = {pair[1] for pair in _pairs(imp)}
         # edge 0 (Mass) should pair with edge 2 (CC); edge 1 (Mass) with edge 3 (CC)
         assert 0 in a_ids or 2 in a_ids   # one of the two valuations is A
         assert len(_pairs(imp)) >= 2    # at least 2 pairs (one per region)
@@ -738,7 +722,6 @@ class TestTimeImputer:
         sigma = np.full(10, np.nan)
         f[0] = 10.0;  sigma[0] = 2.0   # t=2020
         f[8] = 20.0;  sigma[8] = 4.0   # t=2022
-        missing = np.isnan(f)
 
         imp = TimeImputer(window=5, method="linear")  # default p=1.3
         entries = run_imputer(imp, f, sigma, 0, acc)
@@ -757,7 +740,6 @@ class TestTimeImputer:
         sigma = np.full(10, np.nan)
         f[0] = 10.0;  sigma[0] = 2.0
         f[8] = 20.0;  sigma[8] = 4.0
-        missing = np.isnan(f)
 
         imp = TimeImputer(window=5, method="linear", p=2.0)
         run_imputer(imp, f, sigma, 0, acc)
@@ -769,7 +751,6 @@ class TestTimeImputer:
         f     = np.full(10, np.nan)
         sigma = np.full(10, np.nan)
         f[0] = 42.0;  sigma[0] = 3.0
-        missing = np.isnan(f)
 
         imp = TimeImputer(window=5, method="locf")
         run_imputer(imp, f, sigma, 0, acc)
@@ -780,7 +761,6 @@ class TestTimeImputer:
         f     = np.full(10, np.nan)
         sigma = np.full(10, np.nan)
         f[8] = 99.0;  sigma[8] = 1.0
-        missing = np.isnan(f)
 
         imp = TimeImputer(window=5, method="nocb")
         run_imputer(imp, f, sigma, 0, acc)
@@ -791,7 +771,6 @@ class TestTimeImputer:
         f     = np.full(10, np.nan)
         sigma = np.full(10, np.nan)
         f[0] = 10.0;  sigma[0] = 1.0   # t=2020
-        missing = np.isnan(f)
 
         imp = TimeImputer(window=5, method="locf", gap_inflation=2.0)
         run_imputer(imp, f, sigma, 0, acc)
@@ -809,7 +788,6 @@ class TestTimeImputer:
         f     = np.full(10, np.nan)
         sigma = np.full(10, np.nan)
         f[0] = 5.0;  sigma[0] = 1.0   # t=2020 only
-        missing = np.isnan(f)
 
         imp = TimeImputer(window=1, method="locf")
         run_imputer(imp, f, sigma, 0, acc)
@@ -823,7 +801,6 @@ class TestTimeImputer:
         f     = np.full(10, np.nan)
         sigma = np.full(10, np.nan)
         f[0] = 5.0;  sigma[0] = 1.0
-        missing = np.isnan(f)
 
         imp = TimeImputer(window=0, method="locf")
         run_imputer(imp, f, sigma, 0, acc)
@@ -836,7 +813,6 @@ class TestTimeImputer:
         sigma = np.full(10, np.nan)
         f[0] = 10.0;  sigma[0] = 2.0   # t=2020
         f[8] = 30.0;  sigma[8] = 4.0   # t=2022
-        missing = np.isnan(f)
 
         imp = TimeImputer(window=5, method="mean")
         run_imputer(imp, f, sigma, 0, acc)
@@ -850,7 +826,6 @@ class TestTimeImputer:
         f[0] = 10.0;  sigma[0] = 1.0
         f[6] = 99.0;  sigma[6] = 1.0   # already known
         f[8] = 20.0;  sigma[8] = 1.0
-        missing = np.isnan(f)
 
         imp = TimeImputer(window=5, method="linear")
         run_imputer(imp, f, sigma, 0, acc)
@@ -863,7 +838,6 @@ class TestTimeImputer:
         f[0] = 10.0;  sigma[0] = 1.0   # Mining_A t=2020
         f[8] = 30.0;  sigma[8] = 1.0   # Mining_A t=2022
         # Mining_B has no observations → should remain NaN
-        missing = np.isnan(f)
 
         imp = TimeImputer(window=5, method="linear")
         run_imputer(imp, f, sigma, 0, acc)
@@ -878,7 +852,6 @@ class TestTimeImputer:
         sigma = np.full(10, np.nan)
         f[0] = 5.0;  sigma[0] = 1.0
         f[8] = 15.0; sigma[8] = 1.0
-        missing = np.isnan(f)
 
         imp = TimeImputer(window=5, method="linear")
         entries = run_imputer(imp, f, sigma, 0, acc)
@@ -955,7 +928,6 @@ class TestTimeImputerInterpolateOnly:
         sigma = np.full(10, np.nan)
         f[0]  = 10.0;  sigma[0] = 2.0   # t=2020
         f[8]  = 20.0;  sigma[8] = 2.0   # t=2022
-        missing = np.isnan(f)
         imp = TimeImputer(window=5, method="linear", interpolate_only=True)
         run_imputer(imp, f, sigma, 0, acc)
         assert f[6] == pytest.approx(15.0)   # interpolated at λ=0.5
@@ -965,7 +937,6 @@ class TestTimeImputerInterpolateOnly:
         f     = np.full(10, np.nan)
         sigma = np.full(10, np.nan)
         f[8]  = 20.0;  sigma[8] = 1.0   # only t=2022 known
-        missing = np.isnan(f)
         imp = TimeImputer(window=5, method="linear", interpolate_only=True)
         run_imputer(imp, f, sigma, 0, acc)
         assert np.isnan(f[0])   # t=2020 — no before anchor
@@ -976,7 +947,6 @@ class TestTimeImputerInterpolateOnly:
         f     = np.full(10, np.nan)
         sigma = np.full(10, np.nan)
         f[0]  = 10.0;  sigma[0] = 1.0   # only t=2020 known
-        missing = np.isnan(f)
         imp = TimeImputer(window=5, method="linear", interpolate_only=True)
         run_imputer(imp, f, sigma, 0, acc)
         assert np.isnan(f[6])   # t=2021 — no after anchor
@@ -1001,7 +971,6 @@ class TestTimeImputerScoping:
         f[8] = 20.0; sigma[8] = 1.0
         f[1] = 30.0; sigma[1] = 1.0
         f[9] = 50.0; sigma[9] = 1.0
-        missing = np.isnan(f)
 
         scope = np.zeros(10, dtype=bool)
         scope[[0, 6, 8]] = True  # only Mining_A→Ore_A series
@@ -1036,7 +1005,6 @@ class TestTimeImputerScoping:
 
         f_work     = f_agg.copy()
         sigma_work = sigma_agg.copy()
-        missing    = np.isnan(f_work)
 
         imp = TimeImputer(window=5, method="linear", interpolate_only=True,
                           scope_feed_id="crude_ore")
@@ -1054,7 +1022,6 @@ class TestTimeImputerScoping:
         sigma = np.full(10, np.nan)
         f[0] = 10.0; sigma[0] = 1.0   # t=2020 anchor
         f[8] = 20.0; sigma[8] = 1.0   # t=2022 anchor
-        missing = np.isnan(f)
 
         # Only fill 2022 targets (none missing for the 0/6/8 series since 8 is set).
         # Try scope_times=["2021"] — should fill only edge 6.
@@ -1073,7 +1040,6 @@ class TestTimeImputerScoping:
         f     = np.full(10, np.nan)
         sigma = np.full(10, np.nan)
         f[0] = 10.0; sigma[0] = 2.0   # t=2020 anchor only
-        missing = np.isnan(f)
 
         imp = TimeImputer(window=5, method="linear", interpolate_only=False,
                           gap_inflation=1.5,
@@ -1222,7 +1188,6 @@ class TestFlatPriorImputer:
         f[8]  = 100.0;  sigma[8] = 1.0   # Mining_A (region A) → Ore_A, Mass, t=2022
         # group of edge 0 (sector_from=Mining, entity_from=Process, region_from=A, val=Mass)
         # also includes edges 6, 8 → scale = mean(|f|) over finite = 100.0
-        missing = np.isnan(f)
         imp = FlatPriorImputer(
             cv_by_mask={"supply": 0.001, "use": 0.3},
             default_cv=0.5,
@@ -1240,7 +1205,6 @@ class TestFlatPriorImputer:
         f[5]  = 200.0;  sigma[5] = 1.0
         # Level 1 (Ore, Flow, A, Mass) has only edge 4 (NaN) → empty.
         # Level 2 (Ore, Mass) has edges 4 and 5 → edge 5 finite (=200) → mean = 200.
-        missing = np.isnan(f)
         imp = FlatPriorImputer(
             cv_by_mask={"supply": 0.001, "use": 0.3},
             default_cv=0.5,
@@ -1256,7 +1220,6 @@ class TestFlatPriorImputer:
         f     = np.full(10, np.nan)
         sigma = np.full(10, np.nan)
         f[8]  = 50.0;  sigma[8] = 1.0
-        missing = np.isnan(f)
         imp = FlatPriorImputer(
             cv_by_mask={"supply": 0.001},   # no 'use' rule
             default_cv=0.7,
@@ -1283,7 +1246,6 @@ class TestFlatPriorImputer:
         f     = np.full(10, np.nan)
         sigma = np.full(10, np.nan)
         f[6]  = 80.0;  sigma[6] = 1.0
-        missing = np.isnan(f)
 
         # supply listed first → edge 0 gets supply CV
         imp = FlatPriorImputer(
@@ -1302,7 +1264,6 @@ class TestFlatPriorImputer:
         f     = np.full(10, np.nan)
         sigma = np.full(10, np.nan)
         # Nothing finite anywhere → all three cascade levels return 0 → global_scale = 1.0
-        missing = np.isnan(f)
         imp = FlatPriorImputer(
             cv_by_mask={"supply": 0.001, "use": 0.3},
             default_cv=0.5,
@@ -1320,7 +1281,6 @@ class TestFlatPriorImputer:
         f     = np.full(10, np.nan)
         sigma = np.full(10, np.nan)
         f[8]  = 100.0;  sigma[8] = 1.0
-        missing = np.isnan(f)
         imp = FlatPriorImputer(
             cv_by_mask={"supply": 0.001, "use": 0.3},
             default_cv=0.5,
@@ -1558,7 +1518,6 @@ class TestTimeImputerSameRegionScope:
         f[2], sigma[2] = 20.0, 1.0
         f[3], sigma[3] = 30.0, 1.0
         f[5], sigma[5] = 50.0, 1.0
-        missing = np.isnan(f)
 
         imp = TimeImputer(window=3, method="linear", min_obs=2,
                           interpolate_only=True,
@@ -1578,7 +1537,6 @@ class TestTimeImputerSameRegionScope:
         f[2], sigma[2] = 20.0, 1.0
         f[3], sigma[3] = 30.0, 1.0
         f[5], sigma[5] = 50.0, 1.0
-        missing = np.isnan(f)
 
         imp = TimeImputer(window=3, method="linear", min_obs=2,
                           interpolate_only=True, id="time_interp")
@@ -1599,7 +1557,6 @@ class TestTimeImputerSameRegionScope:
         # Only the bilateral series is observed; nothing may be filled anywhere.
         f[3], sigma[3] = 30.0, 1.0
         f[5], sigma[5] = 50.0, 1.0
-        missing = np.isnan(f)
 
         imp = TimeImputer(window=3, method="linear", min_obs=2,
                           interpolate_only=True, scope_edges=scope,

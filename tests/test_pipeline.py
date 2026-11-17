@@ -19,7 +19,6 @@ import uuid
 from collections import Counter
 from types import SimpleNamespace
 
-import numpy as np
 import pytest
 
 from pysuto.pipeline import (GIT_LOCATION_VARS, STEPS, Axis, Chain, Pipeline, StepFailed,

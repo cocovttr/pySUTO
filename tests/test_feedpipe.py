@@ -18,10 +18,8 @@ Run with:
 
 from __future__ import annotations
 
-import json
 import os
 import sys
-import tempfile
 
 import numpy as np
 import pytest

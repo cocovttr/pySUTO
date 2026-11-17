@@ -95,7 +95,6 @@ class FeedDiagnostics:
         Returns the path of the saved PNG.
         """
         import matplotlib.pyplot as plt
-        import matplotlib.ticker as mticker
 
         fig, axes = plt.subplots(2, 3, figsize=(16, 10))
         fig.suptitle(
@@ -145,7 +144,7 @@ class FeedDiagnostics:
         ]
 
         if self._unmatched_idx:
-            lines.append(f"\n  Top unmatched regions:")
+            lines.append("\n  Top unmatched regions:")
             unm = raw_df.loc[list(self._unmatched_idx)]
             for reg, cnt in unm["Region"].value_counts().head(10).items():
                 lines.append(f"    {reg:<32} {cnt:>5} rows")

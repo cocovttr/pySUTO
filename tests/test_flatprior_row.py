@@ -95,7 +95,6 @@ def test_row_inflation_one_is_no_op():
     f[0] = 50.0       # finite anchor for level-2 scale group (Mining, Mass)
     sigma = np.full(5, np.nan)
     sigma[0] = 1.0
-    missing = np.isnan(f)
 
     row_supply, row_use = _row_sub_masks(acc)
     inflation = 1.0
@@ -125,7 +124,6 @@ def test_row_inflation_multiplies_cv_for_row_edges():
     f[0] = 50.0
     sigma = np.full(5, np.nan)
     sigma[0] = 1.0
-    missing = np.isnan(f)
 
     row_supply, row_use = _row_sub_masks(acc)
     inflation = 2.5
