@@ -1,9 +1,8 @@
 """test_driver_knobs.py — each Stage 2–4 driver's knob surface (#100).
 
-The Stage 2 and 3 knobs are fields of the copper case's sections (#120), read from
-``pysuto.cases.copper``; Stage 4's are its driver's module globals, so that driver is
-imported by path under a private module name (import-safe: its ``main()`` runs only
-under ``__main__``). All three drivers run as subprocesses for the CLI checks.
+The Stage 2 and 3 knobs are fields of the copper case's sections (#120); Stage 4's are
+the constants of ``pysuto.stages`` (:data:`~pysuto.stages.OPT_KNOBS`, #186), which its
+driver lists as ``KNOBS``. All three drivers run as subprocesses for the CLI checks.
 """
 from __future__ import annotations
 
@@ -40,12 +39,14 @@ def _load(stage):
 
 def _surface(stage):
     """``(KNOBS, defaults)`` of the stage: the copper case section's UPPER_CASE fields
-    for Stages 2 and 3, the driver's ``KNOBS`` and module globals for Stage 4."""
+    for Stages 2 and 3, the driver's ``KNOBS`` and their values in ``pysuto.stages`` for
+    Stage 4."""
     if stage in CASE_STAGES:
         defaults = getattr(CASE, stage).knobs()
         return tuple(defaults), defaults
-    mod = _load(stage)
-    return tuple(mod.KNOBS), {k: getattr(mod, k) for k in mod.KNOBS}
+    from pysuto import stages
+    assert tuple(_load(stage).KNOBS) == tuple(stages.OPT_KNOBS)
+    return tuple(stages.OPT_KNOBS), stages.opt_defaults()
 
 
 def _run(stage, *extra):
@@ -153,8 +154,8 @@ def test_the_constraint_diagnostics_are_a_knob_on_by_default():
 
 
 def test_the_feasibility_check_knob_replaces_the_bool():
-    mod = _load("opt")
-    assert mod.FEASIBILITY_CHECK == "all"
-    assert "FEASIBILITY_CHECK" in mod.KNOBS
-    assert "FEASIBILITY_CHECK_FIRST_ONLY" not in mod.KNOBS
-    assert not hasattr(mod, "FEASIBILITY_CHECK_FIRST_ONLY")
+    from pysuto import stages
+    assert stages.FEASIBILITY_CHECK == "all"
+    assert "FEASIBILITY_CHECK" in stages.OPT_KNOBS
+    assert "FEASIBILITY_CHECK_FIRST_ONLY" not in stages.OPT_KNOBS
+    assert not hasattr(stages, "FEASIBILITY_CHECK_FIRST_ONLY")

@@ -27,6 +27,7 @@ from datetime import datetime
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
+from pysuto.cases import load_case
 from pysuto.logging  import get_logger, add_run_handler
 from pysuto.pipeline import RESERVE_GB, Axis, Chain, Pipeline, Sweep
 
@@ -97,8 +98,8 @@ _log = get_logger("sweep")
 
 def build(base_opt_run_id: str) -> Sweep:
     base = Chain.from_opt_run(base_opt_run_id)
-    pipeline = Pipeline(steps=STEPS, base=base, cwd=os.getcwd(),
-                        scripts_dir=os.path.dirname(os.path.abspath(__file__)))
+    pipeline = Pipeline(steps=STEPS, base=base, cwd=os.getcwd(), case="copper",
+                        resolve=load_case)
     kw = {"n_points": N_POINTS, "seed": SEED} if MODE == "random" else {}
     return Sweep(pipeline, AXES, mode=MODE, fixed=FIXED,
                  keep_intermediate=KEEP_INTERMEDIATE, scratch_dir=SCRATCH_DIR, **kw)
