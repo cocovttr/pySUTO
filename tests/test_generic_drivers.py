@@ -79,8 +79,8 @@ def test_every_sidecar_records_the_case_id(chain):
 
 def test_the_driver_chain_reproduces_the_toy_s_own_numbers(chain):
     """Same posterior as ``toy.run_stage4`` on the same const run, and the scoreboard of
-    ``test_toy_case.py``: the planted leg leads the soft residuals and 392 of the 420
-    edges lie inside their interval."""
+    ``test_toy_case.py``: the planted leg leads the soft residuals and 396 of the 420
+    edges lie inside their interval (396 since #60's hooks, from 392)."""
     root, ids = chain["root"], chain["ids"]
     own = toy.run_stage4(root, ids["const"])
     registry = OptimRunRegistry(str(root / "proc" / "opt"))
@@ -92,7 +92,7 @@ def test_the_driver_chain_reproduces_the_toy_s_own_numbers(chain):
     soft = toy.soft_residuals(root, ids["opt"])
     assert soft.iloc[0]["z"] == pytest.approx(-4.779, abs=5e-4)
     board = toy.scoreboard(root, ids)
-    assert round(board.coverage() * 420) == 392
+    assert round(board.coverage() * 420) == 396
 
 
 def test_the_psut_primary_defaults_to_the_acc_s_content_valuation(chain):

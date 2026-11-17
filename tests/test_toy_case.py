@@ -98,6 +98,43 @@ def test_truth_balances_every_process_and_flow_node_in_both_valuations():
     assert truth.loc[portua_mine, "value"].eq(0.0).all()                    # no mines
 
 
+def test_world_totals_sum_the_truth_over_regions_and_balance_every_node():
+    wt = toy.world_totals()
+    assert list(wt.columns) == ["time", "valuation", "from_sector", "to_sector", "unit",
+                                "value"]
+    assert "from_region" not in wt.columns and "to_region" not in wt.columns
+    truth = toy.truth()
+    one = wt[(wt["time"] == "2003") & (wt["valuation"] == toy.CONTENT)
+             & (wt["from_sector"] == "Milling") & (wt["to_sector"] == "Concentrate")]
+    mask = ((truth["time"] == "2003") & (truth["valuation"] == toy.CONTENT)
+            & (truth["from_sector"] == "Milling") & (truth["to_sector"] == "Concentrate"))
+    assert len(one) == 1
+    assert one["value"].iloc[0] == pytest.approx(truth.loc[mask, "value"].sum(), rel=1e-12)
+    assert one["unit"].iloc[0] == toy.UNITS[toy.CONTENT]
+    assert wt["value"].sum() == pytest.approx(truth["value"].sum(), rel=1e-12)
+    # world-level balances close for every Process and Flow node but Mining (ADR 0038)
+    inside = wt[wt["to_sector"].ne("WasteRock")]
+    nodes  = _node_balance(inside.assign(from_region="W", to_region="W"), "value")
+    np.testing.assert_allclose(nodes["inflow"], nodes["outflow"], rtol=0.0, atol=1e-10)
+
+
+def test_check_0_1_accepts_the_world_balance_and_rejects_a_wrong_one():
+    inflow, outflow = toy._ref_0_1()
+    assert inflow == pytest.approx(outflow, rel=1e-12)
+    assert toy.check_0_1(inflow, outflow).startswith("✓ 0.1")
+    with pytest.raises(AssertionError):
+        toy.check_0_1(inflow + 1.0, outflow)
+    wt = toy.world_totals()
+    ore = wt[(wt["time"] == "2003") & (wt["valuation"] == toy.GROSS)
+             & (wt["from_sector"] == "Ore")]["value"].sum()
+    mill_in, mill_out = toy._ref_0_1("Milling", "2003", toy.GROSS)
+    assert mill_in == pytest.approx(ore) and mill_in == pytest.approx(mill_out)
+    with pytest.raises(ValueError, match="'Mining'"):
+        toy.check_0_1(1.0, 1.0, sector="Mining")
+    with pytest.raises(ValueError, match="'Use'"):
+        toy.check_0_1(1.0, 1.0, sector="Use")
+
+
 def test_the_truth_and_the_feeds_are_reproducible_from_the_seed():
     pd.testing.assert_frame_equal(toy.truth(), toy.truth())
     a, b = toy.make_feeds(toy.truth()), toy.make_feeds(toy.truth())
@@ -144,6 +181,7 @@ def test_every_registered_imputer_writes_and_the_time_imputer_fills_the_two_gaps
         log.groupby("imputer_id").size().to_dict()
 
     bureau   = toy.make_feeds(toy.truth())["bureau"].raw
+    bureau   = bureau[bureau["Unit"] == toy._BUREAU_UNIT]     # the overlap table has no gaps
     gaps     = ({(r, t) for r in toy.REGIONS for t in toy.YEARS}
                 - set(zip(bureau["Region"], bureau["Year"])))
     assert len(gaps) == 2
@@ -151,6 +189,27 @@ def test_every_registered_imputer_writes_and_the_time_imputer_fills_the_two_gaps
     filled   = em.loc[log.loc[log["imputer_id"] == "time_interp", "edge_id"].astype(int)]
     assert (filled["from_region"] == filled["to_region"]).all()
     assert set(zip(filled["from_region"], filled["time"])) == gaps
+
+
+def test_two_feeds_meet_on_exactly_one_edge_and_stage_2_pools_them(chain):
+    """The Survey and the Bureau both observe Isla's ore extraction in gross mass,
+    in all five years: the one place where Stage 2's aggregation has two observations
+    to weigh, by precision, with a posterior σ below both (barely: Stage 2's Lp rule at p = 1.3 pools σ
+    conservatively, and on Montara's edge it exceeds the smaller σ in two of five years)."""
+    root, ids, acc = chain["root"], chain["ids"], chain["acc"]
+    agg = np.load(root / "proc" / "imp" / ids["imp"] / "agg_result.npz",
+                  allow_pickle=True)
+    F, Sigma, feeds = agg["F"], agg["Sigma"], list(agg["feed_ids"])
+    both = np.isfinite(Sigma).sum(axis=0) == 2
+    assert np.isfinite(Sigma).sum(axis=0).max() == 2
+    assert {_edge_key(acc.edge_meta, int(e)) for e in np.flatnonzero(both)} == {
+        ("Deposit", "Isla", "Mining", "Isla", t, toy.GROSS) for t in toy.YEARS}
+    for e in np.flatnonzero(both):
+        k = [i for i in range(len(feeds)) if np.isfinite(Sigma[i, e])]
+        assert {feeds[i] for i in k} == {"survey", "bureau"}
+        w = 1.0 / Sigma[k, e] ** 2
+        assert agg["f_agg"][e] == pytest.approx(np.sum(w * F[k, e]) / w.sum(), rel=1e-12)
+        assert agg["sigma_agg"][e] < Sigma[k, e].min()
 
 
 def test_reveal_names_the_one_customs_row_that_is_off_by_its_factor(chain):
@@ -205,6 +264,15 @@ def test_every_hard_row_closes_to_1e_10(chain):
         assert np.abs(res.residuals[hard[res.rows_t]]).max() <= 1e-10, t
 
 
+def test_the_toy_registers_no_scale_totals(chain):
+    """2026-11-16: no scale totals in notebooks 00-07. The 90 ``usefulsupply`` sum rows
+    only restated the hard Flow balances (largest |z| 5.3e-13) and are gone."""
+    root, ids = chain["root"], chain["ids"]
+    const = ConstraintRunRegistry(str(root / "proc" / "const")).load(ids["const"])
+    assert set(const.row_meta["type"]) == {"massbal", "ratio"}
+    assert not hasattr(toy.CASE.const, "SUM_SIGMA_FRACTION")
+
+
 def test_the_planted_leg_is_the_top_soft_residual(chain):
     soft = toy.soft_residuals(chain["root"], chain["ids"]["opt"])
     assert str(soft["edge_id"].dtype) == "Int64" and soft["constraint_id"].dtype == object
@@ -226,7 +294,8 @@ def test_stage5_coverage_of_the_420_edges_lies_in_its_recorded_band(chain):
     coverage = covered.mean()
     # Band fixed on the first run of this test (2026-11-11, seed 59): observed 0.936,
     # 393 of 420 edges inside their 95 % interval. Never loosen it. With copper's
-    # cascade order (review of 9c797e3): 0.933, 392 of 420.
+    # cascade order (review of 9c797e3): 0.933, 392 of 420. After #60's hooks (the
+    # inert sum rows removed, one edge observed by two feeds): 0.943, 396 of 420.
     assert 0.90 <= coverage <= 0.97, coverage
     assert toy.scoreboard(root, ids).coverage() == pytest.approx(coverage)
 
@@ -371,7 +440,7 @@ def test_imports_flow_one_way_cases_on_top_and_truth_diag_a_leaf():
 
 
 def test_solution_returns_each_reference_source_and_refuses_an_unknown_key():
-    for key in ("1.1", "2.1", "3.1", "4.1", "5.1", "6.1"):
+    for key in ("0.1", "1.1", "2.1", "3.1", "4.1", "5.1", "6.1"):
         assert toy.solution(key).startswith(f"def _ref_{key.replace('.', '_')}(")
     with pytest.raises(KeyError, match="'9.9'"):
         toy.solution("9.9")
