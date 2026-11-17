@@ -69,6 +69,7 @@ def _fake_launch(self, step, spec):
 @pytest.fixture(autouse=True)
 def _fake_children(monkeypatch):
     monkeypatch.setattr(Pipeline, "_launch", _fake_launch)
+    monkeypatch.setattr("pysuto.pipeline.resolve_case", resolve)
 
 
 FEEDS = ("feed_icsg_1", "feed_baci_2")
@@ -102,8 +103,7 @@ def repo(tmp_path):
 
 def _pipeline(repo, steps=STEPS, run_dirs=None):
     return Pipeline(steps=steps, base=repo.base, cwd=str(repo.root),
-                    log_dir=str(repo.root / "logs"), run_dirs=run_dirs, case="stub",
-                    resolve=resolve)
+                    log_dir=str(repo.root / "logs"), run_dirs=run_dirs, case="stub")
 
 
 class TestChain:
@@ -166,7 +166,7 @@ class TestPipelineDataDir:
             (repo.root / "data" / "proc" / stage / rid).rename(d / rid)
         before = {p for p in repo.root.rglob("*") if "elsewhere" not in p.parts}
         pipeline = Pipeline(steps=STEPS, base=repo.base, cwd=str(repo.root),
-                            case="stub", resolve=resolve, data_dir=str(elsewhere))
+                            case="stub", data_dir=str(elsewhere))
         sweep = Sweep(pipeline, [Axis("imp.TIME_WINDOW", [2, 3])], mode="grid")
         sid = sweep.run(label="dd")
         assert (elsewhere / "proc" / "sweep" / sid).is_dir()
@@ -208,6 +208,7 @@ class TestLaunch:
         import subprocess as sp
         import pysuto.pipeline as pl
         monkeypatch.undo()          # the autouse fake of _launch is not wanted here
+        monkeypatch.setattr(pl, "resolve_case", resolve)
 
         def run(cmd, **kw):
             with open(cmd[-1]) as f:
@@ -246,7 +247,7 @@ class TestPipelineRelativePaths:
         elsewhere = tmp_path_factory.mktemp("process_cwd")
         monkeypatch.chdir(elsewhere)
         chain = Pipeline(steps=("imp", "const"), base=repo.base, cwd=str(repo.root),
-                         case="stub", resolve=resolve, config="c.yaml",
+                         case="stub", config="c.yaml",
                          run_dirs={"imp": "scratch/imp", "const": "scratch/const"},
                          log_dir=str(repo.root / "logs")).run({}, label="rel")
         side = _sidecar_in(repo.root / "scratch" / "const", chain.const)
@@ -257,10 +258,11 @@ class TestPipelineRelativePaths:
         assert not (elsewhere / "scratch").exists()
 
     def test_the_case_is_resolved_once_to_validate_it_and_travels_as_its_reference(
-            self, repo):
+            self, repo, monkeypatch):
         calls = []
-        Pipeline(steps=("opt",), base=repo.base, cwd=str(repo.root), case="some.ref",
-                 resolve=lambda ref: calls.append(ref) or StubCase())
+        monkeypatch.setattr("pysuto.pipeline.resolve_case",
+                            lambda ref: calls.append(ref) or StubCase())
+        Pipeline(steps=("opt",), base=repo.base, cwd=str(repo.root), case="some.ref")
         assert calls == ["some.ref"]
         chain = _pipeline(repo, steps=("opt",)).run({}, label="ref")
         assert _sidecar(repo, "opt", chain.opt)["stage_config"]["spec"]["case"] == "stub"
@@ -508,7 +510,7 @@ class TestSweepRun:
         other = dataclasses.replace(repo.base, opt=_write_run(
             repo.root, "opt", {"const_run_id": repo.base.const}))
         p = Pipeline(base=other, cwd=str(repo.root), log_dir=str(repo.root / "logs"),
-                     case="stub", resolve=resolve)
+                     case="stub")
         with pytest.raises(ValueError, match="declared"):
             Sweep(p, [Axis("const.ANCHOR_CV", [0.01])], mode="grid").run("s7", resume=sid)
 

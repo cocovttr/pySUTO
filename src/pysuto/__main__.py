@@ -8,6 +8,10 @@ to any later stage::
     python -m pysuto run --case toy --from feed --to psut --data-dir /tmp/toy
     python -m pysuto run --case copper --from imp --to psut --base opt_20261022_112855_928da10c
 
+``--case`` is required: a bundled alias (``toy``, ``copper``), a dotted module
+(``mylab.zinc``) or a file path (``./zinc_case.py``), each naming a module that declares a
+:class:`~pysuto.case.CaseSpec` ``CASE`` (:func:`pysuto.case.resolve_case`, #187).
+
 The stages are :data:`pysuto.pipeline.ALL_STEPS`. ``--from feed`` runs the case's Stage 1
 hook (``CaseSpec.stage1``) and needs no base; any later ``--from`` takes its upstream
 from ``--base <opt_run_id>`` (the base chain's parents, as ``Chain.from_opt_run``). The
@@ -29,7 +33,7 @@ import argparse
 import os
 import sys
 
-from pysuto.cases import add_case_arg, case_from_args, load_case
+from pysuto.case import ALIASES, resolve_case
 from pysuto.logging import configure_file_logs
 from pysuto.pipeline import ALL_STEPS, Chain, Pipeline
 
@@ -38,7 +42,9 @@ def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="python -m pysuto")
     sub = parser.add_subparsers(dest="command", required=True)
     run = sub.add_parser("run", help="Run a chain of a case through the six stages.")
-    add_case_arg(run)
+    run.add_argument("--case", default=None, metavar="CASE",
+                     help="Required: a bundled alias (" + ", ".join(sorted(ALIASES))
+                          + "), a dotted module or a file path.")
     run.add_argument("--from", dest="first", choices=ALL_STEPS, default="feed",
                      help="First stage to run (default feed).")
     run.add_argument("--to", dest="last", choices=ALL_STEPS, default="psut",
@@ -57,7 +63,13 @@ def _parser() -> argparse.ArgumentParser:
 def main(argv=None) -> int:
     parser = _parser()
     args = parser.parse_args(argv)
-    case = case_from_args(parser, args)
+    if args.case is None:
+        parser.error("--case is required: a bundled alias (" + ", ".join(sorted(ALIASES))
+                     + "), a dotted module or a file path")
+    try:
+        case = resolve_case(args.case)
+    except ValueError as exc:
+        parser.error(str(exc))
     first, last = ALL_STEPS.index(args.first), ALL_STEPS.index(args.last)
     if first > last:
         parser.error(f"--from {args.first} comes after --to {args.last}")
@@ -72,7 +84,7 @@ def main(argv=None) -> int:
         base = Chain.from_opt_run(args.base, root=os.path.join(args.data_dir, "proc"))
     try:
         pipeline = Pipeline(steps=ALL_STEPS[first:last + 1], base=base, cwd=os.getcwd(),
-                            case=args.case, resolve=load_case, data_dir=args.data_dir,
+                            case=args.case, data_dir=args.data_dir,
                             config=args.config)
     except ValueError as exc:                   # e.g. a case without a Stage 1 hook
         parser.error(str(exc))

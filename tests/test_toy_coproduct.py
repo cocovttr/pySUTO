@@ -11,6 +11,7 @@ to the later fillers).
 """
 from __future__ import annotations
 
+import dataclasses
 import os
 import subprocess
 import sys
@@ -45,7 +46,8 @@ def chain(tmp_path_factory):
 
 def test_the_case_is_the_toy_under_its_own_id():
     case = load_case("toy_coproduct")
-    assert case is toy_coproduct.CASE
+    assert case == dataclasses.replace(toy_coproduct.CASE, case_source="alias:toy_coproduct",
+                                       case_sha256=case.case_sha256)
     assert (case.id, case.acc_id) == ("toy_coproduct", toy.ACC_ID_COPRODUCT)
     assert case.imp is toy.CASE.imp and case.const is toy.CASE.const
 

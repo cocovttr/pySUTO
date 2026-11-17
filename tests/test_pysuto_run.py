@@ -77,11 +77,12 @@ def test_the_toy_s_checks_hold_on_the_one_command_chain(chain):
     toy_checks.test_the_psut_supply_and_use_blocks_balance_per_node(chain)
 
 
-def test_a_feed_step_needs_the_case_s_stage_1_hook(tmp_path):
+def test_a_feed_step_needs_the_case_s_stage_1_hook(tmp_path, monkeypatch):
     from dataclasses import replace
+    monkeypatch.setattr("pysuto.pipeline.resolve_case",
+                        lambda ref: replace(toy.CASE, stage1=None))
     with pytest.raises(ValueError, match="declares none"):
-        Pipeline(steps=ALL_STEPS, case="x", data_dir=str(tmp_path),
-                 resolve=lambda ref: replace(toy.CASE, stage1=None))
+        Pipeline(steps=ALL_STEPS, case="x", data_dir=str(tmp_path))
 
 
 def test_a_start_past_the_feed_step_needs_a_base_and_a_feed_start_refuses_one(tmp_path):
@@ -129,10 +130,9 @@ def test_the_command_runs_six_real_children_and_looks_up_no_scripts_directory(
 
 
 def test_a_child_that_fails_raises_step_failed_with_its_returncode_and_log_tail(tmp_path):
-    from pysuto.cases import load_case
     from pysuto.pipeline import StepFailed
     base = Chain(feed_run_ids=(), imp="imp_x", const="const_missing", opt="opt_x")
-    pipe = Pipeline(steps=("opt",), base=base, case="toy", resolve=load_case,
+    pipe = Pipeline(steps=("opt",), base=base, case="toy",
                     cwd=str(tmp_path), data_dir="d")
     with pytest.raises(StepFailed) as exc:
         pipe.run({}, label="fails")
@@ -163,8 +163,7 @@ def test_the_child_parses_knobs_as_literals_against_the_stage_defaults(monkeypat
 
 def test_uncprop_and_psut_take_no_knobs():
     base = Chain(feed_run_ids=("feed_a",), imp="imp_1", const="const_1", opt="opt_1")
-    from pysuto.cases import load_case
-    pipe = Pipeline(steps=ALL_STEPS[1:], base=base, case="toy", resolve=load_case,
+    pipe = Pipeline(steps=ALL_STEPS[1:], base=base, case="toy",
                     data_dir="d")
     with pytest.raises(KeyError, match="uncprop step takes no knobs"):
         pipe.check_overrides({"uncprop.ALPHA": 0.1})

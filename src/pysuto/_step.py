@@ -10,10 +10,9 @@ The spec is a :class:`StepSpec`, written as JSON. The run id (``feed``: the feed
 one per line) goes to its ``run_id_file``. Knobs cross as ``KNOB=VALUE`` literals, parsed
 and type-checked by :mod:`pysuto.knobs` against the defaults of the stage.
 
-Like :mod:`pysuto.__main__`, this module is at the top of the import stack: ``run_spec``
-resolves the case reference with :func:`pysuto.cases.load_case`, which the library never
-imports. Its imports are function-local so that the pipeline can import :class:`StepSpec`
-without the cases or the stages.
+``run_spec`` resolves the case reference with :func:`pysuto.case.resolve_case`, the
+function the pipeline validated it with (#187). Its imports are function-local so that the
+pipeline can import :class:`StepSpec` without the stages.
 """
 
 from __future__ import annotations
@@ -48,11 +47,11 @@ class StepSpec:
 def run_spec(spec: StepSpec) -> str:
     """Run the step ``spec`` describes in this process; return its run id."""
     from pysuto import stages
-    from pysuto.cases import load_case
+    from pysuto.case import resolve_case
     from pysuto.config import load_config
     from pysuto.knobs import parse_overrides
     step, data_dir, upstream, pairs = spec.step, spec.data_dir, spec.upstream, spec.knobs
-    case = load_case(spec.case)
+    case = resolve_case(spec.case)
     if step == "feed":
         return "\n".join(case.stage1(data_dir).values())
     if spec.config is not None:

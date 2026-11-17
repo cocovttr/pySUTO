@@ -14,13 +14,21 @@ fields; the library names none of them. ``--set KNOB=VALUE`` replaces a knob fie
 (:meth:`Section.with_knobs`), and a run records its section in its sidecar
 (:meth:`CaseSpec.describe`).
 
-The library never imports ``pysuto.cases``: a case module sits at the top of the
-import direction, beside the drivers.
+The library never imports ``pysuto.cases`` by name: a case module sits at the top of the
+import direction, beside the drivers. :func:`resolve_case` finds a case from the string
+``--case`` carries (#187) and imports a bundled alias's module only at call time, through
+:data:`ALIASES`, a name-to-module table, so the pipeline, the drivers and a step's child
+share one resolver without the library importing a case.
 """
 
 from __future__ import annotations
 
+import hashlib
+import importlib
+import importlib.util
 import logging
+import os
+import sys
 from dataclasses import dataclass, field, fields, replace
 from typing import TYPE_CHECKING, Callable, Iterable, Mapping, Optional
 
@@ -217,6 +225,15 @@ class CaseSpec:
     ``stage1`` is the case's Stage 1 hook, ``stage1(data_dir) -> {feed_id: feed_run_id}``,
     which writes the case's feeds into the feed registry of ``data_dir`` (the ``feed``
     step of ``python -m pysuto run``); ``None`` is a case with no hook.
+
+    ``case_source`` and ``case_sha256`` are where the case came from (``alias:toy``,
+    ``module:mylab.zinc`` or ``path:<abs>``) and the sha256 of that module's source file.
+    Only :func:`resolve_case` sets them, and a run records them in ``stage_config["case"]``;
+    a case built in Python has neither and records neither. ``with_knobs`` keeps them (a
+    run records its knobs); code that changes a resolved case structurally, with
+    ``dataclasses.replace`` on builders, selectors or sections, must clear both
+    (``replace(case, case_source=None, case_sha256=None)``) so that the run does not claim
+    the unmodified file. Start from the module's own ``CASE``, which carries neither.
     """
     id:           str
     acc_id:       str
@@ -224,6 +241,8 @@ class CaseSpec:
     const:        ConstSection
     driver_knobs: Mapping[str, Mapping[str, object]] = field(default_factory=dict)
     stage1:       Optional[Callable] = None
+    case_source:  Optional[str] = None
+    case_sha256:  Optional[str] = None
 
     def with_knobs(self, stage: str, overrides: Mapping[str, object]) -> "CaseSpec":
         """This case with ``overrides`` replacing knob fields of section ``stage``."""
@@ -245,14 +264,17 @@ class CaseSpec:
         return values
 
     def ref(self) -> dict:
-        """The case as a Stage 4–6 run records it (``stage_config["case"]``)."""
-        return {"id": self.id, "acc_id": self.acc_id}
+        """The case as a Stage 4–6 run records it (``stage_config["case"]``): the id, the
+        acc id and, for a resolved case, its source and the sha256 of its file."""
+        ref = {"id": self.id, "acc_id": self.acc_id}
+        if self.case_source is not None:
+            ref.update(case_source=self.case_source, case_sha256=self.case_sha256)
+        return ref
 
     def describe(self, stage: str) -> dict:
         """The case as a ``stage`` run records it (``stage_config["case"]``): the case
-        id, the acc id and that stage's section."""
-        return {"id": self.id, "acc_id": self.acc_id,
-                stage: getattr(self, stage).describe()}
+        id, the acc id, the provenance of :meth:`ref` and that stage's section."""
+        return {**self.ref(), stage: getattr(self, stage).describe()}
 
 
 def check_case(sidecar: dict, case: CaseSpec) -> None:
@@ -262,6 +284,91 @@ def check_case(sidecar: dict, case: CaseSpec) -> None:
     if recorded is not None and recorded != case.id:
         raise ValueError(f"run {sidecar.get('run_id')!r} was made by case {recorded!r}, "
                          f"but this driver runs --case {case.id}")
+
+
+# ======================================================================================
+# Resolving a ``--case`` reference (#187)
+# ======================================================================================
+# The bundled cases, name to module; the modules are imported at call time only.
+ALIASES = {"copper":        "pysuto.cases.copper",
+           "toy":           "pysuto.cases.toy",
+           "toy_coproduct": "pysuto.cases.toy_coproduct"}
+
+
+def _is_path(reference: str) -> bool:
+    return reference.endswith(".py") or "/" in reference or os.sep in reference
+
+
+def case_reference(reference: str, cwd: Optional[str] = None) -> str:
+    """``reference`` as a step's child must receive it: a file path made absolute against
+    ``cwd`` (default the working directory), an alias or a dotted module unchanged."""
+    if _is_path(reference):
+        return os.path.abspath(os.path.join(cwd or os.getcwd(), reference))
+    return reference
+
+
+def _sha256(path: str) -> str:
+    with open(path, "rb") as f:
+        return hashlib.sha256(f.read()).hexdigest()
+
+
+def _load_file(path: str):
+    if not os.path.isfile(path):
+        raise ValueError(f"unknown case {path!r}: read as a file path (it ends in .py or "
+                         f"holds a path separator), and no such file exists")
+    name = "_pysuto_case_" + hashlib.sha256(path.encode("utf-8")).hexdigest()[:12]
+    spec = importlib.util.spec_from_file_location(name, path)
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[name] = module      # dataclasses and pickling look the module up by name
+    try:
+        spec.loader.exec_module(module)
+    except BaseException:
+        del sys.modules[name]
+        raise
+    return module
+
+
+def resolve_case(reference: str) -> CaseSpec:
+    """The :class:`CaseSpec` ``CASE`` of the module ``reference`` names, stamped with
+    where it came from.
+
+    ``reference`` is a bundled alias (:data:`ALIASES`), a file path (a string ending in
+    ``.py`` or holding a path separator, relative to the working directory) or a dotted
+    module (``mylab.zinc``, found on ``sys.path``). The returned case has ``case_source``
+    (``alias:<name>``, ``path:<abs>`` or ``module:<dotted>``) and ``case_sha256``, the
+    sha256 of the module's source file.
+
+    Raises
+    ------
+    ValueError
+        Nothing of that name is found (the message names the forms tried), or the module
+        declares no ``CASE`` that is a :class:`CaseSpec`. An import error inside the
+        module propagates.
+    """
+    if reference in ALIASES:
+        module, source = importlib.import_module(ALIASES[reference]), f"alias:{reference}"
+    elif _is_path(reference):
+        path = os.path.abspath(reference)
+        module, source = _load_file(path), f"path:{path}"
+    else:
+        try:
+            module = importlib.import_module(reference)
+        except ModuleNotFoundError as exc:
+            if exc.name is None or not (reference == exc.name
+                                        or reference.startswith(exc.name + ".")):
+                raise                       # a dependency of the module is missing
+            raise ValueError(
+                f"unknown case {reference!r}: not a bundled alias "
+                f"({', '.join(sorted(ALIASES))}), and no module of that name imports "
+                f"({exc}); a file path ends in .py or holds a path separator") from exc
+        source = f"module:{reference}"
+    case = getattr(module, "CASE", None)
+    if not isinstance(case, CaseSpec):
+        raise ValueError(f"case {reference!r}: module {module.__name__} declares no "
+                         f"CASE that is a CaseSpec")
+    if not getattr(module, "__file__", None):
+        raise ValueError(f"case {reference!r}: module {module.__name__} has no source file")
+    return replace(case, case_source=source, case_sha256=_sha256(module.__file__))
 
 
 @dataclass(frozen=True)

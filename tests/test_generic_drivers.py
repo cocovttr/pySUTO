@@ -122,9 +122,10 @@ def test_the_library_stages_4_to_6_reproduce_the_driver_chain_bit_for_bit(chain)
     on the driver chain's const run write the arrays the drivers wrote."""
     from pysuto import stages
     root, ids = chain["root"], chain["ids"]
-    opt = stages.run_opt(toy.CASE, ids["const"], "toy", data_dir=str(root))
-    unc = stages.run_uncprop(toy.CASE, opt, "toy", data_dir=str(root))
-    psut = stages.run_psut(toy.CASE, opt, "toy", data_dir=str(root))
+    toy_case = load_case("toy")         # the drivers' case carries its provenance (#187)
+    opt = stages.run_opt(toy_case, ids["const"], "toy", data_dir=str(root))
+    unc = stages.run_uncprop(toy_case, opt, "toy", data_dir=str(root))
+    psut = stages.run_psut(toy_case, opt, "toy", data_dir=str(root))
     for stage, mine, theirs in (("opt", opt, ids["opt"]), ("uncprop", unc, ids["uncprop"]),
                                 ("psut", psut, ids["psut"])):
         a, b = _arrays(root / "proc" / stage / mine), _arrays(root / "proc" / stage / theirs)

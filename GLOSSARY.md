@@ -1328,9 +1328,13 @@ A case declares it as data, a `FillEntry`; copper's are `trade`, `conc` and `ore
 
 **Case** — one metal's complete declaration: an accounting structure (referenced by registry id),
 its feeds, param families, relation sources and cascade, anchor families and σ policies, run by the
-generic stage drivers. Declared as a `CaseSpec` named `CASE` in `pysuto.cases.<id>` (#120); the
-copper case is the first. A case also sets the Stage 4 and 6 driver constants it departs
-from (`driver_knobs`), and the Stage 2–6 drivers select it with `--case <id>` (#124). _Avoid_: "model" (the QP, the PIOT),
+generic stage drivers. Declared as a `CaseSpec` named `CASE` in a Python module or file that `--case` resolves: a
+path, a dotted module, or a bundled alias (#120, #187); the copper case is the first. A case also
+sets the Stage 4 and 6 driver constants it departs from (`driver_knobs`), and the Stage 2–6
+drivers and `python -m pysuto run` select it with `--case <reference>` (#124). A run's identity of
+the case stays `CaseSpec.id`; its sidecar also records `case_source` (`alias:<name>`,
+`module:<dotted>` or `path:<abs>`) and `case_sha256` (the sha256 of that source file), and a case
+built or structurally changed in Python records neither. _Avoid_: "model" (the QP, the PIOT),
 "study" (a REP analysis), "scenario".
 
 **Acc spec** — the declaration of one accounting structure: its sectors (each with an entity, and
