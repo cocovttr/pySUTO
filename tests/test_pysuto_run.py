@@ -79,8 +79,10 @@ def test_the_toy_s_checks_hold_on_the_one_command_chain(chain):
 
 
 def test_a_feed_step_needs_the_case_s_stage_1_hook(tmp_path):
+    from dataclasses import replace
     with pytest.raises(ValueError, match="declares none"):
-        Pipeline(steps=ALL_STEPS, case="x", data_dir=str(tmp_path))
+        Pipeline(steps=ALL_STEPS, case=replace(toy.CASE, stage1=None),
+                 data_dir=str(tmp_path))
 
 
 def test_a_start_past_the_feed_step_needs_a_base_and_a_feed_start_refuses_one(tmp_path):
@@ -94,21 +96,51 @@ def test_a_start_past_the_feed_step_needs_a_base_and_a_feed_start_refuses_one(tm
     assert back.returncode == 2 and "comes after" in back.stderr
 
 
-def test_every_step_gets_the_case_and_the_data_dir_and_only_imp_and_const_the_config(
-        tmp_path):
+def test_the_command_runs_all_six_stages_in_process_with_no_scripts_directory(
+        tmp_path, monkeypatch, capsys):
+    """#186: the steps call ``pysuto.stages`` with the case object; no driver script is
+    looked up and no subprocess is spawned."""
+    import pysuto.pipeline as pipeline_module
+    from pysuto.__main__ import main
+
+    def spawn(*a, **k):
+        raise AssertionError(f"a subprocess was spawned: {a!r}")
+
+    for name in ("run", "Popen", "check_call", "check_output"):
+        monkeypatch.setattr(subprocess, name, spawn)
+    monkeypatch.chdir(tmp_path)
+    assert main(["run", "--case", "toy", "--data-dir", str(tmp_path / "d")]) == 0
+    assert not hasattr(pipeline_module, "REPO_ROOT")
+    printed = {l.split()[0] for l in capsys.readouterr().out.splitlines() if l.split()}
+    assert {"feed", "imp", "const", "opt", "uncprop", "psut"} <= printed
+    for stage in ("imp", "const", "opt", "uncprop", "psut"):
+        assert len(list((tmp_path / "d" / "proc" / stage).glob(f"{stage}_*"))) == 1
+
+
+def test_a_step_receives_the_case_object_and_the_config_only_for_imp_and_const(
+        tmp_path, monkeypatch):
+    import pysuto.pipeline as pipeline_module
+    seen = {}
+
+    def fake(step):
+        def run(case, *args, **kwargs):
+            seen[step] = (case, kwargs)
+            return f"{step}_x"
+        return run
+
+    for step, name in (("imp", "run_imp"), ("const", "run_const"), ("opt", "run_opt"),
+                       ("uncprop", "run_uncprop"), ("psut", "run_psut")):
+        monkeypatch.setattr(pipeline_module, name, fake(step))
+    cfg = tmp_path / "c.yaml"
+    cfg.write_text("pipeline:\n  acc_id: other\n")
     base = Chain(feed_run_ids=("feed_a",), imp="imp_1", const="const_1", opt="opt_1")
-    pipe = Pipeline(steps=ALL_STEPS[1:], base=base, case="toy", data_dir="d",
-                    config="c.yaml", cwd=str(tmp_path))
-    for step in ALL_STEPS[1:]:
-        cmd = pipe._command(step, base, {}, "lbl", "rid")
-        assert cmd[cmd.index("--case") + 1] == "toy", step
-        assert cmd[cmd.index("--data-dir") + 1] == "d", step
-        assert ("--config" in cmd) == (step in ("imp", "const")), step
-        assert cmd[cmd.index("--run-id-file") + 1] == "rid", step
-    assert pipe._command("uncprop", base, {}, "lbl", "rid")[2] == "opt_1"
+    pipe = Pipeline(steps=ALL_STEPS[1:], base=base, case=toy.CASE, data_dir="d",
+                    config=str(cfg), cwd=str(tmp_path), log_dir=str(tmp_path / "logs"))
+    chain = pipe.run({}, label="lbl")
+    assert chain.psut == "psut_x"
+    for step, (case, kwargs) in seen.items():
+        assert kwargs["data_dir"] == str(tmp_path / "d"), step
+        assert case.acc_id == ("other" if step in ("imp", "const") else toy.CASE.acc_id)
+        assert step in ("imp", "const") or case is toy.CASE
     with pytest.raises(KeyError, match="uncprop step takes no knobs"):
         pipe.check_overrides({"uncprop.ALPHA": 0.1})
-    plain = Pipeline(steps=("imp", "const", "opt"), base=base, cwd=str(tmp_path))
-    for step in ("imp", "const", "opt"):
-        cmd = plain._command(step, base, {}, "lbl", "rid")
-        assert not {"--case", "--data-dir", "--config"} & set(cmd), step

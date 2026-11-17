@@ -34,3 +34,16 @@ above. Instead a sweep points its imp and const steps at a RAM-backed scratch st
 new driver flags (`--imp-dir`, `--const-dir`, defaulting to today's `data/proc` paths), and
 deletes a run once no remaining point reuses it. A point then costs the opt run's 0.08 GB, and
 #106's gate still covers the drivers.
+
+## Amendment (#186, 2026-11-17): the pipeline calls the stage functions in-process
+
+Stages 4–6 became library functions (`pysuto.stages.run_opt`, `run_uncprop`, `run_psut`) beside
+`run_imp` and `run_const`, so `python -m pysuto run` runs without a `scripts/` directory (#185 Q4).
+`pysuto.pipeline` now passes the `CaseSpec` object and each stage's overrides to those functions
+instead of spawning a driver. The memory objection above is met by the functions returning after
+each step (a step's const run is written, and released, before the next starts); the knob protocol
+is unchanged: the same names, type checks and precedence (defaults, then the case's `driver_knobs`,
+then the overrides), the drivers' `--set` being one caller of it. The Stage 4–6 constants moved
+from the drivers' `# USER CONFIGURATION` blocks to `pysuto.stages`, with their values, and the
+drivers list them as `KNOBS`. Measured: the toy chain and the copper chain downstream of
+`opt_20261116_134050_b54f65dc` reproduce every stored array through both entry points (#186).

@@ -2,21 +2,24 @@
 __main__.py
 ===========
 ``python -m pysuto run`` (#125, #26 §3): one command runs a chain of a case through the
-stage drivers, from a Stage 1 hook or a base chain to any later stage::
+six stages, in this process (#186), from a Stage 1 hook or a base chain to any later
+stage::
 
     python -m pysuto run --case toy --from feed --to psut --data-dir /tmp/toy
     python -m pysuto run --case copper --from imp --to psut --base opt_20261022_112855_928da10c
 
 The stages are :data:`pysuto.pipeline.ALL_STEPS`. ``--from feed`` runs the case's Stage 1
 hook (``CaseSpec.stage1``) and needs no base; any later ``--from`` takes its upstream
-from ``--base <opt_run_id>`` (the base chain's parents, as ``Chain.from_opt_run``). Run it
-from the repository root: the drivers' ``logs/`` and the default ``data`` are relative to
-the working directory.
+from ``--base <opt_run_id>`` (the base chain's parents, as ``Chain.from_opt_run``). The
+stage functions are :mod:`pysuto.stages`; the command passes them the case object, and
+needs no ``scripts/`` directory. ``logs/`` and the default ``data`` are relative to the
+working directory.
 
 Output: the command prints one line per stage to stdout, the stage name and the run
 id(s) it produced (``feed`` lists its three feed runs), and nothing else; that is the
 command's result, not a log. The log lines of the pipeline and of the drivers go to
-the logging handlers and ``logs/``.
+the logging handlers and ``logs/``; each step's stdout is captured in
+``logs/pipeline/<label>_<step>.log``.
 """
 
 from __future__ import annotations
@@ -24,16 +27,15 @@ from __future__ import annotations
 import argparse
 import os
 import sys
-from pathlib import Path
 
 from pysuto.cases import add_case_arg, case_from_args
-from pysuto.pipeline import ALL_STEPS, REPO_ROOT, Chain, Pipeline
+from pysuto.pipeline import ALL_STEPS, Chain, Pipeline
 
 
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="python -m pysuto")
     sub = parser.add_subparsers(dest="command", required=True)
-    run = sub.add_parser("run", help="Run a chain of a case through the stage drivers.")
+    run = sub.add_parser("run", help="Run a chain of a case through the six stages.")
     add_case_arg(run)
     run.add_argument("--from", dest="first", choices=ALL_STEPS, default="feed",
                      help="First stage to run (default feed).")
@@ -67,9 +69,7 @@ def main(argv=None) -> int:
         base = Chain.from_opt_run(args.base, root=os.path.join(args.data_dir, "proc"))
     try:
         pipeline = Pipeline(steps=ALL_STEPS[first:last + 1], base=base, cwd=os.getcwd(),
-                            scripts_dir=str(Path(REPO_ROOT) / "scripts"), case=case.id,
-                            data_dir=args.data_dir, config=args.config,
-                            stage1=case.stage1)
+                            case=case, data_dir=args.data_dir, config=args.config)
     except ValueError as exc:                   # e.g. a case without a Stage 1 hook
         parser.error(str(exc))
     chain = pipeline.run({}, label=args.label or case.id)

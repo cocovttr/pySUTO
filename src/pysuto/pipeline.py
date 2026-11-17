@@ -4,21 +4,22 @@ pipeline.py
 The pipeline (GLOSSARY.md "Pipeline"): the stage drivers composed as steps, so a
 **chain** of runs can be produced with **knob** overrides from Python (#103).
 
-Each step is a stage driver run as a subprocess — the module never imports
-``scripts/`` (README §5, import direction) — through the driver's knob protocol
-(:mod:`pysuto.knobs`): upstream run id(s), a label, ``--set KNOB=repr(value)`` per
-override of that stage, and ``--run-id-file`` to read back the run it persisted. The
-steps run one after another in one checkout, which the stage lock enforces (#101).
+Each step is a stage function of :mod:`pysuto.stages` called in this process on the
+:class:`~pysuto.case.CaseSpec` object the pipeline holds (#186), with the stage's knob
+overrides (:mod:`pysuto.knobs`: the same names, types and precedence as the drivers'
+``--set``). A step's stdout goes to ``<log_dir>/<label>_<step>.log``. The steps run one
+after another under the stage lock of the data dir (#101), and the module never imports
+``scripts/`` (README §5, import direction).
 
     base  = Chain.from_opt_run("opt_20261020_112726_2f451f31")
-    chain = Pipeline(steps=("imp", "const", "opt"), base=base).run(
+    chain = Pipeline(steps=("imp", "const", "opt"), base=base, case=CASE).run(
         {"imp.P_PROP": 1.5, "const.P_PROP": 1.5}, label="p = 1.5")
 
 A chain can also start at Stage 1 and end at Stage 6 (#125): the steps are
 :data:`ALL_STEPS`, ``python -m pysuto run --case <id> --from <stage> --to <stage>`` runs
 them (:mod:`pysuto.__main__`), and a step past ``feed`` reads its upstream from the base
-chain. The ``feed`` step is the case's Stage 1 hook (``CaseSpec.stage1``), run in this
-process; ``uncprop`` and ``psut`` take no knobs.
+chain. The ``feed`` step is the case's Stage 1 hook (``CaseSpec.stage1``); ``uncprop`` and
+``psut`` take no knobs.
 
 Override keys are ``<stage>.<KNOB>``, after scikit-learn's ``step__param``. Knobs that
 must share one value across stages are listed in :data:`TIED`.
@@ -37,16 +38,16 @@ combination of the axes' listed values::
 
 from __future__ import annotations
 
+import contextlib
 import itertools
 import json
+import logging
 import os
 import re
-import shlex
 import shutil
 import subprocess
-import sys
-import tempfile
 import time
+import traceback
 from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Mapping, Optional, Sequence
@@ -55,12 +56,13 @@ import numpy as np
 import scipy
 from scipy.stats import loguniform, qmc, uniform
 
+from pysuto.case import CaseSpec
+from pysuto.config import load_config
 from pysuto.logging import get_logger
 from pysuto.registry import SweepRunRegistry, stage_lock
+from pysuto.stages import run_const, run_imp, run_opt, run_psut, run_uncprop
 
 _log = get_logger("pysuto.pipeline")
-
-REPO_ROOT = Path(__file__).resolve().parents[2]
 
 # The stages a pipeline sweeps by default, in order (a sweep varies imp, const and opt
 # knobs only), and every step a pipeline can run (#125).
@@ -71,16 +73,9 @@ ALL_STEPS = ("feed", "imp", "const", "opt", "uncprop", "psut")
 # exponent: "P_PROP must match", the copper case's Stage 2 and Stage 3 sections).
 TIED = (("imp.P_PROP", "const.P_PROP"),)
 
-_SCRIPTS = {
-    "imp":   "collect_aggregate_impute.py",
-    "const": "constraints.py",
-    "opt":   "run_solver.py",
-    "uncprop": "uncertainty_propagation.py",
-    "psut":    "psut.py",
-}
 _TAIL_LINES = 40
-# The stage whose run each step reads; a step's driver takes ``--<stage>-dir`` for the
-# directories it reads and writes outside ``data/proc`` (opt runs always land there).
+# The stage whose run each step reads; the imp and const steps may read and write
+# outside ``data/proc`` (opt runs always land there).
 _UPSTREAM  = {"imp": None, "const": "imp", "opt": "const", "uncprop": "opt",
               "psut": "opt"}
 _DIR_STEPS = ("imp", "const")
@@ -113,12 +108,12 @@ def _upstream(root: str, stage: str, run_id: str) -> dict:
 
 
 class StepFailed(RuntimeError):
-    """A step's driver exited non-zero; ``tail`` holds the end of its output."""
+    """A step raised; ``tail`` holds the end of its output and its traceback, and the
+    exception itself is the ``__cause__``."""
 
-    def __init__(self, step: str, returncode: int, tail: str, log_path: str) -> None:
-        self.step, self.returncode = step, returncode
-        self.tail, self.log_path = tail, log_path
-        super().__init__(f"step {step!r} exited {returncode} (log {log_path}):\n{tail}")
+    def __init__(self, step: str, tail: str, log_path: str) -> None:
+        self.step, self.tail, self.log_path = step, tail, log_path
+        super().__init__(f"step {step!r} failed (log {log_path}):\n{tail}")
 
 
 def split_key(key: str) -> tuple[str, str]:
@@ -139,40 +134,40 @@ class Pipeline:
     base : the chain the first step's upstream comes from; stages outside ``steps``
         keep the base chain's runs in the result. A chain whose first step is ``feed``
         needs none.
-    cwd : the checkout the drivers run in (they resolve ``data/`` and ``logs/``
-        relative to it); default the repository holding this module.
-    case : the case id passed to every driver as ``--case``; ``None`` (default) passes
-        none, so the drivers run their own default, copper.
-    data_dir : the data root passed to every driver as ``--data-dir``; ``None`` passes
-        none (the drivers' own ``data``).
-    config : the config passed as ``--config`` to the imp and const steps, the only
-        drivers that read one (the Stage 4-6 drivers take no such flag).
-    stage1 : the case's Stage 1 hook, ``stage1(data_dir) -> {feed_id: feed_run_id}``,
-        which the ``feed`` step calls in this process under the stage lock.
-    scripts_dir : where the drivers live; default ``<cwd>/scripts``.
-    log_dir : where each step's combined stdout/stderr is written; default
-        ``<cwd>/logs/pipeline``.
+    cwd : the directory ``data_dir`` and ``log_dir`` are relative to; default the
+        working directory.
+    case : the :class:`~pysuto.case.CaseSpec` every step runs, passed to the stage
+        functions as the object (required).
+    data_dir : the data root of every step, holding ``proc/`` and ``input/`` (default
+        ``data``, relative to ``cwd``).
+    config : a config whose ``pipeline.acc_id`` replaces the case's acc id in the imp and
+        const steps, the only stages that read one.
+    log_dir : where each step's stdout is written, with the traceback of a failed step;
+        default ``<cwd>/logs/pipeline``.
     run_dirs : per imp or const step, the directory its run is written to and the next
         step reads it from, instead of ``data/proc/<stage>`` — a sweep's scratch store.
         A stage outside ``steps`` is always read from ``data/proc``: it is the base's.
+
+    The case's Stage 1 hook (``case.stage1``) is the ``feed`` step.
     """
 
     def __init__(self, steps: tuple = STEPS, base: Optional[Chain] = None,
-                 cwd: Optional[str] = None, scripts_dir: Optional[str] = None,
-                 log_dir: Optional[str] = None,
+                 cwd: Optional[str] = None, log_dir: Optional[str] = None,
                  run_dirs: Optional[Mapping[str, str]] = None,
-                 case: Optional[str] = None, data_dir: Optional[str] = None,
-                 config: Optional[str] = None, stage1=None) -> None:
+                 case: Optional[CaseSpec] = None, data_dir: Optional[str] = None,
+                 config: Optional[str] = None) -> None:
         steps = tuple(steps)
         if not _is_contiguous_slice(steps):
             raise ValueError(f"steps {steps} must be a contiguous slice of {ALL_STEPS}")
+        if case is None:
+            raise ValueError("a pipeline needs the CaseSpec its steps run")
         if base is None and steps[0] == "feed":
             base = Chain(feed_run_ids=())
         if base is None:
             raise ValueError("a pipeline needs a base chain for its first step's upstream")
-        if "feed" in steps and stage1 is None:
+        if "feed" in steps and case.stage1 is None:
             raise ValueError(f"the feed step is the case's Stage 1 hook, and case "
-                             f"{case or 'copper'!r} declares none")
+                             f"{case.id!r} declares none")
         if "feed" in steps and data_dir is None:
             raise ValueError("the feed step writes into a data dir; pass data_dir")
         self.steps       = steps
@@ -180,9 +175,8 @@ class Pipeline:
         self.case        = case
         self.data_dir    = None if data_dir is None else str(data_dir)
         self.config      = None if config is None else str(config)
-        self.stage1      = stage1
-        self.cwd         = str(cwd or REPO_ROOT)
-        self.scripts_dir = str(scripts_dir or os.path.join(self.cwd, "scripts"))
+        self.stage1      = case.stage1
+        self.cwd         = str(cwd or os.getcwd())
         self.log_dir     = str(log_dir or os.path.join(self.cwd, "logs", "pipeline"))
         self.run_dirs    = {k: str(v) for k, v in (run_dirs or {}).items()}
         bad = [k for k in self.run_dirs if k not in _DIR_STEPS or k not in steps]
@@ -227,10 +221,13 @@ class Pipeline:
             chain = replace(chain, **{step: rid})
         return chain
 
+    def _data_root(self) -> str:
+        return os.path.abspath(os.path.join(self.cwd, self.data_dir or "data"))
+
     def _run_feed(self) -> tuple:
         """The case's Stage 1 hook, in this process under the stage lock (the feed
         registry has none of its own); returns the feed run ids it registered."""
-        data_dir = os.path.abspath(os.path.join(self.cwd, self.data_dir))
+        data_dir = self._data_root()
         os.makedirs(os.path.join(data_dir, "proc"), exist_ok=True)
         with stage_lock("pipeline_feed", root=os.path.join(data_dir, "proc")):
             run_ids = self.stage1(data_dir)
@@ -239,48 +236,72 @@ class Pipeline:
 
     def run_step(self, step: str, upstream: Chain, knobs: Mapping[str, object],
                  label: str) -> str:
-        """Run one driver on ``upstream``'s runs with ``knobs`` set; return its run id."""
+        """Run one stage on ``upstream``'s runs with ``knobs`` set, in this process under
+        the data dir's stage lock; return its run id. A step that raises is wrapped in
+        :class:`StepFailed`, its stdout and traceback in the step's log."""
         os.makedirs(self.log_dir, exist_ok=True)
         slug = re.sub(r"[^\w.-]+", "_", label).strip("_") or "run"
         log_path = os.path.join(self.log_dir, f"{slug}_{step}.log")
-        with tempfile.TemporaryDirectory() as tmp:
-            rid_file = os.path.join(tmp, "run_id")
-            cmd = self._command(step, upstream, knobs, label, rid_file)
-            _log.info("step %s: %s", step, shlex.join(cmd))
-            with open(log_path, "w", encoding="utf-8") as log:
-                rc = subprocess.run(cmd, cwd=self.cwd, stdout=log,
-                                    stderr=subprocess.STDOUT).returncode
-            if rc != 0:
-                raise StepFailed(step, rc, _tail(log_path), log_path)
-            with open(rid_file, encoding="utf-8") as f:
-                run_id = f.read().strip()
+        _log.info("step %s: %s", step, label)
+        proc = os.path.join(self._data_root(), "proc")
+        os.makedirs(proc, exist_ok=True)
+        try:
+            with open(log_path, "w", encoding="utf-8") as log, \
+                    stage_lock(f"pipeline_{step}", root=proc), _stdout_to(log):
+                run_id = self._call(step, upstream, knobs, label)
+        except Exception as exc:
+            with open(log_path, "a", encoding="utf-8") as log:
+                log.write("".join(traceback.format_exception(type(exc), exc,
+                                                             exc.__traceback__)))
+            raise StepFailed(step, _tail(log_path), log_path) from exc
         _log.info("step %s: %s", step, run_id)
         return run_id
 
-    def _command(self, step, upstream, knobs, label, rid_file) -> list:
-        cmd = [sys.executable, os.path.join(self.scripts_dir, _SCRIPTS[step])]
-        if step in ("uncprop", "psut"):
-            cmd += [upstream.opt, "--label", label]
-        elif step == "imp":
-            for feed in upstream.feed_run_ids:
-                cmd += ["--feed-id", feed]
-            cmd += ["--label", label]
-        elif step == "const":
-            cmd += ["--imp-run-id", upstream.imp, label]
-        else:
-            cmd += ["--const-run-id", upstream.const, "--label", label]
-        for stage in (_UPSTREAM[step], step):
-            if stage in self.run_dirs:
-                cmd += [f"--{stage}-dir", self.run_dirs[stage]]
-        if self.case is not None:
-            cmd += ["--case", self.case]
-        if self.data_dir is not None:
-            cmd += ["--data-dir", self.data_dir]
+    def _call(self, step, upstream, knobs, label) -> str:
+        """The stage function of ``step`` on ``upstream``: the in-process counterpart of
+        the driver's ``main`` — the same case, label, directories, ``--config`` and
+        knob overrides."""
+        case, data_dir = self.case, self._data_root()
         if self.config is not None and step in _DIR_STEPS:
-            cmd += ["--config", self.config]
-        for knob, value in knobs.items():
-            cmd += ["--set", f"{knob}={value!r}"]
-        return cmd + ["--run-id-file", rid_file]
+            case = replace(case, acc_id=load_config(self.config).pipeline.acc_id)
+        dirs = {f"{s}_dir": self.run_dirs[s] for s in (_UPSTREAM[step], step)
+                if s in self.run_dirs}
+        if step == "imp":
+            return run_imp(case.with_knobs("imp", knobs), list(upstream.feed_run_ids),
+                           label, dict(knobs), data_dir=data_dir, **dirs)
+        if step == "const":
+            return run_const(case.with_knobs("const", knobs), upstream.imp, label,
+                             dict(knobs), data_dir=data_dir, **dirs)
+        if step == "opt":
+            return run_opt(case, upstream.const, label, dict(knobs), data_dir=data_dir,
+                           **dirs)
+        if step == "uncprop":
+            return run_uncprop(case, upstream.opt, label, data_dir=data_dir)
+        return run_psut(case, upstream.opt, label, data_dir=data_dir)
+
+
+@contextlib.contextmanager
+def _stdout_to(log):
+    """Send the step's stdout — its ``print`` calls and the console handlers of the
+    loggers, which bind ``sys.stdout`` when created — to ``log``; the command's own
+    stdout then carries its result only. Handlers are pointed back afterwards."""
+    import sys
+    out = sys.stdout
+    moved = []
+    for lg in [logging.getLogger(), *logging.Logger.manager.loggerDict.values()]:
+        for h in getattr(lg, "handlers", ()):
+            if type(h) is logging.StreamHandler and h.stream is out:
+                h.setStream(log)
+                moved.append(h)
+    sys.stdout = log
+    try:
+        yield
+    finally:
+        sys.stdout = out
+        for lg in [logging.getLogger(), *logging.Logger.manager.loggerDict.values()]:
+            for h in getattr(lg, "handlers", ()):       # also those created in the step
+                if type(h) is logging.StreamHandler and h.stream is log:
+                    h.setStream(out)
 
 
 def _after(steps: tuple) -> tuple:
@@ -574,8 +595,9 @@ class Sweep:
         p = self.pipeline
         dirs = {**p.run_dirs, **{s: os.path.join(self.scratch_dir, sid, s)
                                  for s in self._scratch_steps()}}
-        return Pipeline(steps=p.steps, base=p.base, cwd=p.cwd, scripts_dir=p.scripts_dir,
-                        log_dir=p.log_dir, run_dirs=dirs)
+        return Pipeline(steps=p.steps, base=p.base, cwd=p.cwd, log_dir=p.log_dir,
+                        run_dirs=dirs, case=p.case, data_dir=p.data_dir,
+                        config=p.config)
 
     def _release(self, pt, remaining, memo, runner) -> None:
         """Delete the scratch runs of ``pt`` that no point in ``remaining`` will reuse."""
