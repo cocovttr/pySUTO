@@ -1,0 +1,60 @@
+[build-system]
+requires = ["hatchling", "hatch-vcs"]
+build-backend = "hatchling.build"
+
+[project]
+name = "pysuto"
+dynamic = ["version"]
+description = "Python-based Supply-Use Table Optimiser: sigma-weighted reconciliation of supply-use tables from conflicting sources"
+readme = "README.md"
+requires-python = ">=3.9"
+authors = [{ name = "Florian Huber" }]
+keywords = [
+    "material flow analysis",
+    "supply-use tables",
+    "data reconciliation",
+    "uncertainty",
+    "copper",
+]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Science/Research",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Scientific/Engineering",
+]
+dependencies = [
+    "numpy",
+    "pandas",
+    "scipy",
+    "pyarrow",
+    "clarabel",
+    "pyyaml",
+    "matplotlib",
+]
+
+[project.urls]
+Homepage = "https://github.com/florihu/pySUTO"
+Repository = "https://github.com/florihu/pySUTO"
+Issues = "https://github.com/florihu/pySUTO/issues"
+
+[project.optional-dependencies]
+# Stage 5 — posterior uncertainty propagation uses CHOLMOD via scikit-sparse
+# for sparse Cholesky with symbolic-pattern reuse across timesteps. A scipy
+# splu fallback exists in pysuto.uncprop, but it does ~2× the work per
+# timestep and gives up the symbolic-pattern caching win.
+uncprop = ["scikit-sparse"]
+
+[project.scripts]
+pysuto = "pysuto.__main__:main"
+
+[tool.hatch.version]
+source = "vcs"
+# `git archive` output has no .git: .git_archival.txt (export-subst) carries the tag;
+# the fallback covers an archive of an untagged commit.
+raw-options = { fallback_version = "0.0.0+unknown" }
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/pysuto"]
