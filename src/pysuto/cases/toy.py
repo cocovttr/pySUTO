@@ -32,9 +32,10 @@ refined output, scrap feed, consumption and the signed stock change), with prima
 secondary refined output as two series that one root edge pools, and two region-years it
 did not publish. The Bureau also publishes Isla's ore extraction in gross mass, all five
 years, a table apart from its content chain: the one edge the Survey covers too, where
-Stage 2's aggregation weighs two observations (:data:`_OVERLAP_REGION`). The **Customs** feed reports the bilateral concentrate legs in gross
-mass, under partner codes rather than region names. One of the three carries one
-deliberate error; :func:`reveal` names it.
+Stage 2's aggregation weighs two observations (:data:`_OVERLAP_REGION`). The **Customs**
+feed reports the bilateral concentrate legs in gross mass, under partner codes rather
+than region names. One of the three carries one deliberate error; :func:`reveal` names
+it.
 
 Stage 2 runs copper's cascade order, ``trade → network → conc``. The per-pair Milling
 recovery relation is closed by the network (``network_backward``, from the Bureau's
@@ -52,8 +53,8 @@ Limitations, stated once
   choose and its intervals can be scored against the truth. The price is the band group
   the manuscript describes for copper (Method §3.1, ADR 0039), which carries the
   non-negativity of every flow: without it a posterior flow may go below zero. On the
-  seed-59 chain Portua, which mines nothing, books a negative ore extraction in 2003
-  (``Deposit → Mining`` −2.4 kt, the free slack of its mine-less chain).
+  seed-59 chain Portua, which mines nothing, books a small negative ore extraction in
+  2003 (``Deposit → Mining`` below 1 kt, the free slack of its mine-less chain).
 * **A closed world.** No ``ROW`` region, so the ROW pedigree penalty never fires.
 * **One fixed seed.** This module is ``src/``'s exception to "no RNG" (CLAUDE.md): the
   truth's year-to-year wiggle and the feeds' noise come from ``np.random.default_rng``.
@@ -415,9 +416,9 @@ _MINING_REGIONS = ("Montara", "Isla")
 _BUREAU_GAPS    = (("Isla", "2003"), ("Montara", "2004"))   # region-years not published
 _BUREAU_UNIT    = "kt orium"                                # the Bureau's content unit
 _BUREAU_GROSS   = "kt"                                      # ... and its gross-mass unit
-_OVERLAP_REGION = "Isla"     # the Bureau's ore tonnage here meets the Survey's, 5 years
-                                # (Isla, not Montara: with the Lp rule at p = 1.3 the
-                                # pooled σ is below both inputs in every year)
+# The Bureau's ore tonnage meets the Survey's here, all five years. Isla, not Montara:
+# with the Lp rule at p = 1.3 the pooled σ is below both inputs in every year.
+_OVERLAP_REGION = "Isla"
 _CUSTOMS_CODE   = {"Montara": "101", "Portua": "202", "Isla": "303"}
 
 # ── Private: the planted defect (Q27 b: named only by reveal()) ───────────────
