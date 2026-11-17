@@ -15,9 +15,16 @@ A modular Python framework for constructing, reconciling, and propagating uncert
 
 ---
 
+## Start here
+
+New to pySUTO? The tutorial is written for researchers and students: it runs the whole six-stage pipeline on a small synthetic toy case in about 1.5 h, starting at [tutorial/00_world.ipynb](tutorial/00_world.ipynb). The chapter list and set-up are in [tutorial/README.md](tutorial/README.md).
+
+---
+
 ## Table of contents
 
 1. [Overview](#overview)
+   - [What the framework assumes](#what-the-framework-assumes)
 2. [Architecture](#architecture)
    - [Stage 1 — Datafeed](#stage-1--datafeed)
    - [Stage 2 — Aggregation & Imputation](#stage-2--aggregation--imputation)
@@ -45,6 +52,26 @@ Supply–use tables and material flow accounts are assembled from multiple data 
 - **Physical consistency** — supply must equal use for every node and every material-parameter efficiency must be respected. A linear-equality / inequality QP enforces these constraints while staying as close as possible to the aggregated data, with full uncertainty quantification on the optimised values.
 
 The package is organised into **six sequential stages**: datafeed assembly (per source), aggregation + imputation (across sources), constraint building, constrained optimisation, posterior uncertainty propagation, and PSUT/PIOT construction. Each stage has a clear input, a clear output, and its own persistence layer. A **sweep** re-runs Stages 2–4 once per knob point and records the points as one run (see [Pipeline and knobs](#pipeline-and-knobs)).
+
+### What the framework assumes
+
+Commitments of pySUTO that a second case cannot change through data or parameters, each with its source (`method.md` is [docs/manuscript/method.md](docs/manuscript/method.md)).
+
+1. The prior is Gaussian with a diagonal Σ_a: no covariance between edges (`method.md` §3.1.6, Eq. 2).
+2. Feeds combine by inverse variance, and every σ composition is one power-mean rule, default p = 1.3 in every consumer (`method.md` §3.1.2, Eq. 1).
+3. Hard rows hold exactly; soft rows are priced by σ_c⁻² (`method.md` §3.1.6, Eq. 2).
+4. One QP per period; no row couples two periods, enforced at build time (GLOSSARY "No cross-time coupling").
+5. No stage before Stage 6 drops σ: every inter-stage artefact carries value and σ together (`method.md` §3.1.1).
+6. A source edge's outgoing weights in W sum to one (a guard rejects a projection more than 1 % off the matched raw total); fan-in diversifies, fan-out leaves the CV unchanged (`method.md` §3.1.3).
+7. Pedigree scores map to a CV by the Laner (2016) exponential model, the five indicators summed in quadrature (README §Pedigree → coefficient of variation).
+8. An edge no feed or imputer covers is a flat prior at value 0 with a large σ (σ = 1e6 in copper and the toy), a noisy zero; the framework never guesses a value (`method.md` §3.1.4).
+9. Imputation fills are write-once and logged with method, source edges and coefficients (`method.md` §3.1.4).
+10. Build-time validation raises; it never clips, coerces or fills a bad input (CLAUDE.md "Numerical & performance conventions").
+11. A satellite flow carries a value but sits outside its node's balance (GLOSSARY "Satellite flow").
+12. Stage 6 propagates point estimates only; Stage-5 σ is not carried into the tables in v1 (ADR 0007).
+13. Results are year-local: a period slice is `[E_t]`, scattered through `cols_t` before any `G @ F` (GLOSSARY "Period slice").
+
+Copper's modelling choices, each measured against a rejected alternative, are in Table 2 of the manuscript ([docs/manuscript/method.md](docs/manuscript/method.md) §3.2.7), not here.
 
 ---
 
@@ -356,28 +383,7 @@ When a feed sets `Row_penalty: TRUE` in its metadata sidecar, every **ROW-touchi
 
 #### Use case
 
-```python
-registry = DataFeedRegistry(odir="data/proc/feed/registry")
-registry.load_index()
-inputs = InputRegistries.initialize(root="data/input")   # versions acc / feed inputs
-
-wm, meta, result, entry = run_feed_pipeline(
-    excel_path="data/input/feeds/baci_2022.xlsx",
-    raw_df=baci_df,
-    acc_struct=acc,
-    sector_map_df=sector_map, region_map_df=region_map,
-    time_map_df=time_map, valuation_map_df=valuation_map, var_map_df=var_map,
-    F_src=F_src,
-    registry=registry,
-    parents={"inputs": {"acc": inputs.acc.entry("copper"), "feed": inputs.feed.entry("baci")},
-             "upstream": {}},                       # required keyword
-    feed_id="baci",
-    aux_col="Supply_Use",
-    allow_unmatched_edges=True,
-)
-```
-
-The registry now contains `registry.json`, `metadata.json`, `<feed_id>.pkl`, and `result.npz`.
+Run Stage 1 on the toy case in [tutorial/01_datafeed.ipynb](tutorial/01_datafeed.ipynb).
 
 ---
 
@@ -501,34 +507,9 @@ Only finite, non-zero values count at every level, so upstream-imputed zeros nev
 | `default_cv` | required | `FlatPriorImputer` | CV applied to edges that match no listed mask (no density modulation) |
 | `cv_lo`, `cv_hi` (per mask) | from `flat_prior_cv.csv` | `FlatPriorImputer` | Tight / loose endpoints of the coverage-density interpolation `cv_lo + (cv_hi − cv_lo)·(1 − ρ)` |
 
-#### Use cases
+#### Use case
 
-**Aggregation across two registered feeds:**
-
-```python
-collector = FeedCollector(registry=registry, acc_struct=acc)
-collector.select(["baci", "crude_ore"])
-agg_result = collector.aggregate(p=1.3)
-# agg_result.f_agg, agg_result.sigma_agg, agg_result.Omega, agg_result.coverage
-```
-
-**Parametric imputation from a params file:**
-
-```python
-engine = ImputationEngine(acc_struct=acc)
-
-source = ParamSource.from_params("data/input/params/copper_conc_params.csv", acc)
-engine.register(FillImputer(Fill(source, "both", id="conc"), "parametric",
-                            p=1.3, q=3.0, alpha_min=0.05))
-engine.register(TimeImputer(window=5, method="linear", gap_inflation=1.05, p=1.3))
-engine.register(FlatPriorImputer.from_csv(
-    "data/input/params/flat_prior_cv.csv", acc_struct=acc,
-    default_cv=0.3, p=1.3,
-))
-
-agg_result = engine.run(agg_result)
-# agg_result.f_agg updated in-place; agg_result.imputation_log records every fill
-```
+Run Stage 2 on the toy case in [tutorial/02_aggregate_impute.ipynb](tutorial/02_aggregate_impute.ipynb).
 
 #### Diagnostics
 
@@ -610,26 +591,9 @@ Defaults: $\mathrm{CV}_a^\mathrm{min} = \mathrm{CV}_c^\mathrm{min} = 0.05$, $\si
 
 #### Use case
 
-```python
-const_engine = ConstraintEngine(acc_struct=acc)
-const_engine.register(MassBalanceBuilder())
-const_engine.register(SumConstraintBuilder.from_acc_struct(acc, sigma_fraction=0.05))
-const_engine.register(SumConstraintBuilder.from_csv(
-    "data/input/params/sum_constraints.csv", acc_struct=acc))
-const_engine.register(RatioConstraintBuilder.from_csv(
-    "data/input/params/copper_params.csv", acc_struct=acc))
-const_engine.register(RatioBoundBuilder.from_csv(
-    "data/input/params/copper_params.csv", acc_struct=acc))
-const_engine.register(FlowBoundsBuilder())
+Run Stage 3 on the toy case in [tutorial/03_constraints.ipynb](tutorial/03_constraints.ipynb).
 
-constraint_run = const_engine.run(
-    agg_result=agg_result,
-    timesteps=[str(t) for t in range(2010, 2024)],
-    agg_id="copper_agg_v0",
-)
-```
-
-A `ConstDiagnostic` plot suite (in [diag/](src/pysuto/diag/)) can be triggered via `const_engine.run(..., diag_plot=True)`.
+A `ConstDiagnostic` plot suite (in [diag/](src/pysuto/diag/)) can be triggered via `ConstraintEngine.run(..., diag_plot=True)`.
 
 ---
 
@@ -721,21 +685,7 @@ Solver diagnostics live in [diag/](src/pysuto/diag/) (`SolverDiag`, 12 figures: 
 
 #### Use case
 
-```python
-solver = Solver(ClarabelBackend(), const_dir="data/proc/const")
-results = solver.solve_all(
-    run_id="copper_const_v0",
-    timesteps=[str(t) for t in range(2010, 2024)],
-    feasibility_check="all",
-)
-# results[t] is an OptimResult with F_opt, eps_opt, residuals, …
-optim_run_id = solver.persist(
-    run_id="copper_const_v0",
-    results=results,
-    output_dir="data/proc/opt",
-    label="copper",
-)
-```
+Run Stage 4 on the toy case in [tutorial/04_solver.ipynb](tutorial/04_solver.ipynb).
 
 ---
 
@@ -828,24 +778,7 @@ $$\mathrm{var}(w^\top a^*) = w^\top\Sigma_a w - (G\Sigma_a w)^\top S^{-1} (G\Sig
 
 #### Use case
 
-```python
-from pysuto.uncprop import KalmanUncProp
-
-prop = KalmanUncProp(
-    opt_dir     = "data/proc/opt",
-    const_dir   = "data/proc/const",
-    uncprop_dir = "data/proc/uncprop",
-)
-result          = prop.compute(opt_run_id, alpha=0.05)
-uncprop_run_id  = prop.persist(result, opt_run_id, label="copper")
-
-# result.per_timestep["2020"].sigma_a_star  → posterior std (year-local [E_t] on
-#                                             the block path; full [E] on legacy)
-# result.per_timestep["2020"].lower / upper → clipped to [l, u] (same shape)
-# result.per_timestep["2020"].cols_t        → global edge index of the slice (block path)
-# result.per_timestep["2020"].diagnostics   → trace_prior, trace_post (over the
-#                                             year's edges), max_resid_hard, psd_min_diag
-```
+Run Stage 5 on the toy case in [tutorial/05_posterior.ipynb](tutorial/05_posterior.ipynb).
 
 #### Diagnostics
 
@@ -892,22 +825,7 @@ Downstream of the solver: **materialise** the solved edge vector `a*` (`OptimRes
 - **Levels `A` and `L`, footprints, ew-MFA** — `to_piot(level='L')` unlocks the industry-by-industry calculus on that network: `x()` (`Z·1 + y`), `y()`, `A()` (`Z·x̂⁻¹`), `L()` (`(I−A)⁻¹`, so `L·y = x` exactly), `intensity(extension)` for the `E` (extraction) or `O` (secondary) inflow per unit of output, `footprint(extension, by='fd'|'region'|None)` (`e·L·ŷ`, summing to the extension's total), `embodied_trade(extension)` (extraction region × consuming region), `ew_mfa()` per region (`DE`, `imports`, `exports`, `PTB`, `DMI`, `DMC`, `RMC`), `multipliers()` (column sums of `L`) and `sda(period_a, period_b)` (two-factor polar decomposition of `Δx`). With one producer per commodity, as in copper, these equal what the Suh construct would give.
 - **Persistence** — `PsutRunRegistry` writes `data/proc/psut/<psut_run_id>/timesteps/t_<period>.parquet` + `nodes.parquet` with `parents.upstream.opt_run_id`, and records `valuations`, `primary` and the blocks in the sidecar; `scripts/psut.py <opt_run_id> [--primary CC] [--sankey 2020 2024] [--figs-dir figs/psut] [--no-png]` is the one-command CLI, the flag writing both Sankeys per period — `sankey_supply_use_World_<period>_<valuation>.html` and `sankey_process_network_…` — plus a PNG when kaleido can render, under `figs/psut/`.
 
-```python
-from pysuto.psut import PSUT
-psut = PSUT.from_opt_run("opt_20260922_121256_d4394c0a")   # all periods, CC
-S = psut.S("2020")            # (region, process) × (region, flow), primary valuation CC
-U = psut.at(2020).U("Mass")   # (region, flow) × (region, process), gross tonnes
-Y = psut.Y("2020")            # (region, flow) × (region, final_demand)
-grade = psut.realized_conc("2020").query("block == 'S' and to_sector == 'Ore'")   # ex-post ore grade
-trade = psut.table.query("block in ('U', 'Y') and from_region != to_region")      # realised cross-region flows
-world = psut.aggregate(region="World", keep_crossings=True)   # one node per sector; traded vs domestic survive
-world.sankey("2020").write_html("copper_sankey_2020.html")     # the global supply-use Sankey
-piot = psut.to_piot("market_share", level="L")                 # the process network, with A and L
-Z, L = piot.Z("2020"), piot.L("2020")                          # (region, process) × (region, process)
-mfa = piot.ew_mfa("2020")                                      # DE · imports · exports · PTB · DMI · DMC · RMC per region
-emb = piot.embodied_trade("E", "2020")                         # extraction region × consuming region
-world.to_piot().sankey("2020").write_html("copper_process_network_2020.html")
-```
+Run Stage 6 on the toy case in [tutorial/06_psut_piot.ipynb](tutorial/06_psut_piot.ipynb); [tutorial/07_scoreboard.ipynb](tutorial/07_scoreboard.ipynb) scores the whole chain.
 
 ---
 
