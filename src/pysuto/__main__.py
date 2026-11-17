@@ -2,7 +2,7 @@
 __main__.py
 ===========
 ``python -m pysuto run`` (#125, #26 §3): one command runs a chain of a case through the
-six stages, in this process (#186), from a Stage 1 hook or a base chain to any later
+six stages, each in a fresh child process (#186), from a Stage 1 hook or a base chain to any later
 stage::
 
     python -m pysuto run --case toy --from feed --to psut --data-dir /tmp/toy
@@ -11,14 +11,15 @@ stage::
 The stages are :data:`pysuto.pipeline.ALL_STEPS`. ``--from feed`` runs the case's Stage 1
 hook (``CaseSpec.stage1``) and needs no base; any later ``--from`` takes its upstream
 from ``--base <opt_run_id>`` (the base chain's parents, as ``Chain.from_opt_run``). The
-stage functions are :mod:`pysuto.stages`; the command passes them the case object, and
-needs no ``scripts/`` directory. ``logs/`` and the default ``data`` are relative to the
+stage functions are :mod:`pysuto.stages`, called by the private child entry point
+:mod:`pysuto._step` with the ``--case`` reference; the command needs no ``scripts/``
+directory. ``logs/`` and the default ``data`` are relative to the
 working directory.
 
 Output: the command prints one line per stage to stdout, the stage name and the run
 id(s) it produced (``feed`` lists its three feed runs), and nothing else; that is the
-command's result, not a log. The log lines of the pipeline and of the drivers go to
-the logging handlers and ``logs/``; each step's stdout is captured in
+command's result, not a log. The log lines of the pipeline go to the logging handlers and
+``logs/``; each step's stdout and stderr are captured in
 ``logs/pipeline/<label>_<step>.log``.
 """
 
@@ -28,7 +29,7 @@ import argparse
 import os
 import sys
 
-from pysuto.cases import add_case_arg, case_from_args
+from pysuto.cases import add_case_arg, case_from_args, load_case
 from pysuto.pipeline import ALL_STEPS, Chain, Pipeline
 
 
@@ -69,7 +70,8 @@ def main(argv=None) -> int:
         base = Chain.from_opt_run(args.base, root=os.path.join(args.data_dir, "proc"))
     try:
         pipeline = Pipeline(steps=ALL_STEPS[first:last + 1], base=base, cwd=os.getcwd(),
-                            case=case, data_dir=args.data_dir, config=args.config)
+                            case=args.case, resolve=load_case, data_dir=args.data_dir,
+                            config=args.config)
     except ValueError as exc:                   # e.g. a case without a Stage 1 hook
         parser.error(str(exc))
     chain = pipeline.run({}, label=args.label or case.id)

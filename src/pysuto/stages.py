@@ -15,8 +15,8 @@ The bodies of the Stage 2–6 drivers as library functions over a
 
 A driver (``scripts/collect_aggregate_impute.py`` … ``scripts/psut.py``) keeps the
 argument parsing, the stage lock, the log handler and the knob protocol, and passes the
-case object it resolved; ``python -m pysuto run`` passes the case object to the same
-functions in-process (:mod:`pysuto.pipeline`, #186). The library never imports
+case object it resolved; each step of ``python -m pysuto run`` calls the same functions
+in a child process of its own (:mod:`pysuto._step`, :mod:`pysuto.pipeline`, #186). The library never imports
 ``pysuto.cases`` (README §5). A case declares every value Stages 2 and 3 read as a field
 of its section (:class:`pysuto.case.ImpSection`, :class:`pysuto.case.ConstSection`);
 Stages 4–6 read the constants of the block below, and a case replaces them through

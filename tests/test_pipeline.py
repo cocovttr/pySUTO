@@ -1,13 +1,13 @@
 """test_pipeline.py — pysuto.pipeline: Pipeline and Chain (#103), Axis and Sweep (#105).
 
-The stage functions of ``pysuto.stages`` are replaced by one fake, monkeypatched into
-``pysuto.pipeline`` under the names of ``run_imp``, ``run_const`` and ``run_opt``, that
-takes the same arguments (case, upstream run id(s), label, overrides, directories) and
-writes a sidecar into a fake ``data/proc``; the case is a stub, so no real stage runs.
-Setting ``FAKE_FAIL=<stage>`` makes that stage raise "boom"; ``FAKE_FAIL_SET=<pair>``
-does the same for any stage given that override (``KNOB=repr(value)``). Like the real
-functions, the fake one writes its run under ``imp_dir`` / ``const_dir`` when given, and
-raises when its upstream run is not in the directory it was told to read.
+The child process of a step is replaced by one fake, monkeypatched over
+``Pipeline._launch``, that takes the same step spec (case reference, upstream run id(s),
+label, directories, ``KNOB=repr`` knobs) and writes a sidecar into a fake ``data/proc``;
+the case is a stub, so no real stage runs. Setting ``FAKE_FAIL=<stage>`` makes that stage
+raise ``StepFailed``; ``FAKE_FAIL_SET=<pair>`` does the same for any stage given that
+knob (``KNOB=repr(value)``). Like a real child, the fake one writes its run under
+``imp_dir`` / ``const_dir`` when given, and fails when its upstream run is not in the
+directory it was told to read. ``test_pysuto_run.py`` runs real children.
 """
 from __future__ import annotations
 
@@ -23,51 +23,52 @@ from types import SimpleNamespace
 import numpy as np
 import pytest
 
-import pysuto.pipeline as pipeline_module
 from pysuto.pipeline import (GIT_LOCATION_VARS, STEPS, Axis, Chain, Pipeline, StepFailed,
                              Sweep)
 from pysuto.registry import SweepRunRegistry
 
 
 class StubCase:
-    """The part of a ``CaseSpec`` the pipeline touches; knobs are not checked."""
+    """The part of a ``CaseSpec`` the pipeline touches."""
     id, acc_id, stage1 = "stub", "stub", None
 
-    def with_knobs(self, stage, overrides):
-        return self
+
+def resolve(reference):
+    return StubCase()
 
 
-def _fake_stage(stage):
-    def run(case, upstream, label, overrides=None, *, data_dir, imp_dir=None,
-            const_dir=None, logger=None):
-        sets = [f"{k}={v!r}" for k, v in (overrides or {}).items()]
-        print(f"{stage} starting", flush=True)
-        if os.environ.get("FAKE_FAIL") == stage or os.environ.get("FAKE_FAIL_SET") in sets:
-            raise RuntimeError("boom")
-        proc = os.path.join(data_dir, "proc")
-        read = {"const": (upstream, imp_dir), "opt": (upstream, const_dir)}.get(stage)
-        if read:
-            where = read[1] or os.path.join(proc, {"const": "imp", "opt": "const"}[stage])
-            if not os.path.isdir(os.path.join(where, read[0])):
-                raise FileNotFoundError(f"no upstream run {read[0]} in {where}")
-        rid = f"{stage}_20261021_120000_{uuid.uuid4().hex[:8]}"
-        up = {"imp": {"feed_run_ids": upstream}, "const": {"imp_run_id": upstream},
-              "opt": {"const_run_id": upstream}}[stage]
-        out = {"imp": imp_dir, "const": const_dir, "opt": None}[stage] or os.path.join(
-            proc, stage)
-        d = os.path.join(out, rid)
-        os.makedirs(d)
-        with open(os.path.join(d, "metadata.json"), "w") as f:
-            json.dump({"run_id": rid, "label": label, "parents": {"upstream": up},
-                       "stage_config": {"sets": sets}}, f)
-        return rid
-    return run
+def _fake_launch(self, step, spec):
+    stage = step
+    sets = spec["knobs"]
+    print(f"{stage} starting", flush=True)
+    if os.environ.get("FAKE_FAIL") == stage or os.environ.get("FAKE_FAIL_SET") in sets:
+        raise StepFailed(step, 3, f"{stage} starting\nboom", spec["log_path"])
+    data_dir = spec["data_dir"]
+    proc = os.path.join(data_dir, "proc")
+    upstream, dirs = spec["upstream"], spec["dirs"]
+    read = {"const": (upstream, dirs.get("imp_dir")),
+            "opt": (upstream, dirs.get("const_dir"))}.get(stage)
+    if read:
+        where = read[1] or os.path.join(proc, {"const": "imp", "opt": "const"}[stage])
+        if not os.path.isdir(os.path.join(where, read[0])):
+            raise StepFailed(step, 4, f"no upstream run {read[0]} in {where}",
+                             spec["log_path"])
+    rid = f"{stage}_20261021_120000_{uuid.uuid4().hex[:8]}"
+    up = {"imp": {"feed_run_ids": upstream}, "const": {"imp_run_id": upstream},
+          "opt": {"const_run_id": upstream}}[stage]
+    out = {"imp": dirs.get("imp_dir"), "const": dirs.get("const_dir"),
+           "opt": None}[stage] or os.path.join(proc, stage)
+    d = os.path.join(out, rid)
+    os.makedirs(d)
+    with open(os.path.join(d, "metadata.json"), "w") as f:
+        json.dump({"run_id": rid, "label": spec["label"], "parents": {"upstream": up},
+                   "stage_config": {"sets": sets, "spec": spec}}, f)
+    return rid
 
 
 @pytest.fixture(autouse=True)
-def _fake_stages(monkeypatch):
-    for stage in ("imp", "const", "opt"):
-        monkeypatch.setattr(pipeline_module, f"run_{stage}", _fake_stage(stage))
+def _fake_children(monkeypatch):
+    monkeypatch.setattr(Pipeline, "_launch", _fake_launch)
 
 
 FEEDS = ("feed_icsg_1", "feed_baci_2")
@@ -101,7 +102,8 @@ def repo(tmp_path):
 
 def _pipeline(repo, steps=STEPS, run_dirs=None):
     return Pipeline(steps=steps, base=repo.base, cwd=str(repo.root),
-                    log_dir=str(repo.root / "logs"), run_dirs=run_dirs, case=StubCase())
+                    log_dir=str(repo.root / "logs"), run_dirs=run_dirs, case="stub",
+                    resolve=resolve)
 
 
 class TestChain:
@@ -148,7 +150,7 @@ class TestPipelineRun:
         monkeypatch.setenv("FAKE_FAIL", "const")
         with pytest.raises(StepFailed, match="boom") as exc:
             _pipeline(repo).run({}, label="t4")
-        assert exc.value.step == "const" and isinstance(exc.value.__cause__, RuntimeError)
+        assert exc.value.step == "const" and exc.value.returncode == 3
         assert "const starting" in exc.value.tail
         assert len(_runs(repo, "opt")) == 1                       # the base only
 
@@ -185,24 +187,30 @@ class TestPipelineRelativePaths:
             self, repo, monkeypatch, tmp_path_factory):
         """The drivers once ran with ``cwd=cwd``; a path is relative to it, not to the
         process's working directory (#186 review)."""
-        from pysuto.cases import toy
         elsewhere = tmp_path_factory.mktemp("process_cwd")
-        (repo.root / "c.yaml").write_text("pipeline:\n  acc_id: other\n")
-        seen = {}
-        orig = pipeline_module.run_imp
-
-        def spy(case, *args, **kwargs):
-            seen["acc_id"], seen["imp_dir"] = case.acc_id, kwargs.get("imp_dir")
-            return orig(StubCase(), *args, **kwargs)
-
-        monkeypatch.setattr(pipeline_module, "run_imp", spy)
         monkeypatch.chdir(elsewhere)
-        Pipeline(steps=("imp",), base=repo.base, cwd=str(repo.root), case=toy.CASE,
-                 config="c.yaml", run_dirs={"imp": "scratch/imp"},
-                 log_dir=str(repo.root / "logs")).run({}, label="rel")
-        assert seen["acc_id"] == "other"
-        assert seen["imp_dir"] == str(repo.root / "scratch" / "imp")
+        chain = Pipeline(steps=("imp", "const"), base=repo.base, cwd=str(repo.root),
+                         case="stub", resolve=resolve, config="c.yaml",
+                         run_dirs={"imp": "scratch/imp", "const": "scratch/const"},
+                         log_dir=str(repo.root / "logs")).run({}, label="rel")
+        spec = _sidecar_in(repo.root / "scratch" / "const", chain.const)["stage_config"]["spec"]
+        assert spec["config"] == str(repo.root / "c.yaml")
+        assert spec["dirs"] == {"imp_dir": str(repo.root / "scratch" / "imp"),
+                                "const_dir": str(repo.root / "scratch" / "const")}
         assert not (elsewhere / "scratch").exists()
+
+    def test_the_case_is_resolved_once_to_validate_it_and_travels_as_its_reference(
+            self, repo):
+        calls = []
+        Pipeline(steps=("opt",), base=repo.base, cwd=str(repo.root), case="some.ref",
+                 resolve=lambda ref: calls.append(ref) or StubCase())
+        assert calls == ["some.ref"]
+        chain = _pipeline(repo, steps=("opt",)).run({}, label="ref")
+        assert _sidecar(repo, "opt", chain.opt)["stage_config"]["spec"]["case"] == "stub"
+
+
+def _sidecar_in(root, rid):
+    return json.loads((root / rid / "metadata.json").read_text())
 
 
 class TestPipelineRefusals:
@@ -443,7 +451,7 @@ class TestSweepRun:
         other = dataclasses.replace(repo.base, opt=_write_run(
             repo.root, "opt", {"const_run_id": repo.base.const}))
         p = Pipeline(base=other, cwd=str(repo.root), log_dir=str(repo.root / "logs"),
-                     case=StubCase())
+                     case="stub", resolve=resolve)
         with pytest.raises(ValueError, match="declared"):
             Sweep(p, [Axis("const.ANCHOR_CV", [0.01])], mode="grid").run("s7", resume=sid)
 
