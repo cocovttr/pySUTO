@@ -604,7 +604,7 @@ class ImpDiagnostic:
 
         bp = ax.boxplot(
             data,
-            labels=labels,
+            tick_labels=labels,
             patch_artist=True,
             showfliers=True,
             flierprops=dict(
@@ -692,7 +692,7 @@ class ImpDiagnostic:
 
         bp = ax.boxplot(
             data,
-            labels=labels,
+            tick_labels=labels,
             patch_artist=True,
             showfliers=True,
             flierprops=dict(

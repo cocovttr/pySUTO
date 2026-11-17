@@ -26,13 +26,14 @@ classifiers = [
     "Topic :: Scientific/Engineering",
 ]
 dependencies = [
-    "numpy",
-    "pandas",
-    "scipy",
-    "pyarrow",
-    "clarabel",
-    "pyyaml",
-    "matplotlib",
+    "numpy>=1.26.4",
+    "pandas>=2.3.3",
+    "scipy>=1.13.1",
+    "pyarrow>=21.0.0",
+    "clarabel>=0.11.1",
+    "pyyaml>=6.0.3",
+    "matplotlib>=3.9.2",
+    "openpyxl>=3.1.5",          # pd.read_excel: acc, meta, utils, feed diag, feed builders
 ]
 
 [project.urls]
@@ -46,6 +47,11 @@ Issues = "https://github.com/florihu/pySUTO/issues"
 # splu fallback exists in pysuto.uncprop, but it does ~2× the work per
 # timestep and gives up the symbolic-pattern caching win.
 uncprop = ["scikit-sparse"]
+# Plotly Sankeys (psut.sankey); kaleido writes them to PNG.
+sankey = ["plotly>=6.3.0", "kaleido>=1.4.0"]
+tutorial = ["jupyter", "plotly>=6.3.0", "kaleido>=1.4.0"]
+# sparse (pydata) and plotly: tests build a COO fixture and import scripts/report/*.
+dev = ["pytest", "sparse", "plotly>=6.3.0", "coverage", "vulture", "nbclient", "ruff", "build", "twine"]
 
 [project.scripts]
 pysuto = "pysuto.__main__:main"
