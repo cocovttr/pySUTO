@@ -109,7 +109,8 @@ def test_world_totals_sum_the_truth_over_regions_and_balance_every_node():
     mask = ((truth["time"] == "2003") & (truth["valuation"] == toy.CONTENT)
             & (truth["from_sector"] == "Milling") & (truth["to_sector"] == "Concentrate"))
     assert len(one) == 1
-    assert one["value"].iloc[0] == pytest.approx(truth.loc[mask, "value"].sum(), rel=1e-12)
+    assert one["value"].iloc[0] == pytest.approx(truth.loc[mask, "value"].sum(),
+                                                 rel=1e-12)
     assert one["unit"].iloc[0] == toy.UNITS[toy.CONTENT]
     assert wt["value"].sum() == pytest.approx(truth["value"].sum(), rel=1e-12)
     # world-level balances close for every Process and Flow node but Mining (ADR 0038)
@@ -181,7 +182,7 @@ def test_every_registered_imputer_writes_and_the_time_imputer_fills_the_two_gaps
         log.groupby("imputer_id").size().to_dict()
 
     bureau   = toy.make_feeds(toy.truth())["bureau"].raw
-    bureau   = bureau[bureau["Unit"] == toy._BUREAU_UNIT]     # the overlap table has no gaps
+    bureau   = bureau[bureau["Unit"] == toy._BUREAU_UNIT]  # the overlap table has no gaps
     gaps     = ({(r, t) for r in toy.REGIONS for t in toy.YEARS}
                 - set(zip(bureau["Region"], bureau["Year"])))
     assert len(gaps) == 2
@@ -194,8 +195,9 @@ def test_every_registered_imputer_writes_and_the_time_imputer_fills_the_two_gaps
 def test_two_feeds_meet_on_exactly_one_edge_and_stage_2_pools_them(chain):
     """The Survey and the Bureau both observe Isla's ore extraction in gross mass,
     in all five years: the one place where Stage 2's aggregation has two observations
-    to weigh, by precision, with a posterior σ below both (barely: Stage 2's Lp rule at p = 1.3 pools σ
-    conservatively, and on Montara's edge it exceeds the smaller σ in two of five years)."""
+    to weigh, by precision, with a posterior σ below both (barely: Stage 2's Lp rule at
+    p = 1.3 pools σ conservatively, and on Montara's edge it exceeds the smaller σ in two
+    of five years)."""
     root, ids, acc = chain["root"], chain["ids"], chain["acc"]
     agg = np.load(root / "proc" / "imp" / ids["imp"] / "agg_result.npz",
                   allow_pickle=True)
@@ -314,7 +316,8 @@ def test_the_sankey_tables_sum_to_the_psut_totals(chain, caplog):
     """Per block, the PSUT's total is the Sankey's links plus the links it drops; in the
     planted year the dropped part (negative posteriors, a negative stock change) is not
     zero, and the Sankey says so."""
-    psut = PsutRunRegistry(str(chain["root"] / "proc" / "psut")).load(chain["ids"]["psut"])
+    psut = PsutRunRegistry(str(chain["root"] / "proc" / "psut")).load(
+        chain["ids"]["psut"])
     for period in psut.periods():
         for valuation in psut.valuations:
             with caplog.at_level("WARNING", logger="pysuto.diag.psut"):

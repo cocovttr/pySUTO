@@ -1012,6 +1012,25 @@ def _feed_steps(feed: SyntheticFeed, acc: AccountingStructure) -> tuple:
     return ct, wm, F_src, result, row_summary
 
 
+def _register_synthetic_feed(feed: SyntheticFeed, acc: AccountingStructure, acc_entry,
+                             registry: DataFeedRegistry, label: str, seed: int) -> tuple:
+    """Stage 1 for one synthetic feed: :func:`_feed_steps`, then register the run under
+    ``label`` (the registry label :func:`_latest` selects by) with ``seed`` in its
+    sidecar. Returns ``(registry entry, cv_src)``."""
+    _, wm, F_src, result, row_summary = _feed_steps(feed, acc)
+    entry = register_feed(
+        wm, feed.metadata, result, registry,
+        parents       = {"inputs":   {"acc": dict(acc_entry),
+                                      "feed": {"id": feed.feed_id}},
+                         "upstream": {}},
+        F_src         = F_src,
+        label         = label,
+        stage_config  = {"p": CASE.imp.P_PROP, "seed": seed},
+        stage_summary = row_summary,
+    )
+    return entry, result.cv_src
+
+
 def run_stage1(run_root: PathLike, seed: int = SEED,
                coproduct: bool = False) -> "dict[str, str]":
     """Stage 1: lay out the inputs (:func:`write_inputs`), build the accounting
@@ -1032,19 +1051,11 @@ def run_stage1(run_root: PathLike, seed: int = SEED,
     registry.load_index()
     run_ids  = {}
     for feed_id, feed in make_feeds(truth(seed, coproduct), seed).items():
-        _, wm, F_src, result, row_summary = _feed_steps(feed, acc)
-        entry = register_feed(
-            wm, feed.metadata, result, registry,
-            parents       = {"inputs":   {"acc": dict(acc_entry), "feed": {"id": feed_id}},
-                             "upstream": {}},
-            F_src         = F_src,
-            label         = feed_id,
-            stage_config  = {"p": CASE.imp.P_PROP, "seed": seed},
-            stage_summary = row_summary,
-        )
+        entry, cv_src = _register_synthetic_feed(feed, acc, acc_entry, registry,
+                                                 feed_id, seed)
         run_ids[feed_id] = entry.run_id
         _log.info("stage 1: %s → %s (%d rows, cv %.4f)", feed_id, entry.run_id,
-                  len(feed.raw), result.cv_src)
+                  len(feed.raw), cv_src)
     return run_ids
 
 

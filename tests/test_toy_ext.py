@@ -9,6 +9,10 @@ The assertions are the qualitative facts the notebooks teach, not the numbers of
 
 from __future__ import annotations
 
+import ast
+import inspect
+import textwrap
+
 import numpy as np
 import pytest
 
@@ -80,13 +84,15 @@ def test_loosening_the_row_leaves_the_solution_where_it_was(contradiction):
 
 def test_the_anchors_cost_coverage_at_every_row_cv(contradiction):
     t = contradiction["table"]
-    assert (t.loc[["cv=0.01", "cv=1", "fixed"], "coverage"] < t.loc["base", "coverage"]).all()
+    assert (t.loc[["cv=0.01", "cv=1", "fixed"], "coverage"]
+            < t.loc["base", "coverage"]).all()
 
 
 def test_fixing_the_input_removes_the_residual(contradiction):
     t = contradiction["table"]
     assert abs(t.loc["fixed", "planted_row_z"]) < 1.0
-    assert abs(t.loc["fixed", "planted_row_z"]) < abs(t.loc["cv=0.01", "planted_row_z"]) / 20.0
+    assert abs(t.loc["fixed", "planted_row_z"]) \
+        < abs(t.loc["cv=0.01", "planted_row_z"]) / 20.0
 
 
 def test_an_experiment_never_becomes_the_latest_core_run(tree, contradiction):
@@ -107,6 +113,8 @@ def test_stage_4_refuses_a_leg_larger_than_its_exporters_output(tree):
     assert row["prior"] > row["output"]                 # the leg the exporter cannot make
     assert row["a_star"] < 0.10 * row["prior"]
     assert row["posterior_over_prior"] < 0.10
+    # the refused leg's residual: measured z = -4.51 (seed 59); the bound is about half
+    assert row["z"] < -2.5
     assert _core_latest(tree["root"]) == tree["base"]
 
 
@@ -126,6 +134,7 @@ def test_with_the_non_negativity_cone_the_gap_decides_where_the_solver_stops(tre
     s = out["summary"]
     assert s["iterations"][0] < s["iterations"][1]
     assert s["max_abs_diff"] > 1e-3                     # the loose solve is another point
+    assert s["max_diff_over_sigma"] < 1                 # ... yet inside σ (measured 0.24)
     assert s["objective"][0] != s["objective"][1]
     assert len(out["table"]) == 6
     assert out["table"]["diff_over_sigma"].is_monotonic_decreasing
@@ -143,7 +152,8 @@ def test_scrap_share_seed_writes_only_unset_scrap_legs_at_a_share_of_the_input(t
     conc = em[(em["from_sector"] == "Concentrate") & (em["to_sector"] == "Smelting")
               & (em["valuation"] == content) & (em["to_region"] == "Isla")
               & (em["time"] == "2003")]
-    f[conc["edge_id"].to_numpy()], sigma[conc["edge_id"].to_numpy()] = [2.0, 1.0, 3.0], 0.1
+    ids = conc["edge_id"].to_numpy()
+    f[ids], sigma[ids] = [2.0, 1.0, 3.0], 0.1
     scrap = em[(em["from_sector"] == "Scrap") & (em["to_sector"] == "Smelting")
                & (em["valuation"] == content)]
     held = int(scrap["edge_id"].iloc[0])        # an edge already written must stay
@@ -153,7 +163,8 @@ def test_scrap_share_seed_writes_only_unset_scrap_legs_at_a_share_of_the_input(t
     log = run_imputer(seed, f, sigma, step=0, acc=acc)
     target = scrap[(scrap["to_region"] == "Isla") & (scrap["time"] == "2003")]["edge_id"]
     assert [e["edge_id"] for e in log] == list(target)
-    assert f[target.iloc[0]] == pytest.approx(0.6) and sigma[target.iloc[0]] == pytest.approx(0.3)
+    assert f[target.iloc[0]] == pytest.approx(0.6)
+    assert sigma[target.iloc[0]] == pytest.approx(0.3)
     assert f[held] == 7.0
     assert np.isnan(f[em["valuation"] == toy.GROSS]).all()
 
@@ -172,10 +183,28 @@ def test_net_stock_row_is_one_soft_row_per_region_and_year(tree):
 def test_the_three_seams_run_through_stages_2_to_4(tree):
     out = toy_ext.run_seams(tree["root"])
     runs, root = out["runs"], tree["root"]
-    assert out["n_seeded"] == len(toy._BUREAU_GAPS)     # the two scrap legs the Bureau skipped
-    assert "ministry" in runs["feed"]
-    meta = ConstraintRunRegistry(str(toy._tree(root)["const"])).load(runs["const"]).row_meta
-    assert int((meta["variant"] == "netstock").sum()) == len(toy.REGIONS) * len(toy.YEARS)
+    tree_ = toy._tree(root)
+    assert out["n_seeded"] == len(toy._BUREAU_GAPS)    # the scrap legs the Bureau skipped
+    feeds = DataFeedRegistry(odir=str(tree_["feed"]))
+    feeds.load_index()
+    hit = np.flatnonzero(feeds.load_result(runs["feed"]["ministry"])["F_root"])
+    em = toy._load_acc(tree_).edge_meta.loc[hit]
+    # the Ministry covers exactly the two region-years the Bureau did not publish
+    assert set(zip(em["from_region"], em["time"])) == set(toy._BUREAU_GAPS)
+    assert len(hit) == len(toy._BUREAU_GAPS)
+    meta = ConstraintRunRegistry(str(tree_["const"])).load(runs["const"]).row_meta
+    assert int((meta["variant"] == "netstock").sum()) \
+        == len(toy.REGIONS) * len(toy.YEARS)
     sidecar = OptimRunRegistry(str(toy._tree(root)["opt"])).load_sidecar(runs["opt"])
     assert sidecar["label"] == "toy_seams"
     assert _core_latest(root) == tree["base"]
+
+
+def test_each_seam_example_is_under_25_lines_of_code():
+    for seam in (toy_ext.ScrapShareSeed, toy_ext.NetStockRow, toy_ext.fourth_feed):
+        node = ast.parse(textwrap.dedent(inspect.getsource(seam))).body[0]
+        doc = node.body[0]
+        body = node.body[1:] if isinstance(doc, ast.Expr) \
+            and isinstance(doc.value, ast.Constant) else node.body
+        lines = {n for b in body for n in range(b.lineno, b.end_lineno + 1)}
+        assert len(lines) < 25, (seam.__name__, len(lines))
