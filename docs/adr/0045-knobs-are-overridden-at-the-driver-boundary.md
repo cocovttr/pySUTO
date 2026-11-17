@@ -35,38 +35,47 @@ new driver flags (`--imp-dir`, `--const-dir`, defaulting to today's `data/proc` 
 deletes a run once no remaining point reuses it. A point then costs the opt run's 0.08 GB, and
 #106's gate still covers the drivers.
 
-## Amendment (#186, 2026-11-17): #185 supersedes the subprocess half; the knob protocol stands
+## Amendment (#186, 2026-11-17): the subprocess half stands, the children run library entry points
 
-The decision's subprocess half is superseded by the packaging spec (#185 Q4): Stages 4–6 became
+The decision stands in both halves, with one change of what the pipeline spawns. Stages 4–6 became
 library functions (`pysuto.stages.run_opt`, `run_uncprop`, `run_psut`) beside `run_imp` and
-`run_const`, and `pysuto.pipeline` passes the `CaseSpec` object and each stage's overrides to them
-in-process instead of spawning a driver, so `python -m pysuto run` needs no `scripts/` directory.
-The knob-protocol half stands unchanged: the same names, type checks and precedence (defaults, then
-the case's `driver_knobs`, then the overrides), the drivers' `--set` being one caller of it. The
-Stage 4–6 constants moved with their values to `pysuto.stages`; the drivers list them as `KNOBS`.
-Bit-identity holds: the copper chain downstream of `opt_20261116_134050_b54f65dc` reproduces every
-stored array, `parents.inputs` and the imputation log through both entry points
-(`opt_20261117_120417_fff166be` via `python -m pysuto run`, `opt_20261117_125807_848d6e22` via the
-scripts).
+`run_const`, so a step no longer needs a `scripts/` driver: each pipeline step runs in a fresh child,
+`python -m pysuto._step <spec.json>`, which resolves the case reference, parses the overrides as
+`KNOB=VALUE` literals through the knob protocol (same names, type checks and precedence: defaults,
+then the case's `driver_knobs`, then the overrides) and calls the stage function. `python -m pysuto
+run` needs no `scripts/` directory. The Stage 4–6 constants moved with their values to
+`pysuto.stages`; the drivers list them as `KNOBS`.
 
-The memory objection above is **not met**: it is measured, and it holds. Two points of
-`Pipeline(("imp","const","opt"))` on that base chain ran in one process (RSS and peak RSS, GB, read
-from `/proc/self/status` after each step; imp and const written to `/dev/shm`):
+**The one-process design of #185 Q4 is rejected on measurement.** It called every step in the
+pipeline's own process. Two sweep-like points of `Pipeline(("imp","const","opt"))` on
+`opt_20261116_134050_b54f65dc` in one process (RSS, with the peak in brackets, GB; imp and const in
+`/dev/shm`) held on to memory:
 
-| step | point 1 RSS (peak) | point 2 RSS (peak) |
+| step | point 1 | point 2 |
 |---|---|---|
 | imp   | 11.5 (11.9) | 32.5 (42.9) |
 | const | 23.5 (23.8) | 42.9 (43.2) |
-| opt   | 33.1 (36.8) | ≥ 46.0 sampled during the solve; not read after the step |
+| opt   | 33.1 (36.8) | ≥ 46.0 sampled, stopped by hand in the diagnostics at `MemAvailable` < 4.5 GB of 62 GB |
 
-Memory is not returned to the system between steps: the process holds 33.1 GB after point 1, and
-point 2 starts there and grows to 43.2 GB by the end of its const step against point 1's 36.8 GB
-peak. Its opt step was sampled at 46.0 GB during the solve, and the run was stopped by hand while
-the diagnostics rendered, when `MemAvailable` fell under 4.5 GB of the machine's 62 GB; the opt run
-had been persisted by then, without its `diag/`. So point 2's peak is at least 9 GB (25 %) above
-point 1's, and a third point would not fit. `Sweep` runs its points through `Pipeline`, so
-`scripts/sweep.py` inherits this: a multi-point sweep needs each step's memory released (a
-`malloc_trim`, or a worker process per step, neither measured here) before it can run in-process
-again. This is open, not resolved by this amendment. The two opt runs,
-`opt_20261117_134648_3231ec7e` (point 1) and `opt_20261117_140050_847fbe73` (point 2, no `diag/`),
-reproduce `opt_20261116_134050_b54f65dc` in all 240 arrays and tables and in `parents.inputs`.
+(runs `opt_20261117_134648_3231ec7e` and `opt_20261117_140050_847fbe73`, the second without `diag/`).
+The process kept 33.1 GB after one point and peaked at least 9 GB (25 %) higher in the second, so a
+sweep could not run in it.
+
+**With a child per step the parent stays at 0.18 GB and the peak is the child's.** Two points
+through the new pipeline (parent RSS after every step 183 MB; child peak sampled from `/proc`, GB;
+`MemAvailable` never under 41.8 GB):
+
+| step | point 1 child peak | point 2 child peak |
+|---|---|---|
+| imp   | 11.9 | 11.9 |
+| const | 14.8 | 14.8 |
+| opt   | 14.0 | 14.3 |
+
+Point 2's peaks equal point 1's within 0.3 GB, against ≥ 9 GB more in one process; the largest step
+is const at 14.8 GB. Runs `imp_20261117_141716_e4268743`, `const_20261117_142115_4083005e`,
+`opt_20261117_142739_4151e66d` (point 1) and `imp_20261117_143143_1458a219`,
+`const_20261117_143538_a7586afb`, `opt_20261117_144150_64744a5d` (point 2). Both opt runs reproduce
+`opt_20261116_134050_b54f65dc` in all 240 stored arrays and tables and in `parents.inputs`, and the
+chain downstream of it reproduces through `python -m pysuto run` and the scripts alike
+(`opt_20261117_120417_fff166be`, `opt_20261117_125807_848d6e22`, measured on the one-process
+design; the toy chain reproduces on the child design).
