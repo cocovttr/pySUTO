@@ -124,7 +124,7 @@ def test_the_command_runs_six_real_children_and_looks_up_no_scripts_directory(
     assert {"feed", "imp", "const", "opt", "uncprop", "psut"} <= printed
     for stage in ("imp", "const", "opt", "uncprop", "psut"):
         assert len(list((tmp_path / "d" / "proc" / stage).glob(f"{stage}_*"))) == 1
-    log = (tmp_path / "logs" / "pipeline" / "toy_opt.log").read_text()
+    log = (tmp_path / "d" / "logs" / "pipeline" / "toy_opt.log").read_text()
     assert "run_opt DONE" in log                    # the child's output is the step log
 
 

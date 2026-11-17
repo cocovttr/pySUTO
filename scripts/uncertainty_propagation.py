@@ -30,7 +30,6 @@ from __future__ import annotations
 import argparse
 import os
 import sys
-from datetime import datetime
 
 # ---------------------------------------------------------------------------
 # The body is pysuto.stages.run_uncprop (#186), with its constants (ALPHA, BIND_TOL,
@@ -44,7 +43,7 @@ from pysuto.case    import CaseSpec
 from pysuto.cases   import add_case_arg, case_from_args
 from pysuto.cases.copper import CASE
 from pysuto.knobs   import write_run_id
-from pysuto.logging import get_logger, add_run_handler
+from pysuto.logging import get_logger, start_run_log
 from pysuto.registry import stage_lock
 from pysuto.stages  import run_uncprop
 
@@ -56,10 +55,7 @@ def main(opt_run_id: str, label: str = "", *, data_dir: str = "data",
     """Propagate opt run ``opt_run_id`` of ``<data_dir>/proc/opt``; the run is
     written to ``<data_dir>/proc/uncprop``. ``case`` is recorded in the sidecar and
     must be the case that made the opt run."""
-    os.makedirs("logs", exist_ok=True)
-    add_run_handler(
-        f"logs/init_uncertainty_propagation_{datetime.now():%Y%m%d_%H%M%S}.log"
-    )
+    start_run_log(data_dir, "init_uncertainty_propagation")
     return run_uncprop(case, opt_run_id, label, data_dir=data_dir, logger=_log)
 
 

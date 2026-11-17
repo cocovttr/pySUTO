@@ -21,7 +21,6 @@ from __future__ import annotations
 import argparse
 import os
 import sys
-from datetime import datetime
 
 # ---------------------------------------------------------------------------
 # USER CONFIGURATION
@@ -38,14 +37,13 @@ TIMESTEPS  = None              # None → all timesteps; or e.g. (1995, 2010, 20
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
 from pysuto.diag    import SolverDiag
-from pysuto.logging import get_logger, add_run_handler
+from pysuto.logging import get_logger, start_run_log
 
 _log = get_logger("init_solve_diag")
 
 
 def main(opt_run_id: str, label: str = "", regions=None) -> None:
-    os.makedirs("logs", exist_ok=True)
-    add_run_handler(f"logs/init_solve_diag_{datetime.now():%Y%m%d_%H%M%S}.log")
+    start_run_log("data", "init_solve_diag")
 
     _log.info("=== init_solve_diag START ===")
     _log.info("Loading SolverDiag from opt_run_id='%s'", opt_run_id)

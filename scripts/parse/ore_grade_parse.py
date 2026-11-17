@@ -51,7 +51,7 @@ import sys
 import pandas as pd
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", "src"))
-from pysuto.logging import get_logger
+from pysuto.logging import get_logger, start_run_log
 
 logger = get_logger(__name__)
 
@@ -258,6 +258,7 @@ def make_rows(agg: pd.DataFrame) -> list[dict]:
 # ---------------------------------------------------------------------------
 
 def main() -> None:
+    start_run_log("data", "ore_grade_parse")
     logger.info("Loading mappings from %s", MAP_FILE)
     alpha_map, time_map = load_mappings(MAP_FILE)
     logger.info("  %d alphanumiso codes, %d root time steps", len(alpha_map), len(time_map))

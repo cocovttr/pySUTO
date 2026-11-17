@@ -20,9 +20,10 @@ from pysuto.input_registry import InputRegistries
 def calls(monkeypatch):
     log = []
     monkeypatch.setattr(copper_feed, "_run_script",
-                        lambda script, *args: log.append(("script", script, args)))
+                        lambda script, *args, data_dir:
+                            log.append(("script", script, args)))
 
-    def fake_run_feed(spec, data_dir, run_log):
+    def fake_run_feed(spec, acc_id, data_dir, run_log):
         log.append(("feed", spec.feed_id, data_dir))
         return SimpleNamespace(run_id=f"feed_{spec.feed_id}_x")
 
@@ -86,7 +87,7 @@ def test_a_failed_script_raises_with_its_log_tail(tmp_path, monkeypatch):
     monkeypatch.setattr(copper_feed, "_SCRIPTS_DIR", tmp_path)
     (tmp_path / "boom.py").write_text("import sys\nprint('why')\nsys.exit(3)\n")
     with pytest.raises(RuntimeError, match="boom.py exited 3(.|\n)*why"):
-        copper_feed._run_script("boom.py")
+        copper_feed._run_script("boom.py", data_dir=str(tmp_path))
 
 
 def test_the_build_scripts_take_a_data_dir(tmp_path, monkeypatch):

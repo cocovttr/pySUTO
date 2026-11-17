@@ -32,7 +32,7 @@ import sys
 import pandas as pd
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", "src"))
-from pysuto.logging import get_logger
+from pysuto.logging import get_logger, start_run_log
 
 logger = get_logger(__name__)
 
@@ -55,6 +55,7 @@ YEAR_MIN        = 1995
 # ---------------------------------------------------------------------------
 
 def main() -> None:
+    start_run_log("data", "crude_ore_parse_feed")
     logger.info("Reading %s", RAW_FILE)
     df = pd.read_excel(RAW_FILE, sheet_name=RAW_SHEET, header=0)
     logger.info("  total rows: %d", len(df))

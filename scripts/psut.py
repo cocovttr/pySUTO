@@ -32,7 +32,6 @@ from __future__ import annotations
 import argparse
 import os
 import sys
-from datetime import datetime
 
 # ---------------------------------------------------------------------------
 # The body is pysuto.stages.run_psut (#186) and so are the constants it reads (PRIMARY,
@@ -46,7 +45,7 @@ from pysuto.cases import add_case_arg, case_from_args
 from pysuto.cases.copper import CASE
 from pysuto.knobs import write_run_id
 from pysuto.registry import stage_lock
-from pysuto.logging import get_logger, add_run_handler
+from pysuto.logging import get_logger, start_run_log
 from pysuto.stages import FIGS_DIR, PRIMARY, PSUT_KNOBS as KNOBS, run_psut
 
 _log = get_logger("init_psut")
@@ -65,8 +64,7 @@ def main(
     png:        bool = True,             # also a static PNG per figure, when kaleido can render
     case:       CaseSpec = CASE,         # recorded in the sidecar; must have made the opt run
 ) -> str:
-    os.makedirs("logs", exist_ok=True)
-    add_run_handler(f"logs/init_psut_{datetime.now():%Y%m%d_%H%M%S}.log")
+    start_run_log(data_dir, "init_psut")
     return run_psut(case, opt_run_id, label, primary, timesteps, data_dir=data_dir,
                     sankey=sankey, figs_dir=figs_dir, png=png, logger=_log)
 

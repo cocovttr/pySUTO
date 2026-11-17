@@ -38,7 +38,8 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-from pysuto.cases.copper import BACI_FEED, CRUDE_ORE_FEED, ICSG_FEED, icsg_sector_key
+from pysuto.cases.copper import (BACI_FEED, CASE, CRUDE_ORE_FEED, ICSG_FEED,
+                                 icsg_sector_key)
 from pysuto.conc import ConcordanceTable
 from pysuto.feedpipe import run_feed
 from pysuto.feedprep.ore_grade import OreGradeLabels
@@ -671,12 +672,13 @@ def baci_source_version(data_dir: str) -> int:
 _SCRIPTS_DIR = Path(__file__).resolve().parents[3] / "scripts"
 
 
-def _run_script(script: str, *args: str) -> None:
+def _run_script(script: str, *args: str, data_dir: str) -> None:
     """Run ``scripts/<script>`` as a subprocess from the working directory, its output
-    appended to ``logs/<script>.log``; raise ``RuntimeError`` with its tail if it fails."""
+    appended to ``<data_dir>/logs/<script>.log``; raise ``RuntimeError`` with its tail
+    if it fails."""
     cmd = [sys.executable, str(_SCRIPTS_DIR / script), *args]
-    os.makedirs("logs", exist_ok=True)
-    log_path = os.path.join("logs", f"{Path(script).stem}.log")
+    os.makedirs(os.path.join(data_dir, "logs"), exist_ok=True)
+    log_path = os.path.join(data_dir, "logs", f"{Path(script).stem}.log")
     _log.info("stage 1: %s", " ".join(cmd[1:]))
     with open(log_path, "a", encoding="utf-8") as log:
         rc = subprocess.run(cmd, stdout=log, stderr=subprocess.STDOUT).returncode
@@ -712,15 +714,18 @@ def run_stage1(data_dir: str) -> "dict[str, str]":
     """
     data_dir = str(data_dir)
     _run_script("build_baci_reexport.py", "--source-version",
-                str(baci_source_version(data_dir)), "--data-dir", data_dir)
+                str(baci_source_version(data_dir)), "--data-dir", data_dir,
+                data_dir=data_dir)
     run_ids = {}
 
     def feed(spec) -> None:
-        run_log = os.path.join("logs", f"{spec.feed_id}_{datetime.now():%Y%m%d_%H%M%S}.log")
-        run_ids[spec.feed_id] = run_feed(spec, data_dir=data_dir, run_log=run_log).run_id
+        run_log = os.path.join(data_dir, "logs",
+                               f"{spec.feed_id}_{datetime.now():%Y%m%d_%H%M%S}.log")
+        run_ids[spec.feed_id] = run_feed(spec, acc_id=CASE.acc_id, data_dir=data_dir,
+                                         run_log=run_log).run_id
 
     feed(BACI_FEED)
-    _run_script("build_trade_shares.py", "--data-dir", data_dir)
+    _run_script("build_trade_shares.py", "--data-dir", data_dir, data_dir=data_dir)
     feed(ICSG_SPEC)
     feed(CRUDE_ORE_FEED)
     return run_ids

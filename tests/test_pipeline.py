@@ -155,6 +155,26 @@ class TestPipelineRun:
         assert len(_runs(repo, "opt")) == 1                       # the base only
 
 
+class TestPipelineDataDir:
+
+    def test_a_sweep_writes_under_its_pipelines_data_dir_and_nowhere_else(self, repo):
+        elsewhere = repo.root / "elsewhere"
+        for stage, rid in (("imp", repo.base.imp), ("const", repo.base.const),
+                           ("opt", repo.base.opt)):
+            d = elsewhere / "proc" / stage
+            d.mkdir(parents=True)
+            (repo.root / "data" / "proc" / stage / rid).rename(d / rid)
+        before = {p for p in repo.root.rglob("*") if "elsewhere" not in p.parts}
+        pipeline = Pipeline(steps=STEPS, base=repo.base, cwd=str(repo.root),
+                            case="stub", resolve=resolve, data_dir=str(elsewhere))
+        sweep = Sweep(pipeline, [Axis("imp.TIME_WINDOW", [2, 3])], mode="grid")
+        sid = sweep.run(label="dd")
+        assert (elsewhere / "proc" / "sweep" / sid).is_dir()
+        assert len(list((elsewhere / "proc" / "opt").iterdir())) == 3   # base + 2 points
+        assert (elsewhere / "logs" / "pipeline").is_dir()
+        assert {p for p in repo.root.rglob("*") if "elsewhere" not in p.parts} == before
+
+
 class TestPipelineRunDirs:
 
     def test_a_step_with_a_run_dir_writes_there_and_the_next_step_reads_it_there(

@@ -13,7 +13,7 @@ import sys
 import re
 
 
-from pysuto.logging import get_logger
+from pysuto.logging import get_logger, start_run_log
 
 
 l = get_logger(__name__)
@@ -136,6 +136,7 @@ def reg_conv(df, rconv):
 # Main execution
 # -------------------------
 if __name__ == "__main__":
+    start_run_log("data", "baci")
     of = r'data/proc/datafeed/baci'
 
     baci_path = r'data/input/raw/BACI_HS92_V202601'

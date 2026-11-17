@@ -27,7 +27,6 @@ from __future__ import annotations
 import argparse
 import os
 import sys
-from datetime import datetime
 
 # ---------------------------------------------------------------------------
 # The body is pysuto.stages.run_opt (#186) and so are the tuning constants (TIMESTEPS,
@@ -41,7 +40,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 from pysuto.case    import CaseSpec
 from pysuto.cases   import add_case_arg, case_from_args
 from pysuto.cases.copper import CASE
-from pysuto.logging import get_logger, add_run_handler
+from pysuto.logging import get_logger, start_run_log
 from pysuto.knobs   import add_knob_args, overrides_from_cli, write_run_id
 from pysuto.registry import stage_lock
 from pysuto.stages  import OPT_KNOBS as KNOBS, opt_defaults, run_opt
@@ -59,10 +58,7 @@ def main(const_run_id: str, label: str = "", prior_mode: str = "warm",
     ``driver_knobs["opt"]`` (a ``--set`` of the same knob wins); see
     :func:`pysuto.stages.run_opt`, which this calls.
     """
-    os.makedirs("logs", exist_ok=True)
-    add_run_handler(
-        f"logs/init_run_solver_{datetime.now():%Y%m%d_%H%M%S}.log"
-    )
+    start_run_log(data_dir, "init_run_solver")
     return run_opt(case, const_run_id, label, overrides, prior_mode=prior_mode,
                    data_dir=data_dir, const_dir=const_dir, logger=_log)
 

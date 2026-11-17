@@ -75,12 +75,14 @@ def run_spec(spec: StepSpec) -> str:
 
 def main(argv=None) -> int:
     from pysuto.knobs import write_run_id
+    from pysuto.logging import start_run_log
     argv = sys.argv[1:] if argv is None else argv
     if len(argv) != 1:
         print("usage: python -m pysuto._step <spec.json>", file=sys.stderr)
         return 2
     with open(argv[0], encoding="utf-8") as f:
         spec = StepSpec(**json.load(f))
+    start_run_log(spec.data_dir, f"step_{spec.step}")
     write_run_id(spec.run_id_file, run_spec(spec))
     return 0
 

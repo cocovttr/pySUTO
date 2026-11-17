@@ -13,14 +13,14 @@ hook (``CaseSpec.stage1``) and needs no base; any later ``--from`` takes its ups
 from ``--base <opt_run_id>`` (the base chain's parents, as ``Chain.from_opt_run``). The
 stage functions are :mod:`pysuto.stages`, called by the private child entry point
 :mod:`pysuto._step` with the ``--case`` reference; the command needs no ``scripts/``
-directory. ``logs/`` and the default ``data`` are relative to the
-working directory.
+directory. ``--data-dir`` is required, and a relative one is relative to the working
+directory.
 
 Output: the command prints one line per stage to stdout, the stage name and the run
 id(s) it produced (``feed`` lists its three feed runs), and nothing else; that is the
 command's result, not a log. The log lines of the pipeline go to the logging handlers and
-``logs/``; each step's stdout and stderr are captured in
-``logs/pipeline/<label>_<step>.log``.
+``<data-dir>/logs/``; each step's stdout and stderr are captured in
+``<data-dir>/logs/pipeline/<label>_<step>.log``.
 """
 
 from __future__ import annotations
@@ -30,6 +30,7 @@ import os
 import sys
 
 from pysuto.cases import add_case_arg, case_from_args, load_case
+from pysuto.logging import configure_file_logs
 from pysuto.pipeline import ALL_STEPS, Chain, Pipeline
 
 
@@ -44,8 +45,8 @@ def _parser() -> argparse.ArgumentParser:
                      help="Last stage to run (default psut).")
     run.add_argument("--base", default=None, metavar="OPT_RUN_ID",
                      help="Opt run whose chain supplies the upstream of a --from past feed.")
-    run.add_argument("--data-dir", default="data",
-                     help="Data root holding proc/ and input/ (default 'data').")
+    run.add_argument("--data-dir", required=True,
+                     help="Data root with proc/ and input/; logs go to <data-dir>/logs.")
     run.add_argument("--config", default=None,
                      help="Config passed to the imp and const steps only.")
     run.add_argument("--label", default=None,
@@ -65,6 +66,7 @@ def main(argv=None) -> int:
                      "--from feed has none")
     if args.first != "feed" and args.base is None:
         parser.error(f"--from {args.first} needs --base <opt_run_id> for its upstream")
+    configure_file_logs(os.path.join(args.data_dir, "logs"))
     base = None
     if args.base is not None:
         base = Chain.from_opt_run(args.base, root=os.path.join(args.data_dir, "proc"))
