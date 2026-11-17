@@ -20,7 +20,8 @@ from pysuto.input_registry import InputRegistries
 def calls(monkeypatch):
     log = []
     monkeypatch.setattr(copper_feed, "_run_script",
-                        lambda script, *args, data_dir: log.append(("script", script, args)))
+                        lambda script, *args, data_dir:
+                            log.append(("script", script, args)))
 
     def fake_run_feed(spec, acc_id, data_dir, run_log):
         log.append(("feed", spec.feed_id, data_dir))

@@ -513,8 +513,8 @@ class Sweep:
         a sweep: it refuses a sweep declared differently or a checkout at another
         commit, and reruns every point not ``done``.
         """
-        reg = SweepRunRegistry(os.path.join(self.pipeline.cwd,
-                                          self.pipeline.data_dir or "data", "proc", "sweep"))
+        pl  = self.pipeline
+        reg = SweepRunRegistry(os.path.join(pl.cwd, pl.data_dir or "data", "proc", "sweep"))
         decl = self.declaration()
         commit, dirty = _git_state(self.pipeline.cwd)
         if resume is None:

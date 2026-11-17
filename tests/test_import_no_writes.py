@@ -1,4 +1,6 @@
-"""test_import_no_writes.py — importing pySUTO writes nothing; a run writes under its data dir (#190).
+"""test_import_no_writes.py
+========================
+Importing pySUTO writes nothing; a run writes under its data dir (#190).
 
 Four seams: every module of the package imports from an empty working directory and
 leaves it empty; ``python -m pysuto run`` refuses to start without ``--data-dir``;
@@ -42,22 +44,73 @@ def test_python_m_pysuto_run_without_data_dir_exits_2(capsys):
     assert "--data-dir" in capsys.readouterr().err
 
 
-def test_configure_adds_per_module_file_handlers_under_the_log_dir(tmp_path):
-    from pysuto.logging import configure, get_logger
-    early = get_logger("t190.early")
-    configure(str(tmp_path / "logs"))
-    late = get_logger("t190.late")
-    early.info("one")
-    late.info("two")
-    for log in (early, late):
-        for h in log.handlers:
-            h.flush()
-    assert "one" in (tmp_path / "logs" / "t190.early.log").read_text()
-    assert "two" in (tmp_path / "logs" / "t190.late.log").read_text()
-    for log in (early, late):                       # leave no handler on a vanished tmp_path
+@pytest.fixture
+def fresh_log_state(monkeypatch):
+    """Reset the module's log-dir state; close every file handler the test opened."""
+    from pysuto import logging as plog
+    monkeypatch.setattr(plog, "_LOG_DIR", None)
+    created = []
+    root_before = list(logging.getLogger().handlers)
+    yield created
+    for name in created:
+        log = logging.getLogger(name)
         for h in [h for h in log.handlers if isinstance(h, logging.FileHandler)]:
             log.removeHandler(h)
             h.close()
+    root = logging.getLogger()
+    for h in [h for h in root.handlers if h not in root_before]:
+        root.removeHandler(h)
+        h.close()
+
+
+def _flush(*logs):
+    for log in logs:
+        for h in log.handlers:
+            h.flush()
+
+
+def test_configure_file_logs_adds_per_module_handlers_under_the_log_dir(
+        tmp_path, fresh_log_state):
+    from pysuto.logging import configure_file_logs, get_logger
+    fresh_log_state.extend(["t190.early", "t190.late"])
+    early = get_logger("t190.early")
+    configure_file_logs(str(tmp_path / "logs"))
+    late = get_logger("t190.late")
+    early.info("one")
+    late.info("two")
+    _flush(early, late)
+    assert "one" in (tmp_path / "logs" / "t190.early.log").read_text()
+    assert "two" in (tmp_path / "logs" / "t190.late.log").read_text()
+
+
+def test_configure_file_logs_with_another_dir_moves_the_loggers(tmp_path, fresh_log_state):
+    from pysuto.logging import configure_file_logs, get_logger
+    fresh_log_state.append("t190.move")
+    log = get_logger("t190.move")
+    configure_file_logs(str(tmp_path / "a"))
+    log.info("first")
+    configure_file_logs(str(tmp_path / "b"))
+    log.info("second")
+    _flush(log)
+    files = [h for h in log.handlers if isinstance(h, logging.FileHandler)]
+    assert len(files) == 1
+    assert "second" in (tmp_path / "b" / "t190.move.log").read_text()
+    a = (tmp_path / "a" / "t190.move.log").read_text()
+    assert "first" in a and "second" not in a
+
+
+def test_start_run_log_makes_the_run_file_and_the_module_files(tmp_path, fresh_log_state):
+    from pysuto.logging import get_logger, start_run_log
+    fresh_log_state.append("t190.mod")
+    log = get_logger("t190.mod")
+    log_dir = start_run_log(str(tmp_path), "t190x")
+    log.info("hello")
+    _flush(log, logging.getLogger())
+    assert log_dir == str(tmp_path / "logs")
+    runs = list((tmp_path / "logs").glob("t190x_*.log"))
+    assert len(runs) == 1
+    assert "hello" in runs[0].read_text()
+    assert "hello" in (tmp_path / "logs" / "t190.mod.log").read_text()
 
 
 def test_run_feed_without_acc_id_raises(tmp_path):

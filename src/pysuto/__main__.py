@@ -27,7 +27,7 @@ import sys
 from pathlib import Path
 
 from pysuto.cases import add_case_arg, case_from_args
-from pysuto.logging import configure
+from pysuto.logging import configure_file_logs
 from pysuto.pipeline import ALL_STEPS, REPO_ROOT, Chain, Pipeline
 
 
@@ -43,7 +43,7 @@ def _parser() -> argparse.ArgumentParser:
     run.add_argument("--base", default=None, metavar="OPT_RUN_ID",
                      help="Opt run whose chain supplies the upstream of a --from past feed.")
     run.add_argument("--data-dir", required=True,
-                     help="Data root holding proc/ and input/; logs go to <data-dir>/logs.")
+                     help="Data root with proc/ and input/; logs go to <data-dir>/logs.")
     run.add_argument("--config", default=None,
                      help="Config passed to the imp and const steps only.")
     run.add_argument("--label", default=None,
@@ -63,7 +63,7 @@ def main(argv=None) -> int:
                      "--from feed has none")
     if args.first != "feed" and args.base is None:
         parser.error(f"--from {args.first} needs --base <opt_run_id> for its upstream")
-    configure(os.path.join(args.data_dir, "logs"))
+    configure_file_logs(os.path.join(args.data_dir, "logs"))
     base = None
     if args.base is not None:
         base = Chain.from_opt_run(args.base, root=os.path.join(args.data_dir, "proc"))

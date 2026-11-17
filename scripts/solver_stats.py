@@ -21,7 +21,6 @@ from __future__ import annotations
 import argparse
 import os
 import sys
-from datetime import datetime
 
 # ---------------------------------------------------------------------------
 # USER CONFIGURATION
@@ -38,14 +37,13 @@ DEFAULT_OPT_RUN_ID = "opt_20260611_075036_6d2e540f"
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
 from pysuto.diag    import SolverDiag, SolverStatsDiagnostic
-from pysuto.logging import configure, get_logger, add_run_handler
+from pysuto.logging import get_logger, start_run_log
 
 _log = get_logger("solver_stats")
 
 
 def main(opt_run_id: str, years) -> None:
-    configure(os.path.join("data", "logs"))
-    add_run_handler(os.path.join("data", "logs", f"solver_stats_{datetime.now():%Y%m%d_%H%M%S}.log"))
+    start_run_log("data", "solver_stats")
 
     _log.info("=== solver_stats START ===")
     _log.info("Loading SolverDiag from opt_run_id='%s'", opt_run_id)

@@ -45,7 +45,6 @@ from __future__ import annotations
 
 import os
 import sys
-from datetime import datetime
 
 # ---------------------------------------------------------------------------
 # USER CONFIGURATION
@@ -61,18 +60,15 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 from pysuto.cases.copper_feed import ICSG_SPEC as SPEC
 from pysuto.config import load_config
 from pysuto.feedpipe import run_feed
-from pysuto.logging import configure
+from pysuto.logging import start_run_log
 from pysuto.registry import stage_lock
 
 FEED_ID = SPEC.feed_id
 
 
 def main() -> None:
-    log_dir = os.path.join("data", "logs")
-    configure(log_dir)
-    run_log = os.path.join(log_dir, f"{FEED_ID}_{datetime.now():%Y%m%d_%H%M%S}.log")
-    run_feed(SPEC, acc_id=load_config("config/config.yaml").pipeline.acc_id,
-             run_log=run_log)
+    start_run_log("data", FEED_ID)
+    run_feed(SPEC, acc_id=load_config("config/config.yaml").pipeline.acc_id)
 
 
 if __name__ == "__main__":

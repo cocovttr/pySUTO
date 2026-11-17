@@ -30,7 +30,6 @@ from __future__ import annotations
 import argparse
 import os
 import sys
-from datetime import datetime
 
 # ---------------------------------------------------------------------------
 # USER CONFIGURATION
@@ -53,7 +52,7 @@ from pysuto.cases.copper import CASE
 from pysuto.diag    import UncPropDiag
 from pysuto.knobs   import write_run_id
 from pysuto.uncprop import KalmanUncProp
-from pysuto.logging import configure, get_logger, add_run_handler
+from pysuto.logging import get_logger, start_run_log
 from pysuto.registry import OptimRunRegistry, stage_lock
 
 _log = get_logger("init_uncertainty_propagation")
@@ -64,10 +63,7 @@ def main(opt_run_id: str, label: str = "", *, data_dir: str = "data",
     """Propagate opt run ``opt_run_id`` of ``<data_dir>/proc/opt``; the run is
     written to ``<data_dir>/proc/uncprop``. ``case`` is recorded in the sidecar and
     must be the case that made the opt run."""
-    log_dir = os.path.join(data_dir, "logs")
-    configure(log_dir)
-    add_run_handler(os.path.join(
-        log_dir, f"init_uncertainty_propagation_{datetime.now():%Y%m%d_%H%M%S}.log"))
+    start_run_log(data_dir, "init_uncertainty_propagation")
     proc        = os.path.join(data_dir, "proc")
     opt_dir     = os.path.join(proc, "opt")
     const_dir   = os.path.join(proc, "const")

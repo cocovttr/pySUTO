@@ -60,7 +60,7 @@ import sys
 import pandas as pd
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", "src"))
-from pysuto.logging import get_logger
+from pysuto.logging import get_logger, start_run_log
 
 logger = get_logger(__name__)
 
@@ -338,6 +338,7 @@ def convert_eff(path_in: str) -> list[dict]:
 # ---------------------------------------------------------------------------
 
 def main() -> None:
+    start_run_log("data", "copper_params_parse")
     logger.info("Converting %s", CONC_IN)
     conc_rows = convert_conc(CONC_IN)
     conc_df   = pd.DataFrame(conc_rows, columns=TEMPLATE_COLS)

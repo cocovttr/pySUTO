@@ -2,10 +2,13 @@
 import logging
 import sys
 import os
+import threading
+from datetime import datetime
 
 
-_LOG_DIR = None          # set by configure(); None until a run asks for log files
+_LOG_DIR = None          # set by configure_file_logs(); None until a run asks for files
 _NAMES: list = []        # every logger get_logger returned, in first-call order
+_LOCK = threading.Lock() # guards _LOG_DIR, _NAMES and the file-handler swap (threads)
 
 
 def get_logger(name="system"):
@@ -13,24 +16,25 @@ def get_logger(name="system"):
     Return a named logger with a console handler and no file handler.
 
     Importing pySUTO writes nothing to disk (#190); the per-module file
-    ``<log_dir>/<name>.log`` appears only after :func:`configure` names a
+    ``<log_dir>/<name>.log`` appears only after :func:`configure_file_logs` names a
     directory. Calling get_logger with the same name twice is idempotent
     (handlers are not duplicated).
     """
     logger = logging.getLogger(name)
-    if not logger.handlers:  # prevent duplicate handlers; check own handlers only (not ancestors')
-        logger.setLevel(logging.DEBUG)
-        ch = logging.StreamHandler(sys.stdout)
-        ch.setFormatter(_formatter())
-        logger.addHandler(ch)
-        _NAMES.append(name)
-        if _LOG_DIR is not None:
-            _add_file_handler(logger, name)
+    with _LOCK:
+        if not logger.handlers:  # no duplicate handlers; own ones only
+            logger.setLevel(logging.DEBUG)
+            ch = logging.StreamHandler(sys.stdout)
+            ch.setFormatter(_formatter())
+            logger.addHandler(ch)
+            _NAMES.append(name)
+            if _LOG_DIR is not None:
+                _add_file_handler(logger, name)
 
     return logger
 
 
-def configure(log_dir) -> None:
+def configure_file_logs(log_dir) -> None:
     """
     Send the per-module logs to ``<log_dir>/<name>.log`` from now on.
 
@@ -41,16 +45,31 @@ def configure(log_dir) -> None:
     """
     global _LOG_DIR
     log_dir = os.fspath(log_dir)
-    if log_dir == _LOG_DIR:
-        return
-    _LOG_DIR = log_dir
-    os.makedirs(log_dir, exist_ok=True)
-    for name in _NAMES:
-        logger = logging.getLogger(name)
-        for h in [h for h in logger.handlers if isinstance(h, logging.FileHandler)]:
-            logger.removeHandler(h)
-            h.close()
-        _add_file_handler(logger, name)
+    with _LOCK:
+        if log_dir == _LOG_DIR:
+            return
+        _LOG_DIR = log_dir
+        os.makedirs(log_dir, exist_ok=True)
+        for name in _NAMES:
+            logger = logging.getLogger(name)
+            for h in [h for h in logger.handlers if isinstance(h, logging.FileHandler)]:
+                logger.removeHandler(h)
+                h.close()
+            _add_file_handler(logger, name)
+
+
+def start_run_log(data_dir, name: str) -> str:
+    """
+    Start the logs of one driver run under ``<data_dir>/logs`` and return that directory.
+
+    Calls :func:`configure_file_logs` for the per-module files and attaches the
+    timestamped run handler ``<data_dir>/logs/<name>_<YYYYmmdd_HHMMSS>.log`` to the
+    root logger (:func:`add_run_handler`).
+    """
+    log_dir = os.path.join(os.fspath(data_dir), "logs")
+    configure_file_logs(log_dir)
+    add_run_handler(os.path.join(log_dir, f"{name}_{datetime.now():%Y%m%d_%H%M%S}.log"))
+    return log_dir
 
 
 def _add_file_handler(logger: logging.Logger, name: str) -> None:

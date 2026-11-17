@@ -27,7 +27,6 @@ from __future__ import annotations
 import argparse
 import os
 import sys
-from datetime import datetime
 
 # ---------------------------------------------------------------------------
 # USER CONFIGURATION
@@ -123,7 +122,7 @@ from pysuto.input_registry import InputRegistry
 from pysuto.clarabel_backend import ClarabelBackend
 from pysuto.solver  import Solver
 from pysuto.diag    import SolverDiag
-from pysuto.logging import configure, get_logger, add_run_handler
+from pysuto.logging import get_logger, start_run_log
 from pysuto.knobs   import add_knob_args, overrides_from_cli, write_run_id
 from pysuto.registry import ConstraintRunRegistry, stage_lock
 
@@ -148,10 +147,7 @@ def main(const_run_id: str, label: str = "", prior_mode: str = "warm",
     case_knobs = case.driver_knobs_for("opt", KNOBS, globals())
     cfg = {k: globals()[k] for k in KNOBS}
     cfg.update({k: v for k, v in case_knobs.items() if k not in (overrides or {})})
-    log_dir = os.path.join(data_dir, "logs")
-    configure(log_dir)
-    add_run_handler(os.path.join(
-        log_dir, f"init_run_solver_{datetime.now():%Y%m%d_%H%M%S}.log"))
+    start_run_log(data_dir, "init_run_solver")
     proc    = os.path.join(data_dir, "proc")
     opt_dir = os.path.join(proc, "opt")
     acc_dir = os.path.join(proc, "acc")

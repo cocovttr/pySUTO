@@ -32,7 +32,6 @@ from __future__ import annotations
 import argparse
 import os
 import sys
-from datetime import datetime
 
 # ---------------------------------------------------------------------------
 # USER CONFIGURATION
@@ -54,7 +53,7 @@ from pysuto.cases.copper import CASE
 from pysuto.knobs import write_run_id
 from pysuto.psut import PSUT
 from pysuto.registry import OptimRunRegistry, PsutRunRegistry, stage_lock
-from pysuto.logging import configure, get_logger, add_run_handler
+from pysuto.logging import get_logger, start_run_log
 
 _log = get_logger("init_psut")
 
@@ -70,9 +69,7 @@ def main(
     png:        bool = True,             # also a static PNG per figure, when kaleido can render
     case:       CaseSpec = CASE,         # recorded in the sidecar; must have made the opt run
 ) -> str:
-    log_dir = os.path.join(data_dir, "logs")
-    configure(log_dir)
-    add_run_handler(os.path.join(log_dir, f"init_psut_{datetime.now():%Y%m%d_%H%M%S}.log"))
+    start_run_log(data_dir, "init_psut")
 
     _log.info("=== init_psut START ===")
     _log.info("opt_run_id=%s  primary=%s  timesteps=%s  data_dir=%s",
