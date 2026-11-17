@@ -54,11 +54,11 @@ def test_the_hook_runs_the_load_bearing_order_on_the_given_data_dir(calls, tmp_p
 def test_copper_declares_the_hook_and_the_feed_step_s_child_reaches_it(calls, tmp_path):
     """The feed step runs in a child (#186): its entry point calls the hook of the case
     the reference names, in the order of the hook."""
-    from pysuto._step import run_spec
+    from pysuto._step import StepSpec, run_spec
     _icsg_parents(tmp_path, 28)
     assert copper.CASE.stage1 is not None
-    out = run_spec({"step": "feed", "case": "copper", "label": "l",
-                    "data_dir": str(tmp_path)})
+    out = run_spec(StepSpec(step="feed", case="copper", label="l", upstream=None,
+                            data_dir=str(tmp_path), config=None))
     assert [c[1] for c in calls if c[0] == "feed"] == ["baci", "icsg", "crude_ore"]
     assert out == "feed_baci_x\nfeed_icsg_x\nfeed_crude_ore_x"
 
@@ -77,7 +77,7 @@ def test_a_feed_start_hands_the_case_reference_to_the_feed_child(tmp_path, monke
     monkeypatch.chdir(tmp_path)
     assert main(["run", "--case", "copper", "--from", "feed", "--to", "feed",
                  "--data-dir", str(tmp_path / "d")]) == 0
-    assert seen["step"] == "feed" and seen["spec"]["case"] == "copper"
+    assert seen["step"] == "feed" and seen["spec"].case == "copper"
     assert "feed_baci_x feed_icsg_x feed_crude_ore_x" in capsys.readouterr().out
 
 

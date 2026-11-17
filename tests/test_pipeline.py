@@ -12,6 +12,7 @@ directory it was told to read. ``test_pysuto_run.py`` runs real children.
 from __future__ import annotations
 
 import dataclasses
+from dataclasses import asdict
 import json
 import math
 import os
@@ -39,20 +40,20 @@ def resolve(reference):
 
 def _fake_launch(self, step, spec):
     stage = step
-    sets = spec["knobs"]
+    sets = spec.knobs
     print(f"{stage} starting", flush=True)
     if os.environ.get("FAKE_FAIL") == stage or os.environ.get("FAKE_FAIL_SET") in sets:
-        raise StepFailed(step, 3, f"{stage} starting\nboom", spec["log_path"])
-    data_dir = spec["data_dir"]
+        raise StepFailed(step, 3, f"{stage} starting\nboom", spec.log_path)
+    data_dir = spec.data_dir
     proc = os.path.join(data_dir, "proc")
-    upstream, dirs = spec["upstream"], spec["dirs"]
+    upstream, dirs = spec.upstream, spec.dirs
     read = {"const": (upstream, dirs.get("imp_dir")),
             "opt": (upstream, dirs.get("const_dir"))}.get(stage)
     if read:
         where = read[1] or os.path.join(proc, {"const": "imp", "opt": "const"}[stage])
         if not os.path.isdir(os.path.join(where, read[0])):
             raise StepFailed(step, 4, f"no upstream run {read[0]} in {where}",
-                             spec["log_path"])
+                             spec.log_path)
     rid = f"{stage}_20261021_120000_{uuid.uuid4().hex[:8]}"
     up = {"imp": {"feed_run_ids": upstream}, "const": {"imp_run_id": upstream},
           "opt": {"const_run_id": upstream}}[stage]
@@ -61,8 +62,8 @@ def _fake_launch(self, step, spec):
     d = os.path.join(out, rid)
     os.makedirs(d)
     with open(os.path.join(d, "metadata.json"), "w") as f:
-        json.dump({"run_id": rid, "label": spec["label"], "parents": {"upstream": up},
-                   "stage_config": {"sets": sets, "spec": spec}}, f)
+        json.dump({"run_id": rid, "label": spec.label, "parents": {"upstream": up},
+                   "stage_config": {"sets": sets, "spec": asdict(spec)}}, f)
     return rid
 
 
@@ -181,6 +182,42 @@ class TestPipelineRunDirs:
             _pipeline(repo, steps=("const", "opt"), run_dirs=dirs)
 
 
+class TestLaunch:
+    """The real ``_launch`` with a fake child: ``subprocess.run`` stands in."""
+
+    def _launch_with(self, repo, monkeypatch, write):
+        import subprocess as sp
+        import pysuto.pipeline as pl
+        monkeypatch.undo()          # the autouse fake of _launch is not wanted here
+
+        def run(cmd, **kw):
+            with open(cmd[-1]) as f:
+                write(json.load(f)["run_id_file"])
+            return sp.CompletedProcess(cmd, 0)
+
+        monkeypatch.setattr(pl.subprocess, "run", run)
+        pipe = _pipeline(repo, steps=("opt",))
+        return pipe.run({}, label="launch")
+
+    def test_a_child_that_exits_0_without_a_run_id_file_raises_step_failed(
+            self, repo, monkeypatch):
+        with pytest.raises(StepFailed, match="wrote no run id") as exc:
+            self._launch_with(repo, monkeypatch, lambda path: None)
+        assert exc.value.step == "opt" and exc.value.returncode == 0
+
+    def test_a_child_that_writes_a_blank_run_id_raises_step_failed(
+            self, repo, monkeypatch):
+        def blank(path):
+            open(path, "w").write("\n")
+        with pytest.raises(StepFailed, match="wrote no run id"):
+            self._launch_with(repo, monkeypatch, blank)
+
+    def test_a_child_that_writes_a_run_id_returns_it(self, repo, monkeypatch):
+        def good(path):
+            open(path, "w").write("opt_x\n")
+        assert self._launch_with(repo, monkeypatch, good).opt == "opt_x"
+
+
 class TestPipelineRelativePaths:
 
     def test_a_relative_config_and_run_dir_resolve_against_the_pipelines_cwd(
@@ -193,7 +230,8 @@ class TestPipelineRelativePaths:
                          case="stub", resolve=resolve, config="c.yaml",
                          run_dirs={"imp": "scratch/imp", "const": "scratch/const"},
                          log_dir=str(repo.root / "logs")).run({}, label="rel")
-        spec = _sidecar_in(repo.root / "scratch" / "const", chain.const)["stage_config"]["spec"]
+        side = _sidecar_in(repo.root / "scratch" / "const", chain.const)
+        spec = side["stage_config"]["spec"]
         assert spec["config"] == str(repo.root / "c.yaml")
         assert spec["dirs"] == {"imp_dir": str(repo.root / "scratch" / "imp"),
                                 "const_dir": str(repo.root / "scratch" / "const")}

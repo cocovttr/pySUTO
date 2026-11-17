@@ -248,7 +248,7 @@ def test_the_library_never_imports_the_cases():
     for path in SRC.rglob("*.py"):
         if ("cases" in path.relative_to(SRC).parts
                 or path.name in ("__main__.py", "_step.py")):
-            continue                # the cases, ``python -m pysuto`` (#125), its step child (#186)
+            continue                # the cases, ``python -m pysuto`` (#125), its child (#186)
         for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
             names = ([a.name for a in node.names] if isinstance(node, ast.Import)
                      else [node.module or ""] if isinstance(node, ast.ImportFrom)

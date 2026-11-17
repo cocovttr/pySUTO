@@ -2,8 +2,8 @@
 __main__.py
 ===========
 ``python -m pysuto run`` (#125, #26 §3): one command runs a chain of a case through the
-six stages, each in a fresh child process (#186), from a Stage 1 hook or a base chain to any later
-stage::
+six stages, each in a fresh child process (#186), from a Stage 1 hook or a base chain
+to any later stage::
 
     python -m pysuto run --case toy --from feed --to psut --data-dir /tmp/toy
     python -m pysuto run --case copper --from imp --to psut --base opt_20261022_112855_928da10c

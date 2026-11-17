@@ -81,8 +81,8 @@ def test_the_toy_s_checks_hold_on_the_one_command_chain(chain):
 def test_a_feed_step_needs_the_case_s_stage_1_hook(tmp_path):
     from dataclasses import replace
     with pytest.raises(ValueError, match="declares none"):
-        Pipeline(steps=ALL_STEPS, case="x", resolve=lambda ref: replace(toy.CASE, stage1=None),
-                 data_dir=str(tmp_path))
+        Pipeline(steps=ALL_STEPS, case="x", data_dir=str(tmp_path),
+                 resolve=lambda ref: replace(toy.CASE, stage1=None))
 
 
 def test_a_start_past_the_feed_step_needs_a_base_and_a_feed_start_refuses_one(tmp_path):
@@ -99,7 +99,8 @@ def test_a_start_past_the_feed_step_needs_a_base_and_a_feed_start_refuses_one(tm
 def test_the_command_runs_six_real_children_and_looks_up_no_scripts_directory(
         tmp_path, monkeypatch, capsys):
     """#186: each step, the feed hook included, is a fresh ``python -m pysuto._step``
-    child of the parent's own ``pysuto``; no driver script or ``REPO_ROOT`` is involved."""
+    child of the parent's own ``pysuto``; no driver script or ``REPO_ROOT`` is
+    involved."""
     import pysuto
     import pysuto.pipeline as pipeline_module
     from pysuto.__main__ import main
@@ -143,21 +144,22 @@ def test_a_child_that_fails_raises_step_failed_with_its_returncode_and_log_tail(
 
 def test_the_child_parses_knobs_as_literals_against_the_stage_defaults(monkeypatch):
     import pysuto._step as step
+    from dataclasses import replace
     seen = {}
-    monkeypatch.setattr(step, "run_opt", lambda case, up, label, knobs, **kw:
+    monkeypatch.setattr("pysuto.stages.run_opt", lambda case, up, label, knobs, **kw:
                         seen.update(knobs=knobs, kw=kw) or "opt_x")
-    spec = {"step": "opt", "case": "toy", "label": "l", "upstream": "const_1",
-            "data_dir": "d", "config": None, "dirs": {"const_dir": "c"},
-            "knobs": ["TOL_GAP_REL=1e-6", "QP_VARIABLES='flows'"]}
+    spec = step.StepSpec(step="opt", case="toy", label="l", upstream="const_1",
+                         data_dir="d", config=None, dirs={"const_dir": "c"},
+                         knobs=["TOL_GAP_REL=1e-6", "QP_VARIABLES='flows'"])
     assert step.run_spec(spec) == "opt_x"
     assert seen["knobs"] == {"TOL_GAP_REL": 1e-6, "QP_VARIABLES": "flows"}
     assert seen["kw"] == {"data_dir": "d", "const_dir": "c"}
     with pytest.raises(TypeError, match="TOL_GAP_REL"):
-        step.run_spec(dict(spec, knobs=["TOL_GAP_REL='x'"]))
+        step.run_spec(replace(spec, knobs=["TOL_GAP_REL='x'"]))
     with pytest.raises(KeyError, match="NOT_A_KNOB"):
-        step.run_spec(dict(spec, knobs=["NOT_A_KNOB=1"]))
+        step.run_spec(replace(spec, knobs=["NOT_A_KNOB=1"]))
     with pytest.raises(KeyError, match="takes no knobs"):
-        step.run_spec(dict(spec, step="uncprop", knobs=["ALPHA=0.1"]))
+        step.run_spec(replace(spec, step="uncprop", knobs=["ALPHA=0.1"]))
 
 
 def test_uncprop_and_psut_take_no_knobs():

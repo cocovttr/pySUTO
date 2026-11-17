@@ -75,7 +75,13 @@ Point 2's peaks equal point 1's within 0.3 GB, against ≥ 9 GB more in one proc
 is const at 14.8 GB. Runs `imp_20261117_141716_e4268743`, `const_20261117_142115_4083005e`,
 `opt_20261117_142739_4151e66d` (point 1) and `imp_20261117_143143_1458a219`,
 `const_20261117_143538_a7586afb`, `opt_20261117_144150_64744a5d` (point 2). Both opt runs reproduce
-`opt_20261116_134050_b54f65dc` in all 240 stored arrays and tables and in `parents.inputs`, and the
-chain downstream of it reproduces through `python -m pysuto run` and the scripts alike
-(`opt_20261117_120417_fff166be`, `opt_20261117_125807_848d6e22`, measured on the one-process
-design; the toy chain reproduces on the child design).
+`opt_20261116_134050_b54f65dc` in all 240 stored arrays and tables and in `parents.inputs`. The
+child design also carries Stages 5 and 6: `python -m pysuto run --case copper --from uncprop --to
+psut --base opt_20261116_134050_b54f65dc` made `uncprop_20261117_152125_bcdaa2d8` and
+`psut_20261117_152247_1252cb8e`, which reproduce `uncprop_20261116_141543_6be9fa25` (150 arrays and
+tables) and `psut_20261116_141702_37174685` (31) with equal `parents.inputs`. With the two opt runs
+above that covers Stages 4–6 through children, and the toy chain reproduces Stages 2–6 on the child
+design. Copper's Stages 2–3 through children are checked only through their opt runs, which equal the
+reference in every array; the imp and const runs of points 1 and 2 sat in a scratch store that is
+deleted, and the stored ones (`imp_20261117_115422_d9357d2d`, `const_20261117_115808_9142e955`)
+come from the one-process design.
