@@ -1,0 +1,103 @@
+# ci.yml: the suite on 3.9/3.12/3.13, ruff (pyflakes rules), the build, and PyPI trusted
+# publishing on a pushed v* tag (#196). No token: PyPI trusts this workflow and the `pypi`
+# environment (a pending publisher for florihu/pySUTO, set up once on pypi.org).
+name: ci
+
+on:
+  push:
+    branches: ["**"]
+    tags: ["v*"]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.9", "3.12", "3.13"]
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          fetch-depth: 0              # hatch-vcs reads the version from the tags
+      - uses: actions/setup-python@v7.1.0
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Pin the runtime lower bounds exactly (3.9 only)
+        if: matrix.python-version == '3.9'
+        run: |
+          # The oldest supported combination: every `name>=X` of [project].dependencies
+          # becomes `name==X`; the extras stay free.
+          awk '/^dependencies = \[/{f=1; next} f && /^\]/{exit} f' pyproject.toml \
+            | grep -oE '"[A-Za-z0-9_.-]+>=[0-9][^",<]*' | tr -d '"' | sed 's/>=/==/' \
+            | tee constraints.txt
+          echo "PIP_CONSTRAINT=$PWD/constraints.txt" >> "$GITHUB_ENV"
+      - name: Install
+        run: python -m pip install ".[dev]"
+      - name: Show the resolved versions
+        run: python -m pip list
+      - name: Test
+        run: python -m pytest tests/
+
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: actions/setup-python@v7.1.0
+        with:
+          python-version: "3.12"
+      - run: python -m pip install ruff
+      - run: ruff check
+
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v7.1.0
+        with:
+          python-version: "3.12"
+      - run: python -m pip install build twine
+      - run: python -m build
+      - run: twine check --strict dist/*
+      - name: Check the archive contents
+        run: |
+          python - <<'PY'
+          import glob, tarfile, zipfile
+
+          wheel = zipfile.ZipFile(glob.glob("dist/*.whl")[0]).namelist()
+          bad = [n for n in wheel if not n.startswith(("pysuto/", "pysuto-"))]
+          if bad:
+              raise SystemExit(f"wheel holds files outside pysuto/: {bad[:10]}")
+
+          sdist = tarfile.open(glob.glob("dist/*.tar.gz")[0]).getnames()
+          banned = ("scripts/explo/", "docs/rep/", "figs/", ".claude/", ".scratch/",
+                    "build/", "data/", "TODO.md", "CLAUDE.md")
+          bad = [n for n in sdist if n.split("/", 1)[-1].startswith(banned)]
+          if bad:
+              raise SystemExit(f"sdist holds excluded files: {bad[:10]}")
+          print(f"wheel {len(wheel)} files, sdist {len(sdist)} files: clean")
+          PY
+      - uses: actions/upload-artifact@v7.0.2
+        with:
+          name: dist
+          path: dist/
+          if-no-files-found: error
+
+  publish:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [test, lint, build]
+    runs-on: ubuntu-latest
+    environment: pypi
+    permissions:
+      id-token: write                 # trusted publishing: PyPI exchanges this OIDC token
+    steps:
+      - uses: actions/download-artifact@v8.0.2
+        with:
+          name: dist
+          path: dist/
+      - uses: pypa/gh-action-pypi-publish@v1.14.3
