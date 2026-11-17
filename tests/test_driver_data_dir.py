@@ -173,7 +173,7 @@ def test_a_warm_stage_4_records_the_acc_it_loaded_from_the_data_dir(case, monkey
     against the const run's acc ref, and that ref lands in the opt sidecar."""
     from pysuto.registry import OptimRunRegistry
     rs = driver("run_solver.py")
-    monkeypatch.setattr(rs, "N_WORKERS", 1)                 # warm is a chain
+    monkeypatch.setattr("pysuto.stages.N_WORKERS", 1)                 # warm is a chain
     opt_id = rs.main(case["const_run_id"], "case", "warm", data_dir=str(case["data"]))
     sidecar = OptimRunRegistry(str(case["data"] / "proc" / "opt")).load_sidecar(opt_id)
     assert sidecar["parents"]["inputs"] == {"acc": case["entry"]}
@@ -185,7 +185,7 @@ def test_a_warm_stage_4_refuses_an_acc_built_from_another_version(case, monkeypa
     from pysuto.acc import write_build_record
     write_build_record(case["acc_dir"], {**case["entry"], "version": 1})
     rs = driver("run_solver.py")
-    monkeypatch.setattr(rs, "N_WORKERS", 1)
+    monkeypatch.setattr("pysuto.stages.N_WORKERS", 1)
     with pytest.raises(ValueError, match=r"toy v1.*toy v2"):
         rs.main(case["const_run_id"], "case", "warm", data_dir=str(case["data"]))
 

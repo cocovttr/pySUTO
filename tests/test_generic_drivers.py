@@ -15,6 +15,7 @@ import sys
 from pathlib import Path
 
 import numpy as np
+import pandas as pd
 import pytest
 
 from pysuto.case import CaseSpec, check_case
@@ -93,6 +94,55 @@ def test_the_driver_chain_reproduces_the_toy_s_own_numbers(chain):
     assert soft.iloc[0]["z"] == pytest.approx(-4.779, abs=5e-4)
     board = toy.scoreboard(root, ids)
     assert round(board.coverage() * 420) == 396
+
+
+def _arrays(run_dir: Path) -> dict:
+    """Every stored array and table of a run directory (its diagnostics left out), by
+    file and key."""
+    out = {}
+    for path in sorted(run_dir.rglob("*")):
+        name = str(path.relative_to(run_dir))
+        if "diag" in path.relative_to(run_dir).parts:
+            continue
+        if path.suffix == ".parquet":
+            out[(name, None)] = pd.read_parquet(path)
+        elif path.suffix in (".npy", ".npz"):
+            data = np.load(path, allow_pickle=True)
+            for key in ([None] if path.suffix == ".npy" else list(data.keys())):
+                out[(name, key)] = data if key is None else data[key]
+    return out
+
+
+def _same(a, b) -> bool:
+    return a.equals(b) if isinstance(a, pd.DataFrame) else np.array_equal(a, b)
+
+
+def test_the_library_stages_4_to_6_reproduce_the_driver_chain_bit_for_bit(chain):
+    """#186: ``stages.run_opt`` / ``run_uncprop`` / ``run_psut`` called in this process
+    on the driver chain's const run write the arrays the drivers wrote."""
+    from pysuto import stages
+    root, ids = chain["root"], chain["ids"]
+    opt = stages.run_opt(toy.CASE, ids["const"], "toy", data_dir=str(root))
+    unc = stages.run_uncprop(toy.CASE, opt, "toy", data_dir=str(root))
+    psut = stages.run_psut(toy.CASE, opt, "toy", data_dir=str(root))
+    for stage, mine, theirs in (("opt", opt, ids["opt"]), ("uncprop", unc, ids["uncprop"]),
+                                ("psut", psut, ids["psut"])):
+        a, b = _arrays(root / "proc" / stage / mine), _arrays(root / "proc" / stage / theirs)
+        assert a.keys() == b.keys() and a, stage
+        assert all(_same(a[k], b[k]) for k in a), stage
+    side = lambda reg, i: reg(str(root / "proc" / i[0])).load_sidecar(i[1])
+    assert side(OptimRunRegistry, ("opt", opt))["stage_config"] == \
+        side(OptimRunRegistry, ("opt", ids["opt"]))["stage_config"]
+
+
+def test_a_stage_4_knob_override_beats_the_case_and_is_checked(chain):
+    from pysuto import stages
+    with pytest.raises(KeyError, match="NOT_A_KNOB"):
+        stages.run_opt(toy.CASE, "const_x", overrides={"NOT_A_KNOB": 1},
+                       data_dir=str(chain["root"]))
+    with pytest.raises(TypeError, match="QP_VARIABLES"):
+        stages.run_opt(toy.CASE, "const_x", overrides={"QP_VARIABLES": 3},
+                       data_dir=str(chain["root"]))
 
 
 def test_the_psut_primary_defaults_to_the_acc_s_content_valuation(chain):
@@ -175,8 +225,9 @@ class _Stop(Exception):
 
 
 def test_copper_s_psut_primary_resolves_to_cc_through_driver_knobs(monkeypatch, tmp_path):
-    """One resolution point: ``psut.main`` applies the case's ``driver_knobs``, so the
-    library call and the command line (which passes ``--primary`` None) agree."""
+    """One resolution point: ``stages.run_psut`` applies the case's ``driver_knobs``, so
+    the library call, the driver's ``main`` and the command line (which passes
+    ``--primary`` None) agree."""
     mod = _load_driver(monkeypatch, "psut.py")
     seen = {}
 
@@ -188,8 +239,9 @@ def test_copper_s_psut_primary_resolves_to_cc_through_driver_knobs(monkeypatch, 
         seen["primary"] = k["primary"]
         raise _Stop
 
-    monkeypatch.setattr(mod, "OptimRunRegistry", _Registry)
-    monkeypatch.setattr(mod.PSUT, "from_opt_run", staticmethod(_from_opt_run))
+    from pysuto import stages
+    monkeypatch.setattr(stages, "OptimRunRegistry", _Registry)
+    monkeypatch.setattr(stages.PSUT, "from_opt_run", staticmethod(_from_opt_run))
     monkeypatch.chdir(tmp_path)
     for kwargs, expected in (({}, "CC"), ({"primary": "Mass"}, "Mass")):
         with pytest.raises(_Stop):

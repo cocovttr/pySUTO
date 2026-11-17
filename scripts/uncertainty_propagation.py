@@ -33,28 +33,20 @@ import sys
 from datetime import datetime
 
 # ---------------------------------------------------------------------------
-# USER CONFIGURATION
-# ---------------------------------------------------------------------------
-# main() derives every path from `--data-dir` (default data): proc/opt, proc/const,
-# proc/imp, proc/acc, proc/uncprop.
-ALPHA                = 0.05
-BIND_TOL             = 1e-6    # kt — a hard inequality row binds when G·a* − c ≥ −BIND_TOL (#27)
-RANK_TOL             = 1e-10   # pivot tolerance for hard rows dependent on the others (#27)
-EXCLUDE_SCALE_TOTALS = False   # True leaves the scale totals out of S(t) — ablation (#87)
-# ---------------------------------------------------------------------------
-# END USER CONFIGURATION
+# The body is pysuto.stages.run_uncprop (#186), with its constants (ALPHA, BIND_TOL,
+# RANK_TOL, EXCLUDE_SCALE_TOTALS); main() derives every path from `--data-dir`
+# (default data): proc/opt, proc/const, proc/imp, proc/acc, proc/uncprop.
 # ---------------------------------------------------------------------------
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
-from pysuto.case    import CaseSpec, check_case
+from pysuto.case    import CaseSpec
 from pysuto.cases   import add_case_arg, case_from_args
 from pysuto.cases.copper import CASE
-from pysuto.diag    import UncPropDiag
 from pysuto.knobs   import write_run_id
-from pysuto.uncprop import KalmanUncProp
 from pysuto.logging import get_logger, add_run_handler
-from pysuto.registry import OptimRunRegistry, stage_lock
+from pysuto.registry import stage_lock
+from pysuto.stages  import run_uncprop
 
 _log = get_logger("init_uncertainty_propagation")
 
@@ -68,59 +60,7 @@ def main(opt_run_id: str, label: str = "", *, data_dir: str = "data",
     add_run_handler(
         f"logs/init_uncertainty_propagation_{datetime.now():%Y%m%d_%H%M%S}.log"
     )
-    proc        = os.path.join(data_dir, "proc")
-    opt_dir     = os.path.join(proc, "opt")
-    const_dir   = os.path.join(proc, "const")
-    uncprop_dir = os.path.join(proc, "uncprop")
-
-    _log.info("=== init_uncertainty_propagation START ===")
-    _log.info("opt_run_id=%s  alpha=%.3f  exclude_scale_totals=%s",
-              opt_run_id, ALPHA, EXCLUDE_SCALE_TOTALS)
-
-    check_case(OptimRunRegistry(opt_dir).load_sidecar(opt_run_id), case)
-    prop = KalmanUncProp(
-        opt_dir              = opt_dir,
-        const_dir            = const_dir,
-        uncprop_dir          = uncprop_dir,
-        bind_tol             = BIND_TOL,
-        rank_tol             = RANK_TOL,
-        exclude_scale_totals = EXCLUDE_SCALE_TOTALS,
-    )
-
-    result = prop.compute(opt_run_id, alpha=ALPHA)
-    uncprop_run_id = prop.persist(result, opt_run_id, label=label, case=case.ref())
-
-    contractions = [
-        1.0 - ts.diagnostics["trace_post"] / ts.diagnostics["trace_prior"]
-        for ts in result.per_timestep.values()
-        if ts.diagnostics["trace_prior"] > 0.0
-    ]
-    mean_contraction = sum(contractions) / len(contractions) if contractions else 0.0
-    max_resid_hard = max(
-        ts.diagnostics["max_resid_hard"] for ts in result.per_timestep.values()
-    )
-
-    _log.info(
-        "UncPropRun '%s' persisted under %s  (n_t=%d, mean_trace_contraction=%.3f, max_resid_hard=%.3e)",
-        uncprop_run_id, uncprop_dir, len(result.per_timestep),
-        mean_contraction, max_resid_hard,
-    )
-
-    diag = UncPropDiag.from_uncprop_id(
-        uncprop_run_id,
-        uncprop_dir = uncprop_dir,
-        opt_dir     = opt_dir,
-        const_dir   = const_dir,
-        imp_dir     = os.path.join(proc, "imp"),
-        acc_dir     = os.path.join(proc, "acc"),
-        label       = label,
-    )
-    diag.summary()
-    paths = diag.plot()
-    _log.info("Wrote %d diag files to %s", len(paths),
-              os.path.join(uncprop_dir, uncprop_run_id, "diag"))
-    _log.info("=== init_uncertainty_propagation DONE ===")
-    return uncprop_run_id
+    return run_uncprop(case, opt_run_id, label, data_dir=data_dir, logger=_log)
 
 
 if __name__ == "__main__":
