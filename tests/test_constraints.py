@@ -439,7 +439,6 @@ class TestSumConstraintBuilder:
         block   = builder.build_static(toy_acc)
 
         assert block.G_rows.shape[0] >= 1, "Should produce at least 1 row"
-        G = block.G_rows.toarray()
         assert block.sigma_c[0] == pytest.approx(5.0)
 
     def test_sum_sense(self, toy_acc):
@@ -490,7 +489,6 @@ def _make_two_valuation_acc():
 
     # Per-(time, val) bucket of 5 edges: supply (0,1), use (2,3), waste (4).
     ei = acc.edge_index
-    from_sector = acc.node_index.loc[ei["from_id"].values, "sector"].values
     to_sector   = acc.node_index.loc[ei["to_id"].values,   "sector"].values
     from_entity = acc.node_index.loc[ei["from_id"].values, "entity"].values
     to_entity   = acc.node_index.loc[ei["to_id"].values,   "entity"].values
@@ -661,7 +659,6 @@ class TestUnitMixingCheck:
         """Whitelisted ratio_eq rows may span valuations without raising."""
         from pysuto.constraints import (
             ConstraintEngine, MassBalanceBuilder,
-            ConstraintUnitMixingError,
         )
 
         agg = _make_toy_agg_result(toy_acc_2val, seed=7)
@@ -1654,7 +1651,6 @@ class TestConstraintEngine:
 
         # G is stored once; c(t) may differ — but G itself is time-invariant by design
         assert run.G is not None
-        G_dense = run.G.toarray()
         # Both timesteps reference the same G object
         assert run.timestep_data["2020"]["c"].shape == (run.G.shape[0],)
         assert run.timestep_data["2021"]["c"].shape == (run.G.shape[0],)
@@ -1684,7 +1680,7 @@ class TestConstraintEngine:
         from pysuto.constraints import (
             ConstraintEngine, MassBalanceBuilder, RatioBoundBuilder,
         )
-        import csv, os
+        import csv
         csv_path = "/tmp/test_multi_bound.csv"
         with open(csv_path, "w", newline="") as f:
             w = csv.DictWriter(f, fieldnames=[
@@ -1866,7 +1862,7 @@ class TestRatioPerTimestepDeactivation:
 
     def test_ratio_bound_sentinel_trivially_satisfies_inequality(self, toy_acc, tmp_path):
         """For x at u_max=1e9, A x ≤ BOUND_C_INACTIVE element-wise on inactive rows."""
-        from pysuto.constraints import RatioBoundBuilder, BOUND_C_INACTIVE
+        from pysuto.constraints import RatioBoundBuilder
         path    = self._write_wildcard_params_csv(tmp_path, bl=0.1, bu=2.0)
         builder = RatioBoundBuilder.from_csv(path, toy_acc)
         builder.build_static(toy_acc)
@@ -1933,7 +1929,6 @@ class TestRatioPerTimestepDeactivation:
         )
         # CSV with hardcoded a_time=2020 → only 1 ratio_eq row, not uniform
         # across the 2-year toy_acc.time_range.
-        path = tmp_path / "single_year.csv"
         TestRatioConstraintBuilder()._write_params_csv  # type: ignore[attr-defined]
         # Reuse the existing single-year CSV builder via the existing class.
         path_str = TestRatioConstraintBuilder()._write_params_csv(

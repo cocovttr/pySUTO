@@ -220,7 +220,6 @@ def sector_totals(edges, group_col, years=None, valuations=None) -> pd.DataFrame
               .sum()
               .rename(columns={"a_post": "sum_post", "a_prior": "sum_prior"}))
     if years is not None or valuations is not None:
-        lv = g.index.levels if len(g.index) else None
         groups = sorted(set(g.index.get_level_values(0))) if len(g.index) else []
         vals   = list(valuations) if valuations is not None else \
                  sorted(set(g.index.get_level_values(1))) if len(g.index) else []

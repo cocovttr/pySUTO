@@ -608,7 +608,6 @@ class SolverDiag:
         imp          = self._imp_index_entry or {}
         imp_label    = imp.get("label", "") or "—"
         imp_created  = imp.get("created_at", "—")
-        imp_n_edges  = imp.get("n_edges", "—")
         imp_n_filled = imp.get("n_filled", "—")
         imp_n_steps  = imp.get("n_steps", "—")
         imp_n_before = imp.get("n_covered_before", "—") if imp else "—"

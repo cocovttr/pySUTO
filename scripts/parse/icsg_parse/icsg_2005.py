@@ -52,8 +52,6 @@ REGION_RENAME = {
         # ambiguous truncations -> drop
         'South':            None,
         'United':           None,
-     'Philippppines': 'Philippines', 
-     'Belgium-': 'Belgium-Luxembourg'
     }
 
 
@@ -654,7 +652,6 @@ def clean_flows(df_init, sheet, process, flow_type, rename_dict, sxew=None):
         'Concentrates_x000d_\nSX-EW': 'Concentrates\nSX-EW',
         'Primary_x000d_': 'Primary',
         'Low-grade_x000d_': 'Low-grade',
-        'Copper_x000d_\nCu Alloy': 'Copper\nCu Alloy',
         'Copper Cu Alloy_x000d_\nNot Specif.': 'Copper\nCu Alloy\nNot Specified',
         'Primary_x000d_\nSecondary': 'Primary\nSecondary',
         'Low-grade_x000d_\nElectrowon': 'Low-grade\nElectrowon',

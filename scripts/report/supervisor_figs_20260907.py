@@ -166,7 +166,7 @@ def _sankey_trace(links: pd.DataFrame, domain_y: tuple[float, float],
 
 def fig2_sankey_1995(edges: pd.DataFrame) -> None:
     e95 = edges[edges.year == 1995]
-    parts, notes = [], []
+    parts = []
     for val in ["Mass", "CC"]:
         li = (e95[e95.valuation == val]
               .groupby(["from_sector", "to_sector"]).a_post.sum()

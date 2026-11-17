@@ -742,7 +742,6 @@ class TestEdgeRules:
         ei = acc.edge_index
 
         # No P→P edges
-        node_region = {nid: t for t, nid in acc.node_to_id.items()}
         for _, row in ei.iterrows():
             ni = acc.decode_node(int(row["from_id"]))
             nj = acc.decode_node(int(row["to_id"]))

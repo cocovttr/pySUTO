@@ -12,12 +12,11 @@ from __future__ import annotations
 from typing import Literal, Optional
 
 import numpy as np
-import pandas as pd
 
 from pysuto.logging import get_logger
 from pysuto.lp import lp_combine
 
-from .base import BaseImputer, _apply_cv_cap
+from .base import BaseImputer
 
 logger = get_logger(__name__)
 
@@ -175,7 +174,7 @@ class TimeImputer(BaseImputer):
         return self._scope_mask
 
     def impute(self, ledger, step: int, acc_struct) -> None:
-        f, sigma = ledger.f, ledger.sigma
+        f = ledger.f
         ei = acc_struct.edge_index
 
         # Build sorted time ordering

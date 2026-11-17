@@ -22,8 +22,7 @@ import test_toy_case as toy_checks
 from pysuto.acc import AccountingStructure
 from pysuto.cases import toy
 from pysuto.pipeline import ALL_STEPS, Chain, Pipeline
-from pysuto.registry import (ConstraintRunRegistry, DataFeedRegistry,
-                             ImputationRunRegistry, OptimRunRegistry, PsutRunRegistry,
+from pysuto.registry import (ConstraintRunRegistry, ImputationRunRegistry, OptimRunRegistry, PsutRunRegistry,
                              UncPropRunRegistry)
 
 REPO = Path(__file__).resolve().parents[1]

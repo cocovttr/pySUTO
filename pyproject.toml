@@ -6,7 +6,7 @@ build-backend = "hatchling.build"
 name = "pysuto"
 dynamic = ["version"]
 description = "Python-based Supply-Use Table Optimiser: sigma-weighted reconciliation of supply-use tables from conflicting sources"
-readme = "README.md"
+readme = "README_PYPI.md"
 requires-python = ">=3.9"
 authors = [{ name = "Florian Huber" }]
 keywords = [
@@ -65,3 +65,29 @@ raw-options = { fallback_version = "0.0.0+unknown" }
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/pysuto"]
+
+[tool.hatch.build.targets.sdist]
+# Project history and working material stay in the repository; tests/ ships.
+exclude = [
+    "/scripts/explo",
+    "/docs/rep",
+    "/figs",
+    "/TODO.md",
+    "/CLAUDE.md",
+    "/.claude",
+    "/.scratch",
+    "/.github",
+]
+
+[tool.ruff]
+target-version = "py39"
+extend-exclude = ["leg", "scripts/explo", "*.ipynb"]
+
+[tool.ruff.lint]
+# Pyflakes only: unused imports and variables, undefined names. No formatter, no E rules.
+select = ["F"]
+
+[tool.ruff.lint.per-file-ignores]
+# The fixtures maps, mock_acc_struct and raw_use_only are imported from test_conc and used
+# as test parameters: pytest's idiom, which pyflakes reads as a redefinition.
+"tests/test_copper_feed.py" = ["F811"]
