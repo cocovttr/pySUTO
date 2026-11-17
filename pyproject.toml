@@ -51,7 +51,8 @@ uncprop = ["scikit-sparse"]
 sankey = ["plotly>=6.3.0", "kaleido>=1.4.0"]
 tutorial = ["jupyter", "plotly>=6.3.0", "kaleido>=1.4.0"]
 # sparse (pydata) and plotly: tests build a COO fixture and import scripts/report/*.
-dev = ["pytest", "sparse", "plotly>=6.3.0", "coverage", "vulture", "nbclient", "ruff", "build", "twine"]
+dev = ["pytest", "sparse", "plotly>=6.3.0", "coverage", "vulture", "nbclient", "ruff",
+       "build", "twine"]
 
 [project.scripts]
 pysuto = "pysuto.__main__:main"
