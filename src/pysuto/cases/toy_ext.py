@@ -250,6 +250,23 @@ def break_contradiction(run_root, row_cvs=(0.01, 0.1, 1.0, 10.0), anchor_cv: flo
     return {"table": pd.DataFrame(rows).set_index("variant"), "runs": runs}
 
 
+def check_8_1(table: pd.DataFrame, factor: float) -> str:
+    """Exercise 8.1: the factor by which the contradicted row's z fell from the tightest
+    to the loosest row cv of :func:`break_contradiction`'s ``table``.
+
+    The row's σ_c is ``cv·|c|``, so it grows by the ratio of the two cvs; the tick line
+    states how much of the fall that ratio leaves to the residual itself.
+    """
+    rows     = table[table.index.str.startswith("cv=")].sort_values("row_cv")
+    expected = float(rows["planted_row_z"].iloc[0] / rows["planted_row_z"].iloc[-1])
+    if not np.isclose(factor, expected, rtol=1e-6):
+        raise AssertionError(f"factor by which z fell: expected {expected!r}, "
+                             f"got {factor!r}")
+    grew = float(rows["row_cv"].iloc[-1] / rows["row_cv"].iloc[0])
+    return (f"✓ 8.1  z fell {expected:.0f}× while the row's σ grew {grew:.0f}×: the "
+            f"residual itself grew {grew / expected:.2f}×")
+
+
 # =============================================================================
 # Break it 2: a phantom leg, larger than its exporter's whole output
 # =============================================================================

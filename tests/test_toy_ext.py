@@ -95,6 +95,14 @@ def test_fixing_the_input_removes_the_residual(contradiction):
         < abs(t.loc["cv=0.01", "planted_row_z"]) / 20.0
 
 
+def test_check_8_1_accepts_the_table_s_z_ratio_and_rejects_another(contradiction):
+    t      = contradiction["table"]
+    factor = t.loc["cv=0.01", "planted_row_z"] / t.loc["cv=1", "planted_row_z"]
+    assert toy_ext.check_8_1(t, factor).startswith("✓ 8.1")
+    with pytest.raises(AssertionError):
+        toy_ext.check_8_1(t, factor * 1.1)
+
+
 def test_an_experiment_never_becomes_the_latest_core_run(tree, contradiction):
     assert _core_latest(tree["root"]) == tree["base"]
     feeds = DataFeedRegistry(odir=str(toy._tree(tree["root"])["feed"]))
