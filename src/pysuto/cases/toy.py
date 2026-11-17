@@ -30,9 +30,12 @@ computes it). The **Survey** reports ore extraction in gross mass, one row per m
 region-year. The **Bureau** reports the chain in orium content (mine, concentrate and
 refined output, scrap feed, consumption and the signed stock change), with primary and
 secondary refined output as two series that one root edge pools, and two region-years it
-did not publish. The **Customs** feed reports the bilateral concentrate legs in gross
-mass, under partner codes rather than region names. One of the three carries one
-deliberate error; :func:`reveal` names it.
+did not publish. The Bureau also publishes Isla's ore extraction in gross mass, all five
+years, a table apart from its content chain: the one edge the Survey covers too, where
+Stage 2's aggregation weighs two observations (:data:`_OVERLAP_REGION`). The **Customs**
+feed reports the bilateral concentrate legs in gross mass, under partner codes rather
+than region names. One of the three carries one deliberate error; :func:`reveal` names
+it.
 
 Stage 2 runs copper's cascade order, ``trade → network → conc``. The per-pair Milling
 recovery relation is closed by the network (``network_backward``, from the Bureau's
@@ -50,8 +53,8 @@ Limitations, stated once
   choose and its intervals can be scored against the truth. The price is the band group
   the manuscript describes for copper (Method §3.1, ADR 0039), which carries the
   non-negativity of every flow: without it a posterior flow may go below zero. On the
-  seed-59 chain Portua, which mines nothing, books a negative ore extraction in 2003
-  (``Deposit → Mining`` −2.4 kt, the free slack of its mine-less chain).
+  seed-59 chain Portua, which mines nothing, books a small negative ore extraction in
+  2003 (``Deposit → Mining`` below 1 kt, the free slack of its mine-less chain).
 * **A closed world.** No ``ROW`` region, so the ROW pedigree penalty never fires.
 * **One fixed seed.** This module is ``src/``'s exception to "no RNG" (CLAUDE.md): the
   truth's year-to-year wiggle and the feeds' noise come from ``np.random.default_rng``.
@@ -62,7 +65,8 @@ Public API
 ``ACC_SPEC``, ``ACC_REF``, :func:`build_acc` — the accounting structure (the #57 acc
 spec) and its default build record; ``GROSS``, ``CONTENT``, ``RAW``, ``SEC``,
 ``DEMAND``, ``UNITS`` — its labels.
-:func:`truth` — the ground truth; :func:`make_feeds` — the three synthetic feeds;
+:func:`truth` — the ground truth, :func:`world_totals` — its world-level sums (all that
+chapter 00 shows); :func:`make_feeds` — the three synthetic feeds;
 :func:`write_params` — the ``conc``, ``eff`` and ``stripping_ratio`` CSVs;
 :func:`write_inputs` — the input registries of a run tree.
 ``CASE`` — the toy as a :class:`pysuto.case.CaseSpec` (#124): the stage drivers run it
@@ -96,7 +100,6 @@ from pysuto.conc import WeightMatrix
 from pysuto.constraints import (
     MassBalanceBuilder,
     RatioConstraintBuilder,
-    SumConstraintBuilder,
 )
 from pysuto.diag.truth import TruthDiag, prior_z
 from pysuto.feedpipe import (
@@ -355,6 +358,33 @@ def truth(seed: int = SEED, coproduct: bool = False) -> pd.DataFrame:
     return pd.DataFrame(rows, columns=_TRUTH_COLUMNS)
 
 
+def world_totals(ground_truth: Optional[pd.DataFrame] = None,
+                 coproduct: bool = False) -> pd.DataFrame:
+    """The ground truth at world level: every flow summed over the three regions.
+
+    The tutorial's chapter 00 shows the truth only through this frame, so no region's
+    numbers leak before :func:`reveal` (chapter 07).
+
+    Parameters
+    ----------
+    ground_truth : DataFrame, optional
+        A frame like :func:`truth`'s; default ``truth(coproduct=coproduct)``.
+    coproduct : bool
+        Which truth to build when ``ground_truth`` is not given.
+
+    Returns
+    -------
+    DataFrame
+        One row per ``(time, valuation, from_sector, to_sector)``, columns ``time,
+        valuation, from_sector, to_sector, unit, value`` (``unit`` from ``UNITS``).
+    """
+    frame = truth(coproduct=coproduct) if ground_truth is None else ground_truth
+    keys  = ["time", "valuation", "from_sector", "to_sector"]
+    world = frame.groupby(keys, sort=False)["value"].sum().reset_index()
+    world.insert(4, "unit", world["valuation"].map(UNITS))
+    return world
+
+
 def truth_vector(frame: pd.DataFrame, acc: AccountingStructure) -> np.ndarray:
     """``frame``'s ``value`` column on the structure's edge ids (length ``acc.n_edges``).
 
@@ -385,6 +415,10 @@ _PEDIGREE = {"survey":  (2, 3, 2, 2, 2),
 _MINING_REGIONS = ("Montara", "Isla")
 _BUREAU_GAPS    = (("Isla", "2003"), ("Montara", "2004"))   # region-years not published
 _BUREAU_UNIT    = "kt orium"                                # the Bureau's content unit
+_BUREAU_GROSS   = "kt"                                      # ... and its gross-mass unit
+# The Bureau's ore tonnage meets the Survey's here, all five years. Isla, not Montara:
+# with the Lp rule at p = 1.3 the pooled σ is below both inputs in every year.
+_OVERLAP_REGION = "Isla"
 _CUSTOMS_CODE   = {"Montara": "101", "Portua": "202", "Isla": "303"}
 
 # ── Private: the planted defect (Q27 b: named only by reveal()) ───────────────
@@ -551,16 +585,30 @@ def make_feeds(ground_truth: pd.DataFrame,
                          val(t, CONTENT, "Metal", r, "Stock", r)))
     bureau = pd.DataFrame(rows, columns=["Year", "Region", "Supply_Use", "Process",
                                          "Item", "_truth"]).assign(Unit=_BUREAU_UNIT)
+    # The one overlap edge: the Bureau also publishes one region's mined ore tonnage in
+    # gross mass, Deposit → Mining, the edge the Survey covers. It is its own table, so
+    # the unpublished region-years do not apply, and its noise has its own generator
+    # (every other draw is unchanged).
+    extra = pd.DataFrame(
+        [(t, _OVERLAP_REGION, "Supply", "deposit", "mine",
+          val(t, GROSS, "Deposit", _OVERLAP_REGION, "Mining", _OVERLAP_REGION))
+         for t in YEARS],
+        columns=["Year", "Region", "Supply_Use", "Process", "Item", "_truth"]
+    ).assign(Unit=_BUREAU_GROSS)
     feeds["bureau"] = SyntheticFeed(
         feed_id  = "bureau",
-        raw      = _finish("bureau", bureau, rng),
+        raw      = pd.concat([_finish("bureau", bureau, rng),
+                              _finish("bureau", extra,
+                                      np.random.default_rng([seed, 2]))],
+                             ignore_index=True),
         maps     = _maps({"mine": "Mining", "concentrator": "Milling",
                           "primary refinery": "Smelting",
                           "secondary refinery": "Smelting",
                           "fabrication": "Use", "stocks": "Stock",
                           "ore": "Ore", "concentrate": "Concentrate",
-                          "refined": "Metal", "scrap": "Scrap"},
-                         {r: r for r in REGIONS}, {_BUREAU_UNIT: CONTENT},
+                          "refined": "Metal", "scrap": "Scrap", "deposit": "Deposit"},
+                         {r: r for r in REGIONS},
+                         {_BUREAU_UNIT: CONTENT, _BUREAU_GROSS: GROSS},
                          [("Year",    "src_time",        None),
                           ("Unit",    "src_valuation",   None),
                           ("Region",  "src_region_from", None),
@@ -766,7 +814,6 @@ class ToyConst(ConstSection):
     PIN_FLAT_PRIOR_ZEROS:  bool  = False
     PIN_EXCLUDE_SECTORS:   tuple = ()
     DIAG_PLOT:             bool  = False
-    SUM_SIGMA_FRACTION:    float = 0.05
     # Ratio rows' flow-space scale floor. Copper's 100 kt would swamp the toy, whose
     # content edges are 0.1–10 kt Content; the builder's default 1 kt is used.
     RATIO_SIGMA_REL_FLOOR: float = 0.02
@@ -846,17 +893,17 @@ def imp_stage_config(ctx) -> dict:
 
 
 def builders(ctx) -> list:
-    """The toy's constraint builders: hard mass balances (``massbal_scope``), the
-    ``from_acc_struct`` soft sum rows, soft ``conc`` and ``eff`` ratio rows and the hard
-    stripping ratio; no ``RatioBoundBuilder``, no ``FlowBoundsBuilder`` (#27)."""
+    """The toy's constraint builders: hard mass balances (``massbal_scope``), soft
+    ``conc`` and ``eff`` ratio rows and the hard stripping ratio; no scale totals, no
+    ``RatioBoundBuilder``, no ``FlowBoundsBuilder`` (#27)."""
     spec, acc = ctx.case.const, ctx.acc
-    # #59's soft sum rows: from_acc_struct writes one per Flow node, Σ supply − Σ use = 0
-    # at 5 % of the supply, which the hard balance already holds. Copper's self-anchored
-    # scale totals (from_mask_anchor at 1 %, ADR 0006) were tried on the seed-59 chain:
-    # they restate every prior at 1 %, an erroneous one too, so a Concentrate usetotout
-    # row became the top soft residual (z −58.6) and coverage fell 0.936 → 0.674.
-    out = [MassBalanceBuilder(mask="massbal_scope"),
-           SumConstraintBuilder.from_acc_struct(acc, sigma_fraction=spec.SUM_SIGMA_FRACTION)]
+    # No scale totals (decided 2026-11-16). #59's ``from_acc_struct`` sum rows restated
+    # the hard Flow balances (largest |z| 5.3e-13) and did nothing. Copper's
+    # prior-anchored totals (``from_mask_anchor`` at 1 %, ADR 0006) were tried on the
+    # seed-59 chain: they restate every prior at 1 %, an erroneous one too, so a
+    # Concentrate usetotout row became the top soft residual (z -58.6) and coverage fell
+    # 0.936 -> 0.674. They appear only in the tutorial's ``08_break_it``.
+    out = [MassBalanceBuilder(mask="massbal_scope")]
     for pid, hard in (("conc", False), ("eff", False), ("stripping_ratio", True)):
         out.append(RatioConstraintBuilder.from_csv(
             _params_csv(ctx, pid), acc_struct=acc,
@@ -874,7 +921,6 @@ def const_stage_config(ctx) -> dict:
             "sigma_c_abs_floor": spec.SIGMA_C_ABS_FLOOR,
             "nodata_anchor_cv": spec.NODATA_ANCHOR_CV,
             "nodata_anchor_exclude": list(spec.NODATA_ANCHOR_EXCLUDE),
-            "sum_sigma_fraction": spec.SUM_SIGMA_FRACTION,
             "ratio_sigma_rel_floor": spec.RATIO_SIGMA_REL_FLOOR,
             "ratio_scale_abs_floor": spec.RATIO_SCALE_ABS_FLOOR,
             "massbal_mask": "massbal_scope", "stripping_ratio_hard": True,
@@ -966,6 +1012,25 @@ def _feed_steps(feed: SyntheticFeed, acc: AccountingStructure) -> tuple:
     return ct, wm, F_src, result, row_summary
 
 
+def _register_synthetic_feed(feed: SyntheticFeed, acc: AccountingStructure, acc_entry,
+                             registry: DataFeedRegistry, label: str, seed: int) -> tuple:
+    """Stage 1 for one synthetic feed: :func:`_feed_steps`, then register the run under
+    ``label`` (the registry label :func:`_latest` selects by) with ``seed`` in its
+    sidecar. Returns ``(registry entry, cv_src)``."""
+    _, wm, F_src, result, row_summary = _feed_steps(feed, acc)
+    entry = register_feed(
+        wm, feed.metadata, result, registry,
+        parents       = {"inputs":   {"acc": dict(acc_entry),
+                                      "feed": {"id": feed.feed_id}},
+                         "upstream": {}},
+        F_src         = F_src,
+        label         = label,
+        stage_config  = {"p": CASE.imp.P_PROP, "seed": seed},
+        stage_summary = row_summary,
+    )
+    return entry, result.cv_src
+
+
 def run_stage1(run_root: PathLike, seed: int = SEED,
                coproduct: bool = False) -> "dict[str, str]":
     """Stage 1: lay out the inputs (:func:`write_inputs`), build the accounting
@@ -986,19 +1051,11 @@ def run_stage1(run_root: PathLike, seed: int = SEED,
     registry.load_index()
     run_ids  = {}
     for feed_id, feed in make_feeds(truth(seed, coproduct), seed).items():
-        _, wm, F_src, result, row_summary = _feed_steps(feed, acc)
-        entry = register_feed(
-            wm, feed.metadata, result, registry,
-            parents       = {"inputs":   {"acc": dict(acc_entry), "feed": {"id": feed_id}},
-                             "upstream": {}},
-            F_src         = F_src,
-            label         = feed_id,
-            stage_config  = {"p": CASE.imp.P_PROP, "seed": seed},
-            stage_summary = row_summary,
-        )
+        entry, cv_src = _register_synthetic_feed(feed, acc, acc_entry, registry,
+                                                 feed_id, seed)
         run_ids[feed_id] = entry.run_id
         _log.info("stage 1: %s → %s (%d rows, cv %.4f)", feed_id, entry.run_id,
-                  len(feed.raw), result.cv_src)
+                  len(feed.raw), cv_src)
     return run_ids
 
 
@@ -1099,8 +1156,8 @@ def run_stage6(run_root: PathLike, opt_run_id: Optional[str] = None,
     if png:
         path = tree["psut"] / run_id / f"sankey_supply_use_{period}_{CONTENT}.png"
         try:
-            psut.sankey(period).write_image(str(path), width=1400, height=800,
-                                            scale=1.5)
+            psut.sankey(period, unit=UNITS[CONTENT]).write_image(
+                str(path), width=1400, height=800, scale=1.5)
             _log.info("stage 6: Sankey → %s", path)
         except Exception as exc:        # kaleido missing or no browser: the PSUT stands
             _log.warning("stage 6: PNG skipped (%s: %s)", type(exc).__name__,
@@ -1243,6 +1300,34 @@ def _close(given, expected, what: str, rtol: float = 1e-6, atol: float = 1e-9) -
         raise AssertionError(f"{what}: expected {expected!r}, got {given!r}")
 
 
+def _ref_0_1(sector="Smelting", year="2003", valuation=CONTENT) -> tuple:
+    """Σ inflow and Σ outflow of one node at world level, from :func:`world_totals`."""
+    if _ENTITY.get(sector) not in ("Process", "Flow") or sector == "Mining":
+        raise ValueError(f"{sector!r} is not a node whose world balance closes: pick a "
+                         f"Process or Flow sector other than 'Mining' (its WasteRock "
+                         f"satellite is outside the balance, ADR 0038)")
+    wt   = world_totals()
+    rows = wt[(wt["time"] == year) & (wt["valuation"] == valuation)]
+    return (float(rows.loc[rows["to_sector"] == sector, "value"].sum()),
+            float(rows.loc[rows["from_sector"] == sector, "value"].sum()))
+
+
+def check_0_1(inflow: float, outflow: float, sector: str = "Smelting",
+              year: str = "2003", valuation: str = CONTENT) -> str:
+    """Exercise 0.1: Σ inflow and Σ outflow of one node, summed over the three regions,
+    read off :func:`world_totals` and closed by hand.
+
+    The check is at world level on purpose: a region's balance would unseal the truth,
+    which chapters 00-06 never read (:func:`reveal`, chapter 07). It reads no run tree.
+    """
+    expected = _ref_0_1(sector, year, valuation)
+    _close((inflow, outflow), expected, f"(inflow, outflow) of {sector} {year}")
+    _close(expected[0], expected[1], "inflow and outflow of one node", rtol=0.0,
+           atol=1e-9)
+    return (f"✓ 0.1  {sector}, world, {year}: in {expected[0]:.4f} = out "
+            f"{expected[1]:.4f} {UNITS[valuation]}")
+
+
 def _ref_1_1(run_root, region="Portua", year="2003") -> float:
     """CV of the Bureau's refined-output edge, by hand: two series pooled on one edge."""
     acc   = AccountingStructure.load(ACC_ID, storage_dir=str(_tree(run_root)["acc"]))
@@ -1376,12 +1461,12 @@ def check_6_1(run_root: PathLike, supply: float, use: float, region: str = "Port
             f"{expected[1]:.4f} {UNITS[valuation]}")
 
 
-_REFERENCES = {"1.1": _ref_1_1, "2.1": _ref_2_1, "3.1": _ref_3_1,
+_REFERENCES = {"0.1": _ref_0_1, "1.1": _ref_1_1, "2.1": _ref_2_1, "3.1": _ref_3_1,
                "4.1": _ref_4_1, "5.1": _ref_5_1, "6.1": _ref_6_1}
 
 
 def solution(key: str) -> str:
-    """The source of exercise ``key``'s reference function (``"1.1"`` … ``"6.1"``), for
+    """The source of exercise ``key``'s reference function (``"0.1"`` … ``"6.1"``), for
     the notebook to print."""
     if key not in _REFERENCES:
         raise KeyError(f"no exercise {key!r}; known: {sorted(_REFERENCES)}")
