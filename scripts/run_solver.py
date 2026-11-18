@@ -39,7 +39,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
 from pysuto.case    import CaseSpec
 from pysuto.cases   import add_case_arg, case_from_args
-from pysuto.cases.copper import CASE
+import copper
 from pysuto.logging import get_logger, start_run_log
 from pysuto.knobs   import add_knob_args, overrides_from_cli, write_run_id
 from pysuto.registry import stage_lock
@@ -50,7 +50,7 @@ _log = get_logger("init_run_solver")
 
 def main(const_run_id: str, label: str = "", prior_mode: str = "warm",
          overrides: dict | None = None, *, data_dir: str = "data",
-         const_dir: str | None = None, case: CaseSpec = CASE) -> str:
+         const_dir: str | None = None, case: CaseSpec = copper.CASE) -> str:
     """Solve constraint run ``const_run_id``; return the opt run id.
 
     ``case`` is recorded in the sidecar and must be the case that made the constraint
@@ -79,7 +79,7 @@ if __name__ == "__main__":
         choices=["warm", "cold"],
         help="Solver prior mode: 'cold' (default) or 'warm'."
     )
-    add_case_arg(parser)
+    add_case_arg(parser, default=copper.__file__)
     parser.add_argument("--data-dir", default="data",
                         help="Data root holding proc/ (default 'data').")
     parser.add_argument("--const-dir", default=None,

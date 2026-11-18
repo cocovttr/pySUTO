@@ -23,6 +23,7 @@ import numpy as np
 import pytest
 
 from pysuto.registry import stage_lock
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))   # copper (#189)
 
 REPO = Path(__file__).resolve().parents[1]
 STAGE_DRIVERS = ["collect_aggregate_impute.py", "constraints.py", "run_solver.py",
@@ -322,7 +323,7 @@ def _toy_post_impute(ctx):
 def _toy_case():
     """The copper case's knobs with the toy's cascade, hooks, builders and acc."""
     from dataclasses import replace
-    from pysuto.cases.copper import CASE
+    from copper import CASE
     return replace(CASE, id="toy", acc_id="toy",
                    imp=replace(CASE.imp, cascade=(), CASCADE_ORDER=(),
                                terminal=_toy_terminal, pre_impute=_toy_pre_impute,

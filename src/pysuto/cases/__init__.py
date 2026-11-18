@@ -1,12 +1,11 @@
 """
 cases
 =====
-Case modules (GLOSSARY.md "Case", #26 §3): ``pysuto.cases.<id>`` declares one metal's
-case, wired through the six stages. A Stage 2 and 3 case is a
+Bundled case modules (GLOSSARY.md "Case", #26 §3): ``pysuto.cases.<id>`` declares one
+case, wired through the six stages. pySUTO ships no study case (ADR 0047): copper is
+``scripts/copper.py`` in the repository. A Stage 2 and 3 case is a
 :class:`pysuto.case.CaseSpec` named ``CASE``.
 
-* :mod:`pysuto.cases.copper` — the **copper case** (#120): the Stage 2 and 3 model of
-  the copper application.
 * :mod:`pysuto.cases.toy` — the **toy case** (#59): a synthetic three-region orium case
   generated from a planted ground truth.
 * :mod:`pysuto.cases.toy_coproduct` — the toy whose smelter has a second Flow product
@@ -42,7 +41,7 @@ def load_case(case_id: str):
     return resolve_case(case_id)
 
 
-def add_case_arg(parser, default: str = "copper") -> None:
+def add_case_arg(parser, default: str | None = None) -> None:
     """Add ``--case <reference>`` to a driver's parser: ``default`` is the case it runs
     without the option; ``None`` makes the option required, which
     :func:`case_from_args` enforces (exit 2, listing the aliases)."""

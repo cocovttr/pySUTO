@@ -60,7 +60,7 @@ FIXED: dict = {"const.DIAG_PLOT": False}
 # Re-measure on the first sweep (its manifest timestamps).
 STEP_MINUTES = {"imp": 2.8, "const": 4.4, "opt": 2.7}
 
-# The copper case's cascade ids (pysuto.cases.copper.CASCADE); reversed, every pairwise
+# The copper case's cascade ids (scripts/copper.py CASCADE); reversed, every pairwise
 # precedence flips.
 CASCADE_SHIPPED  = ("trade", "network", "conc", "ore_grade")
 CASCADE_REVERSED = tuple(reversed(CASCADE_SHIPPED))
@@ -92,11 +92,12 @@ AXES = [
 # ---------------------------------------------------------------------------
 
 _log = get_logger("sweep")
+COPPER = os.path.join(os.path.dirname(os.path.abspath(__file__)), "copper.py")
 
 
 def build(base_opt_run_id: str) -> Sweep:
     base = Chain.from_opt_run(base_opt_run_id)
-    pipeline = Pipeline(steps=STEPS, base=base, cwd=os.getcwd(), case="copper")
+    pipeline = Pipeline(steps=STEPS, base=base, cwd=os.getcwd(), case=COPPER)
     kw = {"n_points": N_POINTS, "seed": SEED} if MODE == "random" else {}
     return Sweep(pipeline, AXES, mode=MODE, fixed=FIXED,
                  keep_intermediate=KEEP_INTERMEDIATE, scratch_dir=SCRATCH_DIR, **kw)

@@ -9,7 +9,9 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from pysuto.cases.copper_feed import ORE_GRADE_LABELS
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))   # copper (#189)
+from copper_feed import ORE_GRADE_LABELS
 from pysuto.feedprep import ore_grade as OG
 from pysuto.feedprep.ore_grade import (
     MARGIN_REL_CARRY,

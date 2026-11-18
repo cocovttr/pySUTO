@@ -41,7 +41,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
 from pysuto.case    import CaseSpec
 from pysuto.cases   import add_case_arg, case_from_args
-from pysuto.cases.copper import CASE
+import copper
 from pysuto.knobs   import write_run_id
 from pysuto.logging import get_logger, start_run_log
 from pysuto.registry import stage_lock
@@ -51,7 +51,7 @@ _log = get_logger("init_uncertainty_propagation")
 
 
 def main(opt_run_id: str, label: str = "", *, data_dir: str = "data",
-         case: CaseSpec = CASE) -> str:
+         case: CaseSpec = copper.CASE) -> str:
     """Propagate opt run ``opt_run_id`` of ``<data_dir>/proc/opt``; the run is
     written to ``<data_dir>/proc/uncprop``. ``case`` is recorded in the sidecar and
     must be the case that made the opt run."""
@@ -68,7 +68,7 @@ if __name__ == "__main__":
         "--label", default="",
         help="Optional label for the uncprop run sidecar.",
     )
-    add_case_arg(parser)
+    add_case_arg(parser, default=copper.__file__)
     parser.add_argument("--data-dir", default="data",
                         help="Data root holding proc/ (default 'data').")
     parser.add_argument("--run-id-file", default=None, metavar="PATH",

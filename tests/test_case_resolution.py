@@ -62,6 +62,15 @@ class TestForms:
             assert case.id == "toy" and case.case_source == f"path:{path}"
             assert case.case_sha256 == _sha(path)
 
+    def test_a_file_already_imported_as_a_module_resolves_to_that_module(
+            self, module_file):
+        import zinc_case_mod
+        case = resolve_case(str(module_file))
+        assert case.case_source == f"path:{module_file}"
+        assert not any(n.startswith("_pysuto_case_") and getattr(m, "__file__", None)
+                       == str(module_file) for n, m in sys.modules.items())
+        assert case is not None and zinc_case_mod.CASE.id == case.id
+
     def test_the_module_path_of_a_pysuto_module_is_a_module_not_an_alias(self):
         case = resolve_case("pysuto.cases.toy")
         assert case.case_source == "module:pysuto.cases.toy"
@@ -81,7 +90,7 @@ class TestErrors:
         with pytest.raises(ValueError) as exc:
             resolve_case("nope_case_mod")
         msg = str(exc.value)
-        assert "nope_case_mod" in msg and "toy" in msg and "copper" in msg
+        assert "nope_case_mod" in msg and "toy" in msg
 
     def test_an_unknown_path_names_the_path_tried(self, tmp_path):
         ref = str(tmp_path / "missing.py")

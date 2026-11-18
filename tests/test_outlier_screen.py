@@ -5,7 +5,10 @@ import numpy as np
 import pandas as pd
 
 from pysuto.acc import ValuationRoles
-from pysuto.cases.copper import CASE
+import sys
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))   # copper (#189)
+from copper import CASE
 from pysuto.impute import (
     damp_leg_sigma as _damp_leg_sigma,
     screen_contradicted_nodes,
@@ -384,7 +387,7 @@ def _ctx(tmp_path, acc, agg):
 
 
 def test_pre_impute_damps_then_screens_and_files_the_report(tmp_path):
-    from pysuto.cases.copper import pre_impute
+    from copper import pre_impute
     acc, agg = _Acc(), _Agg(10)
     m = acc.edge_index
     for i, val, fv in ((0, "CC", 100.0), (2, "Mass", 2000.0)):
@@ -401,7 +404,7 @@ def test_pre_impute_damps_then_screens_and_files_the_report(tmp_path):
 
 
 def test_post_impute_files_the_contradicted_node_report(tmp_path):
-    from pysuto.cases.copper import post_impute
+    from copper import post_impute
     ctx = _ctx(tmp_path, _MatteAcc(), _matte_agg(20.0))
 
     post_impute(ctx)

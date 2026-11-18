@@ -26,7 +26,7 @@ sys.path.insert(0, "src")
 sys.path.insert(0, "scripts")
 sys.path.insert(0, "scripts/explo")
 import build_baci_reexport as R                           # noqa: E402
-from pysuto.cases.copper_feed import icsg_intake_production   # noqa: E402
+from copper_feed import icsg_intake_production   # noqa: E402
 import issue69_aggregate_gap_diag as P69                  # noqa: E402
 import roundL_reexport_diag as L                          # noqa: E402
 import roundZ_png_kg_diag as Z                            # noqa: E402

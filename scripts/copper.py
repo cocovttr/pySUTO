@@ -26,6 +26,7 @@ The hooks ``pre_impute`` and ``post_impute`` and the builders reach them through
 from __future__ import annotations
 
 import os
+import sys
 from dataclasses import dataclass, field
 from typing import Optional
 
@@ -59,6 +60,7 @@ from pysuto.unc import PedigreeScores
 from pysuto.logging import get_logger
 
 _log = get_logger(__name__)
+_HERE = os.path.dirname(os.path.abspath(__file__))
 
 
 # =============================================================================
@@ -953,7 +955,7 @@ def builders(ctx) -> list:
 # The three copper feeds as :class:`pysuto.feedpipe.FeedSpec`s, run by
 # ``feedpipe.run_feed``. The loaders and hooks moved here unchanged from
 # ``scripts/{icsg,baci,crude_ore}_feed.py``. ``ICSG_FEED`` is the loaders' part of ICSG's
-# spec: ``pysuto.cases.copper_feed.ICSG_SPEC`` adds the trade-share weights and the
+# spec: ``copper_feed.ICSG_SPEC`` adds the trade-share weights and the
 # observed-zero stamping (#147).
 
 # The case's rest-of-world region, for the ROW pedigree penalty (#119), and the
@@ -1197,9 +1199,14 @@ CRUDE_ORE_FEED = FeedSpec(
 # =============================================================================
 
 def stage1(data_dir: str) -> dict:
-    """Copper's Stage 1 hook, ``pysuto.cases.copper_feed.run_stage1`` (#109)."""
-    # Function-local: copper_feed imports this module (the FeedSpecs above).
-    from pysuto.cases.copper_feed import run_stage1
+    """Copper's Stage 1 hook, ``copper_feed.run_stage1`` (#109)."""
+    # Function-local: copper_feed imports this module (the FeedSpecs above). It does so
+    # as ``copper``, which a ``--case scripts/copper.py`` child holds under another name:
+    # alias it, so that both are one module.
+    sys.modules.setdefault("copper", sys.modules[__name__])
+    if _HERE not in sys.path:
+        sys.path.insert(0, _HERE)
+    from copper_feed import run_stage1
     return run_stage1(data_dir)
 
 

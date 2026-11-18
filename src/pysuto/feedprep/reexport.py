@@ -13,7 +13,7 @@ numbers per (product s, region h, year t), all in contained copper (CC),
 
 and ``T ≤ X``, ``T ≤ I`` make it safe by construction: producers are never netted.
 Reading the registered ICSG input (``U``, ``P``) is the case's business,
-``pysuto.cases.copper_feed``; the script is the CLI around these functions.
+``scripts/copper_feed.py``; the script is the CLI around these functions.
 
 Public API
 ----------

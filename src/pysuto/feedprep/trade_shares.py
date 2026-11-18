@@ -9,7 +9,7 @@ it decode an accounting structure's edges into the CC fan-target frame it reads
 (:func:`baci_observed_regions`) and the fan groups the ADR 0027 netting exhausted
 (:func:`imports_exhausted_groups`); :func:`check_parents_record` is #53's refusal of
 stale weights. Reading the registered inputs (raw ICSG usage and production) is the
-case's business, ``pysuto.cases.copper_feed``; ``scripts/build_trade_shares.py`` is
+case's business, ``scripts/copper_feed.py``; ``scripts/build_trade_shares.py`` is
 argument parsing and calls.
 
 Public API

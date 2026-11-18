@@ -12,7 +12,11 @@ from types import SimpleNamespace
 
 import pytest
 
-from pysuto.cases import copper, copper_feed
+import sys
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))   # copper (#189)
+import copper
+import copper_feed
 from pysuto.input_registry import InputRegistries
 
 
@@ -58,7 +62,7 @@ def test_copper_declares_the_hook_and_the_feed_step_s_child_reaches_it(calls, tm
     from pysuto._step import StepSpec, run_spec
     _icsg_parents(tmp_path, 28)
     assert copper.CASE.stage1 is not None
-    out = run_spec(StepSpec(step="feed", case="copper", label="l", upstream=None,
+    out = run_spec(StepSpec(step="feed", case=copper.__file__, label="l", upstream=None,
                             data_dir=str(tmp_path), config=None))
     assert [c[1] for c in calls if c[0] == "feed"] == ["baci", "icsg", "crude_ore"]
     assert out == "feed_baci_x\nfeed_icsg_x\nfeed_crude_ore_x"
@@ -76,9 +80,9 @@ def test_a_feed_start_hands_the_case_reference_to_the_feed_child(tmp_path, monke
 
     monkeypatch.setattr(Pipeline, "_launch", launch)
     monkeypatch.chdir(tmp_path)
-    assert main(["run", "--case", "copper", "--from", "feed", "--to", "feed",
+    assert main(["run", "--case", copper.__file__, "--from", "feed", "--to", "feed",
                  "--data-dir", str(tmp_path / "d")]) == 0
-    assert seen["step"] == "feed" and seen["spec"].case == "copper"
+    assert seen["step"] == "feed" and seen["spec"].case == copper.__file__
     assert "feed_baci_x feed_icsg_x feed_crude_ore_x" in capsys.readouterr().out
 
 

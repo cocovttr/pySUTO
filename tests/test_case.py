@@ -2,7 +2,7 @@
 
 The knobs of a case section are its UPPER_CASE fields; ``--set`` replaces them through
 the type checks of :mod:`pysuto.knobs`; a run records its section with functions by
-qualified name. The copper case (``pysuto.cases.copper.CASE``) is the one instance;
+qualified name. The copper case (``scripts/copper.py``, ``CASE``) is the one instance;
 the toy sections below are built in this module.
 """
 from __future__ import annotations
@@ -18,7 +18,9 @@ import pytest
 
 from pysuto.case import (Cascade, CascadeStep, CaseContext, CaseSpec, ConstSection,
                          FillEntry, ImpSection)
-from pysuto.cases.copper import CASCADE, CASE, CopperConst, CopperImp, builders, terminal
+import sys
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))   # copper (#189)
+from copper import CASCADE, CASE, CopperConst, CopperImp, builders, terminal
 from pysuto.knobs import parse_overrides
 from pysuto.registry import _NpEncoder
 
@@ -144,9 +146,9 @@ class TestCopperCase:
             assert set(desc[stage]) == {f.name for f in dataclasses.fields(
                 getattr(CASE, stage))}
         assert (CASE.describe("imp")["imp"]["terminal"]
-                == "pysuto.cases.copper.terminal")
+                == "copper.terminal")
         assert (CASE.describe("const")["const"]["nodata_anchor_exempt"]
-                == "pysuto.cases.copper.nodata_anchor_exempt")
+                == "copper.nodata_anchor_exempt")
 
     def test_the_tied_knob_has_one_value_in_both_sections(self):
         """pysuto.pipeline TIED: imp.P_PROP and const.P_PROP."""
@@ -227,7 +229,7 @@ class TestImpCascade:
             "rule": "forward", "sigma_rule": "trade",
             "scope": "pysuto.relation.sources.trade_scope"}
         assert entries[1] == {"kind": "step", "id": "network",
-                              "build": "pysuto.cases.copper.build_network"}
+                              "build": "copper.build_network"}
         assert entries[3]["source"] == {
             "params_id": "ore_grade", "param_types": ["concentration", "efficiency"]}
         json.dumps(entries)

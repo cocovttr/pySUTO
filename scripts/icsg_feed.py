@@ -49,15 +49,15 @@ import sys
 # ---------------------------------------------------------------------------
 # USER CONFIGURATION
 # ---------------------------------------------------------------------------
-# The feed's policy is the copper case's complete ICSG spec, ``pysuto.cases.copper_feed.
-# ICSG_SPEC``: the loaders of ``pysuto.cases.copper``, the BACI-trade-share weights
+# The feed's policy is the copper case's complete ICSG spec, ``copper_feed.
+# ICSG_SPEC``: the loaders of ``copper``, the BACI-trade-share weights
 # (#53 refuses stale ones) and the observed zeros (#76–#97, their knobs OBSERVED_ZERO_CV
 # and OBSERVED_ZERO_FLOOR_KT live there). The acc id is config/config.yaml's
 # pipeline.acc_id, read inside main() by run_feed.
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
-from pysuto.cases.copper_feed import ICSG_SPEC as SPEC
+from copper_feed import ICSG_SPEC as SPEC
 from pysuto.config import load_config
 from pysuto.feedpipe import run_feed
 from pysuto.logging import start_run_log

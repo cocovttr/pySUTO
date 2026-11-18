@@ -42,7 +42,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
 from pysuto.case import CaseSpec
 from pysuto.cases import add_case_arg, case_from_args
-from pysuto.cases.copper import CASE
+import copper
 from pysuto.knobs import write_run_id
 from pysuto.registry import stage_lock
 from pysuto.logging import get_logger, start_run_log
@@ -62,7 +62,7 @@ def main(
     sankey:     list | None = None,      # periods to draw; [] → the latest
     figs_dir:   str = FIGS_DIR,
     png:        bool = True,             # also a static PNG per figure, when kaleido can render
-    case:       CaseSpec = CASE,         # recorded in the sidecar; must have made the opt run
+    case:       CaseSpec = copper.CASE,         # recorded in the sidecar; must have made the opt run
 ) -> str:
     start_run_log(data_dir, "init_psut")
     return run_psut(case, opt_run_id, label, primary, timesteps, data_dir=data_dir,
@@ -80,7 +80,7 @@ if __name__ == "__main__":
                              "(default: the case's, else the acc's content valuation).")
     parser.add_argument("--timesteps", nargs="+", default=None,
                         help="Subset of timestep labels (default: every timestep of the run).")
-    add_case_arg(parser)
+    add_case_arg(parser, default=copper.__file__)
     parser.add_argument("--data-dir", default=DATA_DIR,
                         help=f"Data root holding proc/opt, proc/const, proc/acc (default {DATA_DIR!r}).")
     parser.add_argument("--sankey", nargs="*", default=None, metavar="PERIOD",

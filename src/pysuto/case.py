@@ -18,7 +18,9 @@ The library never imports ``pysuto.cases`` by name: a case module sits at the to
 import direction, beside the drivers. :func:`resolve_case` finds a case from the string
 ``--case`` carries (#187) and imports a bundled alias's module only at call time, through
 :data:`ALIASES`, a name-to-module table, so the pipeline, the drivers and a step's child
-share one resolver without the library importing a case.
+share one resolver without the library importing a case. A file already imported as a
+module is reused, so a driver's ``import copper`` and its ``--case scripts/copper.py``
+are one module object.
 """
 
 from __future__ import annotations
@@ -290,9 +292,9 @@ def check_case(sidecar: dict, case: CaseSpec) -> None:
 # ======================================================================================
 # Resolving a ``--case`` reference (#187)
 # ======================================================================================
-# The bundled cases, name to module; the modules are imported at call time only.
-ALIASES = {"copper":        "pysuto.cases.copper",
-           "toy":           "pysuto.cases.toy",
+# The bundled cases, name to module; the modules are imported at call time only. A study
+# case is not bundled: it is a file or a module the caller names (ADR 0047).
+ALIASES = {"toy":           "pysuto.cases.toy",
            "toy_coproduct": "pysuto.cases.toy_coproduct"}
 
 
@@ -317,6 +319,9 @@ def _load_file(path: str):
     if not os.path.isfile(path):
         raise ValueError(f"unknown case {path!r}: read as a file path (it ends in .py or "
                          f"holds a path separator), and no such file exists")
+    for loaded in list(sys.modules.values()):       # one module object per file
+        if getattr(loaded, "__file__", None) == path:
+            return loaded
     name = "_pysuto_case_" + hashlib.sha256(path.encode("utf-8")).hexdigest()[:12]
     spec = importlib.util.spec_from_file_location(name, path)
     module = importlib.util.module_from_spec(spec)

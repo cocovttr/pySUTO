@@ -1,6 +1,6 @@
 """copper_feed.py
 ===============
-Copper's Stage 1 beyond the loaders of ``pysuto.cases.copper``: the labels and registered
+Copper's Stage 1 beyond the loaders of ``copper``: the labels and registered
 inputs the feed-side algorithms of ``pysuto.feedprep`` are bound to, the raw-ICSG readers
 (usage, intake, production), the observed-zero stamping of the ICSG feed (#76–#97), and the
 **complete ICSG FeedSpec**, ``ICSG_SPEC`` (#147): ``ICSG_FEED`` plus the BACI-trade-share
@@ -38,8 +38,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-from pysuto.cases.copper import (BACI_FEED, CASE, CRUDE_ORE_FEED, ICSG_FEED,
-                                 icsg_sector_key)
+from copper import BACI_FEED, CASE, CRUDE_ORE_FEED, ICSG_FEED, icsg_sector_key
 from pysuto.conc import ConcordanceTable
 from pysuto.feedpipe import run_feed
 from pysuto.feedprep.ore_grade import OreGradeLabels
@@ -669,7 +668,7 @@ def baci_source_version(data_dir: str) -> int:
         raise ValueError(f"stage 1: {path} names no baci version")
     return int(version)
 
-_SCRIPTS_DIR = Path(__file__).resolve().parents[3] / "scripts"
+_SCRIPTS_DIR = Path(__file__).resolve().parent
 
 
 def _run_script(script: str, *args: str, data_dir: str) -> None:

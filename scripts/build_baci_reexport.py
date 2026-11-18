@@ -105,7 +105,7 @@ import sys
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
-from pysuto.cases.copper_feed import (
+from copper_feed import (
     AGGREGATES_ID, BACI_ID, GROSS_VALUATION, HS_OF, HUB_EXCLUDE, ICSG_ID, NETTED_SECTORS,
     TRADED_SECTORS, icsg_intake_production)
 from pysuto.feedprep.reexport import (
@@ -125,7 +125,7 @@ from pysuto.input_registry import InputRegistries
 SOURCE_VERSION = 5
 
 # The sectors, the HS codes of a new row, the hub exclusion and the knobs of the netting
-# are the copper case's (``pysuto.cases.copper_feed``) and the library's
+# are the copper case's (``copper_feed``) and the library's
 # (``pysuto.feedprep.reexport``).
 SECTORS = NETTED_SECTORS
 

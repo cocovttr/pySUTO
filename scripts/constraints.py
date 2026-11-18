@@ -4,14 +4,14 @@ init_copper_constraints.py
 Stage 3a driver: build and persist the constraint matrix for the copper model.
 
 The constraint builders and their registration order are the case's
-(pysuto.cases.copper.builders, #120; its docstring lists the constraint types):
+(scripts/copper.py builders, #120; its docstring lists the constraint types):
 hard mass balance, the supply/use scale totals and the scrap level anchors, the
 CSV-fed soft ratios and hard ratio bounds, the net-stock and scrap-share bands, and
 the hard lower bounds.
 
 ═══════════════════════════════════════════════════════════
 CONFIGURATION  ←  every knob is a field of the case spec,
-                  src/pysuto/cases/copper.py (edit it there)
+                  scripts/copper.py (edit it there)
 ═══════════════════════════════════════════════════════════
 """
 
@@ -25,7 +25,7 @@ import sys
 # USER CONFIGURATION
 # ---------------------------------------------------------------------------
 # Upstream wiring (`imp_run_id`) is passed via the `--imp-run-id` CLI flag. main()
-# takes the acc id from the case (`--case`, default copper; `--config` may replace it)
+# takes the acc id from the case (`--case`, default scripts/copper.py; `--config` may replace it)
 # and derives every path from `--data-dir` (default data): proc/acc, proc/imp,
 # proc/const, input/. Every knob (P_PROP, σ floors, builder registrations) lives in the
 # case spec (pysuto.cases.<id>).
@@ -40,7 +40,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 from dataclasses import replace
 from pysuto.case import CaseSpec
 from pysuto.cases import add_case_arg, case_from_args
-from pysuto.cases.copper import CASE
+import copper
 from pysuto.config import load_config
 from pysuto.registry import stage_lock
 from pysuto.logging import get_logger, start_run_log
@@ -49,13 +49,13 @@ from pysuto.stages import run_const
 
 # The knobs a pipeline step may override with --set (#100, pysuto.knobs): the UPPER_CASE
 # fields of the case's Stage 3 section. Paths and the acc id are not knobs.
-KNOBS = tuple(CASE.const.knobs())
+KNOBS = tuple(copper.CASE.const.knobs())
 
 _log = get_logger("init_copper_constraints")
 
 
 def main(imp_run_id: str, label: str, overrides: dict | None = None, *,
-         case: CaseSpec = CASE,
+         case: CaseSpec = copper.CASE,
          data_dir: str = "data", config: str | None = None,
          imp_dir: str | None = None, const_dir: str | None = None) -> str:
     """Build and persist the constraint run of ``imp_run_id``; return its id.
@@ -81,7 +81,7 @@ if __name__ == "__main__":
         help="ImputationRun ID to load from --imp-dir.",
     )
     parser.add_argument("label", help="Label for this constraint run")
-    add_case_arg(parser)
+    add_case_arg(parser, default=copper.__file__)
     parser.add_argument("--data-dir", default="data",
                         help="Data root holding proc/ and input/ (default 'data').")
     parser.add_argument("--config", default=None,
