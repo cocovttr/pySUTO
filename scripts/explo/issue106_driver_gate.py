@@ -53,6 +53,8 @@ sys.path.insert(0, "src")
 from pysuto.pipeline import Chain, Pipeline                       # noqa: E402
 from pysuto.stages import opt_defaults                            # noqa: E402
 
+COPPER = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "copper.py")
+
 REF      = "opt_20261021_131744_58504ad3"      # the final reference chain (#110)
 PROC     = os.path.join("data", "proc")
 SCRATCH  = "/dev/shm/pysuto-gate"
@@ -84,12 +86,12 @@ def driver_defaults() -> dict:
 
 def run_chains(ref: str) -> tuple:
     base = Chain.from_opt_run(ref)
-    two = Pipeline(base=base, cwd=os.getcwd(), case="copper").run(
+    two = Pipeline(base=base, cwd=os.getcwd(), case=COPPER).run(
         {}, label="r106 zero overrides")
     print(f"chain 2: {two}", flush=True)
     lock_after = [os.path.exists(os.path.join(PROC, ".stage.lock"))]
     dirs = {s: os.path.join(SCRATCH, s) for s in ("imp", "const")}
-    three = Pipeline(base=base, cwd=os.getcwd(), run_dirs=dirs, case="copper").run(
+    three = Pipeline(base=base, cwd=os.getcwd(), run_dirs=dirs, case=COPPER).run(
         driver_defaults(), label="r106 explicit defaults")
     print(f"chain 3: {three}", flush=True)
     lock_after.append(os.path.exists(os.path.join(PROC, ".stage.lock")))

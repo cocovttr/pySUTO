@@ -1,5 +1,5 @@
 """Unit tests for the feed-time re-export re-attribution (ADR 0027), ``pysuto.feedprep.
-reexport``, and the copper ICSG readers it is fed by, ``pysuto.cases.copper_feed``."""
+reexport``, and the copper ICSG readers it is fed by, ``scripts/copper_feed.py``."""
 import json
 import os
 import shutil
@@ -8,7 +8,8 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from pysuto.cases.copper_feed import HS_OF, production_recipes
+import copper_case  # noqa: F401  (puts scripts/ on sys.path, #189)
+from copper_feed import HS_OF, production_recipes
 from pysuto.feedprep.reexport import (
     rebuild_values,
     check_icsg_baci_version,
@@ -639,7 +640,7 @@ def test_eff_lookup_does_not_version_an_edited_current(tmp_path):
     """A read-only diagnostic called `_eff_nominals` seconds after a branch switch
     had edited an input's current/, and the lookup registered baci v25, a version
     no run uses (#93). A lookup reads the latest registered version."""
-    from pysuto.cases.copper_feed import eff_nominals
+    from copper_feed import eff_nominals
     from pysuto.input_registry import InputRegistries
 
     csv = tmp_path / "params" / "eff" / "current" / "params.csv"

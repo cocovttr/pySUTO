@@ -7,7 +7,7 @@ Steps
 -----
 A  Load accounting structure and feed registry
 B  Collect and aggregate feeds (baci, crude_ore, icsg)
-C  Run the case's imputation cascade (copper: pysuto.cases.copper.CASCADE, #120, #136):
+C  Run the case's imputation cascade (copper: scripts/copper.py CASCADE, #120, #136):
      1  trade seeds, network closure, concentration, ore-grade and efficiency
         ratios, iterated to a fixpoint in CASCADE_ORDER (the Fill entries of the case)
      2  temporal interpolation (interpolation-only)
@@ -17,7 +17,7 @@ D  Save AggregationResult to OUTPUT_DIR
 
 ═══════════════════════════════════════════════════════════
 CONFIGURATION  ←  every knob is a field of the case spec,
-                  src/pysuto/cases/copper.py (edit it there)
+                  scripts/copper.py (edit it there)
 ═══════════════════════════════════════════════════════════
 """
 
@@ -31,7 +31,7 @@ import sys
 # USER CONFIGURATION
 # ---------------------------------------------------------------------------
 # Upstream wiring (feed IDs) is passed via repeated `--feed-id` CLI flags. The case
-# (`--case`, default copper: pysuto.cases.<id>.CASE) names the acc id, which `--config`
+# (`--case`, default scripts/copper.py) names the acc id, which `--config`
 # may replace; every path derives from `--data-dir` (default data): proc/acc,
 # proc/feed/registry, proc/imp, input/. Every knob lives in the case spec.
 
@@ -42,17 +42,21 @@ import sys
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
 from dataclasses     import replace
-from pysuto.case     import CaseSpec
+from pathlib import Path
+from pysuto.case     import CaseSpec, resolve_case
 from pysuto.cases    import add_case_arg, case_from_args
-from pysuto.cases.copper import CASE
 from pysuto.config   import load_config
 from pysuto.registry import stage_lock
 from pysuto.logging import get_logger, start_run_log
 from pysuto.knobs    import add_knob_args, overrides_from_cli, write_run_id
 from pysuto.stages   import run_imp
 
+# The case the driver runs without --case: the repository's copper case, next to it.
+DEFAULT_CASE = str(Path(__file__).resolve().with_name("copper.py"))
+CASE = resolve_case(DEFAULT_CASE)
+
 # ─────────────────────────────────────────────────────────────────────────────
-# USER CONFIGURATION — the copper case (pysuto.cases.copper, #120) declares every
+# USER CONFIGURATION — the copper case (scripts/copper.py, #120) declares every
 # Stage 2 knob, its value and the imputer cascade; the stage body is
 # pysuto.stages.run_imp (#124), which builds from the case this driver passes.
 # ─────────────────────────────────────────────────────────────────────────────
@@ -94,7 +98,7 @@ if __name__ == "__main__":
         help="Feed run ID to include. Repeat for each feed.",
     )
     parser.add_argument("--label", help="Human-readable label stored in the run's sidecar")
-    add_case_arg(parser)
+    add_case_arg(parser, default=DEFAULT_CASE)
     parser.add_argument("--data-dir", default="data",
                         help="Data root holding proc/ and input/ (default 'data').")
     parser.add_argument("--config", default=None,

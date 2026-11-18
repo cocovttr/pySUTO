@@ -31,6 +31,7 @@ import numpy as np
 import pandas as pd
 import pytest
 import scipy.sparse as sp
+import copper_case  # noqa: F401  (puts scripts/ on sys.path, #189)
 
 # ---------------------------------------------------------------------------
 # Helpers to build a minimal toy AccountingStructure without file I/O
@@ -2235,7 +2236,7 @@ def _make_fd_acc():
 class TestSupplyUseScaleTotal:
     """Supply/use total-output scale totals, self-anchored to f_agg, grouped by
     (sector_from, region_from, time, valuation). Mirrors the wiring in
-    pysuto.cases.copper.builders. See ADR 0006."""
+    scripts/copper.py builders. See ADR 0006."""
 
     GROUP_KEYS = ("sector_from", "region_from", "time", "valuation")
     CV = 0.01
@@ -2440,7 +2441,7 @@ class TestScrapLevelAnchor:
 
     `Scrap` is an SB node, so `Scrap→Process` edges match neither scale-total
     mask — until this family nothing in Stage 3 stated their level. Mirrors the
-    wiring in pysuto.cases.copper.builders."""
+    wiring in scripts/copper.py builders."""
 
     GROUP_KEYS = ("sector_to", "region_to", "time", "valuation")
     CV = 0.01
@@ -2576,7 +2577,7 @@ class TestScrapLevelAnchor:
         """Because the mask is coverage-gated every group is 100 % feed-backed,
         so ADR 0025's 0.3 kt floor applies unconditionally and the fabricated
         branch is never taken."""
-        from pysuto.cases.copper import CASE
+        from copper import CASE
         from pysuto.constraints.anchors import scale_total_cv
         spec = CASE.const
         SCALE_TOTAL_ABS_FLOOR = spec.SCALE_TOTAL_ABS_FLOOR

@@ -1330,7 +1330,7 @@ A case declares it as data, a `FillEntry`; copper's are `trade`, `conc` and `ore
 its feeds, param families, relation sources and cascade, anchor families and σ policies, run by the
 generic stage drivers. Declared as a `CaseSpec` named `CASE` in a Python module or file that
 `--case` resolves: a path, a dotted module, or a bundled alias (#120, #187); the copper case is the
-first. A case also sets the Stage 4 and 6 driver constants it departs from (`driver_knobs`). Its
+first, `scripts/copper.py` (ADR 0047). A case also sets the Stage 4 and 6 driver constants it departs from (`driver_knobs`). Its
 identity in a run is `CaseSpec.id`. _Avoid_: "model" (the QP, the PIOT), "study" (a REP analysis),
 "scenario".
 

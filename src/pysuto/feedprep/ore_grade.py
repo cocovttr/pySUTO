@@ -14,7 +14,7 @@ observed grade into later production years (ADR 0023), :func:`compute_tailings_g
 derives the tailings grades from the prior's own construction (ADR 0015 amendment), and
 :func:`build_param_rows` / :func:`build_tailings_rows` expand them into params rows.
 The case's sector labels travel in :class:`OreGradeLabels`; the registered inputs
-(eff, conc nominals, the S&P factor file) are read by ``pysuto.cases.copper_feed`` and
+(eff, conc nominals, the S&P factor file) are read by ``scripts/copper_feed.py`` and
 ``scripts/build_ore_grade.py``, which is argument parsing and calls.
 
 Public API

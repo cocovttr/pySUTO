@@ -37,13 +37,17 @@ import sys
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
-from pysuto.case    import CaseSpec
+from pathlib import Path
+from pysuto.case    import CaseSpec, resolve_case
 from pysuto.cases   import add_case_arg, case_from_args
-from pysuto.cases.copper import CASE
 from pysuto.logging import get_logger, start_run_log
 from pysuto.knobs   import add_knob_args, overrides_from_cli, write_run_id
 from pysuto.registry import stage_lock
 from pysuto.stages  import OPT_KNOBS as KNOBS, opt_defaults, run_opt
+
+# The case the driver runs without --case: the repository's copper case, next to it.
+DEFAULT_CASE = str(Path(__file__).resolve().with_name("copper.py"))
+CASE = resolve_case(DEFAULT_CASE)
 
 _log = get_logger("init_run_solver")
 
@@ -79,7 +83,7 @@ if __name__ == "__main__":
         choices=["warm", "cold"],
         help="Solver prior mode: 'cold' (default) or 'warm'."
     )
-    add_case_arg(parser)
+    add_case_arg(parser, default=DEFAULT_CASE)
     parser.add_argument("--data-dir", default="data",
                         help="Data root holding proc/ (default 'data').")
     parser.add_argument("--const-dir", default=None,

@@ -290,9 +290,9 @@ def check_case(sidecar: dict, case: CaseSpec) -> None:
 # ======================================================================================
 # Resolving a ``--case`` reference (#187)
 # ======================================================================================
-# The bundled cases, name to module; the modules are imported at call time only.
-ALIASES = {"copper":        "pysuto.cases.copper",
-           "toy":           "pysuto.tutorial.toy",
+# The bundled cases, name to module; the modules are imported at call time only. A study
+# case is not bundled: it is a file or a module the caller names (ADR 0047).
+ALIASES = {"toy":           "pysuto.tutorial.toy",
            "toy_coproduct": "pysuto.tutorial.toy_coproduct"}
 
 
@@ -317,6 +317,9 @@ def _load_file(path: str):
     if not os.path.isfile(path):
         raise ValueError(f"unknown case {path!r}: read as a file path (it ends in .py or "
                          f"holds a path separator), and no such file exists")
+    folder = os.path.dirname(path)
+    if folder not in sys.path:      # as a script run by Python: siblings are importable
+        sys.path.insert(0, folder)
     name = "_pysuto_case_" + hashlib.sha256(path.encode("utf-8")).hexdigest()[:12]
     spec = importlib.util.spec_from_file_location(name, path)
     module = importlib.util.module_from_spec(spec)
@@ -334,7 +337,9 @@ def resolve_case(reference: str) -> CaseSpec:
     where it came from.
 
     ``reference`` is a bundled alias (:data:`ALIASES`), a file path (a string ending in
-    ``.py`` or holding a path separator, relative to the working directory) or a dotted
+    ``.py`` or holding a path separator, relative to the working directory; its folder is
+    put first on ``sys.path`` if absent, before the file runs, so that it can import the
+    modules next to it as a script run by Python can) or a dotted
     module (``mylab.zinc``, found on ``sys.path``). The returned case has ``case_source``
     (``alias:<name>``, ``path:<abs>`` or ``module:<dotted>``) and ``case_sha256``, the
     sha256 of the module's source file.

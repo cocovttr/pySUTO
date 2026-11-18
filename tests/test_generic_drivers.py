@@ -18,6 +18,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
+from copper_case import copper
 from pysuto.case import CaseSpec, check_case
 from pysuto.cases import case_ids, load_case
 from pysuto.tutorial import toy
@@ -154,10 +155,10 @@ def test_the_psut_primary_defaults_to_the_acc_s_content_valuation(chain):
 
 
 def test_an_unknown_case_raises_listing_the_known_ones():
-    with pytest.raises(ValueError, match="'nope'.*copper.*toy"):
+    with pytest.raises(ValueError, match="'nope'.*toy"):
         load_case("nope")
-    assert {"copper", "toy"} <= set(case_ids())
-    assert isinstance(load_case("toy"), CaseSpec) and load_case("copper").id == "copper"
+    assert {"toy", "toy_coproduct"} <= set(case_ids()) and "copper" not in case_ids()
+    assert isinstance(load_case("toy"), CaseSpec) and load_case(copper.__file__).id == "copper"
 
 
 def test_a_driver_refuses_an_unknown_case_with_a_usage_error(tmp_path):
@@ -174,7 +175,7 @@ def test_a_run_of_another_case_is_refused():
     with pytest.raises(ValueError, match="made by case 'copper'.*--case toy"):
         check_case(sidecar, toy.CASE)
     check_case({"run_id": "old", "stage_config": {}}, toy.CASE)        # no record: passes
-    check_case(sidecar, load_case("copper"))
+    check_case(sidecar, copper.CASE)
 
 
 # ---------------------------------------------------------------------------
@@ -247,7 +248,7 @@ def test_copper_s_psut_primary_resolves_to_cc_through_driver_knobs(monkeypatch, 
     monkeypatch.chdir(tmp_path)
     for kwargs, expected in (({}, "CC"), ({"primary": "Mass"}, "Mass")):
         with pytest.raises(_Stop):
-            mod.main("opt_x", case=load_case("copper"), data_dir=str(tmp_path), **kwargs)
+            mod.main("opt_x", case=copper.CASE, data_dir=str(tmp_path), **kwargs)
         assert seen["primary"] == expected
     with pytest.raises(_Stop):                    # a case without the knob: the content valuation
         mod.main("opt_x", case=toy.CASE, data_dir=str(tmp_path))
@@ -258,7 +259,7 @@ def test_driver_knobs_are_checked_by_the_knob_protocol():
     from dataclasses import replace
     knobs = ("PRIMARY",)
     ns = {"PRIMARY": None}
-    assert load_case("copper").driver_knobs_for("psut", knobs, ns) == {"PRIMARY": "CC"}
+    assert copper.CASE.driver_knobs_for("psut", knobs, ns) == {"PRIMARY": "CC"}
     misspelt = replace(toy.CASE, driver_knobs={"psut": {"PRIMARI": "CC"}})
     with pytest.raises(KeyError, match="PRIMARI"):
         misspelt.driver_knobs_for("psut", knobs, ns)

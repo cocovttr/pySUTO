@@ -11,8 +11,9 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from pysuto.cases import copper_feed
-from pysuto.cases.copper_feed import (check_trade_share_parents, eff_smelting,
+import copper_case  # noqa: F401  (puts scripts/ on sys.path, #189)
+import copper_feed
+from copper_feed import (check_trade_share_parents, eff_smelting,
                                       icsg_raw_production, trade_share_parents)
 from pysuto.feedprep import trade_shares as T
 from pysuto.feedprep.trade_shares import imports_exhausted_groups

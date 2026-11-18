@@ -44,7 +44,7 @@ sys.path.insert(0, "src")
 sys.path.insert(0, "scripts")
 sys.path.insert(0, "scripts/explo")
 import build_baci_reexport as B                           # noqa: E402
-from pysuto.cases.copper_feed import eff_nominals         # noqa: E402
+from copper_feed import eff_nominals         # noqa: E402
 import issue65_icsg_stock_parse_diag as P65               # noqa: E402
 import issue69_aggregate_gap_diag as P69                  # noqa: E402
 import issue75_scandinavia_split_diag as P75              # noqa: E402

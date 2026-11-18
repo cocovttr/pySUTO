@@ -78,7 +78,7 @@ import numpy as np
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
 from pysuto.acc import AccountingStructure
-from pysuto.cases.copper_feed import (
+from copper_feed import (
     BOUND_DOMESTIC_SECTORS, CATHODE_CARRIER_SECTOR_TO, SIGNED_SECTORS_TO, TRADED_SECTORS,
     WITHHOLD_CHAIN_INCONSISTENT,
     chain_inconsistent_refining, icsg_raw_production, icsg_raw_usage, latest_feed_run,
@@ -93,7 +93,7 @@ from pysuto.input_registry import PARAMS_PARENTS, InputRegistries
 # USER CONFIGURATION
 # ---------------------------------------------------------------------------
 # The labels (traded sectors, signed stock legs, the bound's sectors, ADR 0020's gate) are
-# the copper case's, ``pysuto.cases.copper_feed``; the algorithm is ``pysuto.feedprep.
+# the copper case's, ``copper_feed``; the algorithm is ``pysuto.feedprep.
 # trade_shares``. Sectors actually emitted this run:
 SECTORS = list(TRADED_SECTORS)
 

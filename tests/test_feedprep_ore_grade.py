@@ -9,7 +9,8 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from pysuto.cases.copper_feed import ORE_GRADE_LABELS
+import copper_case  # noqa: F401  (puts scripts/ on sys.path, #189)
+from copper_feed import ORE_GRADE_LABELS
 from pysuto.feedprep import ore_grade as OG
 from pysuto.feedprep.ore_grade import (
     MARGIN_REL_CARRY,

@@ -53,12 +53,12 @@ import sys
 # USER CONFIGURATION
 # ---------------------------------------------------------------------------
 # The feed's policy (loaders, concordance tables, ROW region) is the copper case's
-# CRUDE_ORE_FEED, pysuto.cases.copper; the acc id is config/config.yaml's
+# CRUDE_ORE_FEED, scripts/copper_feed.py; the acc id is config/config.yaml's
 # pipeline.acc_id, read inside main().
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
-from pysuto.cases.copper import CRUDE_ORE_FEED
+from copper_feed import CRUDE_ORE_FEED
 from pysuto.config import load_config
 from pysuto.feedpipe import run_feed
 from pysuto.logging import start_run_log

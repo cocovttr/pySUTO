@@ -33,6 +33,7 @@ from pysuto.impute import (
 )
 from pysuto.relation.ratio_relation import ratio_relation
 from pysuto.relation.sources import Fill, ParamSource
+import copper_case  # noqa: F401  (puts scripts/ on sys.path, #189)
 
 # Lp combiner unit tests live in tests/test_lp.py.
 # ParamRow.sigma unit tests live in tests/test_relation_params.py.
@@ -1370,7 +1371,7 @@ class TestFlatPriorImputer:
 
 def _load_driver():
     """The copper case module, which holds the Stage-2 model (#121)."""
-    import pysuto.cases.copper as copper
+    import copper
     return copper
 
 

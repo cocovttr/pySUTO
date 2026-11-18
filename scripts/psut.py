@@ -40,13 +40,17 @@ import sys
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
-from pysuto.case import CaseSpec
+from pathlib import Path
+from pysuto.case import CaseSpec, resolve_case
 from pysuto.cases import add_case_arg, case_from_args
-from pysuto.cases.copper import CASE
 from pysuto.knobs import write_run_id
 from pysuto.registry import stage_lock
 from pysuto.logging import get_logger, start_run_log
 from pysuto.stages import FIGS_DIR, PRIMARY, PSUT_KNOBS as KNOBS, run_psut
+
+# The case the driver runs without --case: the repository's copper case, next to it.
+DEFAULT_CASE = str(Path(__file__).resolve().with_name("copper.py"))
+CASE = resolve_case(DEFAULT_CASE)
 
 _log = get_logger("init_psut")
 
@@ -80,7 +84,7 @@ if __name__ == "__main__":
                              "(default: the case's, else the acc's content valuation).")
     parser.add_argument("--timesteps", nargs="+", default=None,
                         help="Subset of timestep labels (default: every timestep of the run).")
-    add_case_arg(parser)
+    add_case_arg(parser, default=DEFAULT_CASE)
     parser.add_argument("--data-dir", default=DATA_DIR,
                         help=f"Data root holding proc/opt, proc/const, proc/acc (default {DATA_DIR!r}).")
     parser.add_argument("--sankey", nargs="*", default=None, metavar="PERIOD",

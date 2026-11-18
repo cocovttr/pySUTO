@@ -17,7 +17,7 @@ direction): the parent and the child resolve the case reference with the one res
 :mod:`pysuto.case` (#187).
 
     base  = Chain.from_opt_run("opt_20261020_112726_2f451f31")
-    chain = Pipeline(steps=("imp", "const", "opt"), base=base, case="copper").run(
+    chain = Pipeline(steps=("imp", "const", "opt"), base=base, case="scripts/copper.py").run(
         {"imp.P_PROP": 1.5, "const.P_PROP": 1.5}, label="p = 1.5")
 
 A chain can also start at Stage 1 and end at Stage 6 (#125): the steps are

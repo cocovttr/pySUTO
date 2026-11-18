@@ -1,13 +1,10 @@
 """
 cases
 =====
-Case modules (GLOSSARY.md "Case", #26 §3): ``pysuto.cases.<id>`` declares one metal's
-case, wired through the six stages. A Stage 2 and 3 case is a
-:class:`pysuto.case.CaseSpec` named ``CASE``.
-
-* :mod:`pysuto.cases.copper` — the **copper case** (#120): the Stage 2 and 3 model of
-  the copper application.
-* The toy cases live in :mod:`pysuto.tutorial` (#188).
+Formerly the bundled case modules (GLOSSARY.md "Case", #26 §3). It declares no case any
+more: pySUTO ships no study case (ADR 0047), the toy cases live in :mod:`pysuto.tutorial`
+(#188) and copper is ``scripts/copper.py`` in the repository (#189). What is left are the
+two helpers :func:`case_ids` and :func:`load_case`; #191 removes the package.
 
 Import direction: ``cases`` sits at the top of the stack, beside the stage drivers and the
 ``python -m pysuto`` entry point. It imports the library; the library never imports it.
@@ -36,7 +33,7 @@ def load_case(case_id: str):
     return resolve_case(case_id)
 
 
-def add_case_arg(parser, default: str = "copper") -> None:
+def add_case_arg(parser, default: str | None = None) -> None:
     """Add ``--case <reference>`` to a driver's parser: ``default`` is the case it runs
     without the option; ``None`` makes the option required, which
     :func:`case_from_args` enforces (exit 2, listing the aliases)."""

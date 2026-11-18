@@ -1,7 +1,7 @@
 """
 test_copper_feed.py
 ===================
-The copper ICSG feed, ``pysuto.cases.copper_feed``: the observed zeros (#76, narrowed by #78, extended by #96, #97, #31): in a
+The copper ICSG feed, ``scripts/copper_feed.py``: the observed zeros (#76, narrowed by #78, extended by #96, #97, #31): in a
 region ICSG covers that produces none of a product that year, by its raw ICSG production
 (ADR 0024's bound), a weighted fan's domestic leg at trade-share weight 0 and the edge the
 region's own mine or SX-EW output leaves on are covered at 0, priced, and reach Stage 2 as
@@ -13,8 +13,9 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from pysuto.cases import copper_feed                              # noqa: E402
-from pysuto.cases.copper_feed import (ICSG_SPEC, OBSERVED_ZERO_FLOOR_KT,   # noqa: E402
+import copper_case  # noqa: F401  (puts scripts/ on sys.path, #189)
+import copper_feed                              # noqa: E402
+from copper_feed import (ICSG_SPEC, OBSERVED_ZERO_FLOOR_KT,   # noqa: E402
                                       icsg_coverage, load_trade_shares,
                                       non_producer_mask, observed_zero_sigma,
                                       production_zero_mask, raw_production,
@@ -406,7 +407,7 @@ def test_the_feed_refuses_weights_it_cannot_check(tmp_path):
 
 def test_the_complete_icsg_spec_carries_the_trade_share_and_observed_zero_hooks():
     """#147: the loaders' ICSG_FEED plus the two hooks, importable without a script."""
-    from pysuto.cases.copper import ICSG_FEED
+    from copper_feed import ICSG_FEED
 
     assert ICSG_FEED.user_weights is None and ICSG_FEED.post_propagate is None
     assert ICSG_SPEC.user_weights is not None and ICSG_SPEC.post_propagate is not None

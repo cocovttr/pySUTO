@@ -18,6 +18,7 @@ import pandas as pd
 import pytest
 from numpy.testing import assert_array_equal
 
+import copper_case  # noqa: F401  (puts scripts/ on sys.path, #189)
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..",
                                 "scripts", "parse", "baci_parse"))
 from baci_parse_feed import (  # noqa: E402
@@ -194,7 +195,7 @@ import types  # noqa: E402
 
 def _stub_feed(tmp_path):
     """The copper case's cv-scale loader, over a temp feed dir."""
-    import pysuto.cases.copper as copper
+    import copper_feed as copper
     return types.SimpleNamespace(
         load_cv_scales=lambda acc: copper.load_cv_scales(acc, str(tmp_path)),
         MAX_CV_SCALE=copper.MAX_CV_SCALE)
@@ -226,7 +227,7 @@ def _scale_csv(path, cv):
 @pytest.fixture
 def wired(tmp_path, monkeypatch):
     bf = _stub_feed(tmp_path)
-    import pysuto.cases.copper as copper
+    import copper_feed as copper
     monkeypatch.setattr(copper, "expand_edge_index", lambda *a, **k: _ei_frame())
     return bf, tmp_path
 
