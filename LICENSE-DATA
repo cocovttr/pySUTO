@@ -1,0 +1,16 @@
+Hand-authored input tables: Creative Commons Attribution 4.0 International (CC BY 4.0)
+
+Copyright (c) 2026 Florian Huber
+
+The hand-authored tables of this repository under data/input/ -- the accounting-structure
+specs (data/input/acc/), the feed concordances, metadata and weights (data/input/feed/),
+the parameter tables (data/input/params/) and the masks (data/input/mask/), in their
+current/ folders -- are licensed under CC BY 4.0:
+https://creativecommons.org/licenses/by/4.0/
+
+You may share and adapt them for any purpose, provided you give appropriate credit, link
+to the licence and indicate whether changes were made.
+
+The original source data these tables describe (for example the ICSG and BACI releases)
+are not part of this repository and remain under their owners' terms. The code is
+licensed under the MIT License (LICENSE).

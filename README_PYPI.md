@@ -21,5 +21,6 @@ once: Kaleido needs it to write the Sankey figures. Python 3.9 or newer is requi
 a `CASE`; the package ships no study case. The copper chain runs only from a repository
 checkout (`--case scripts/copper.py`) with the licensed original data.
 
-Documentation, the method and the source are in the GitHub repository:
+pySUTO is licensed under the MIT License. Documentation, the method, the citation file and
+the source are in the GitHub repository:
 https://github.com/florihu/pySUTO
