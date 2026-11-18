@@ -20,6 +20,7 @@ boundary blocks, the ``SB`` node's boundary role (``acc.boundary_roles``, ADR 00
     O  SB·secondary    → Process              secondary input
     P  Process         → SB·secondary         residual output
     W  Process         → SB·nature            discard to nature (empty in copper)
+    T  Flow            → Flow                 trade between regions, f(r) → f(s) (ADR 0048)
 
 Every admissible edge lands in exactly one block; an edge outside this table
 is an error, never a silent omission. The node universe carries each SB node's
@@ -94,6 +95,7 @@ _BLOCK_RULES = (
     ("O", "SB",      _SECONDARY, "Process", None),
     ("P", "Process", None,       "SB",      _SECONDARY),
     ("W", "Process", None,       "SB",      _NATURE),
+    ("T", "Flow",    None,       "Flow",    None),
 )
 BLOCKS = tuple(rule[0] for rule in _BLOCK_RULES)
 
@@ -108,6 +110,7 @@ _ROW_COL = {
     "O": (("SB", _SECONDARY, "secondary"),    ("Process", None, "process")),
     "P": (("Process", None, "process"),       ("SB", _SECONDARY, "secondary")),
     "W": (("Process", None, "process"),       ("SB", _NATURE, "nature")),
+    "T": (("Flow", None, "flow"),             ("Flow", None, "flow")),
 }
 
 _TABLE_COLUMNS = [
@@ -592,6 +595,10 @@ class PSUT(_TidyView):
     def W(self, period=None, valuation=None) -> pd.DataFrame:
         """Discard to nature: rows ``(region, process)``, columns ``(region, nature)``."""
         return self.block("W", period, valuation)
+
+    def T(self, period=None, valuation=None) -> pd.DataFrame:
+        """Trade between regions: flow by flow, ``f(r) → f(s)`` (ADR 0048)."""
+        return self.block("T", period, valuation)
 
     def _labels(self, entity: str, role: Optional[str], name: str) -> pd.MultiIndex:
         n = self.nodes[self.nodes["entity"] == entity]

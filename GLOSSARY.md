@@ -65,7 +65,14 @@ SB-*output* edges only.
 
 **Tradable**:
 A mask marking which edges may be **traded across regions**; every other edge is **domestic**
-(same-region). Only meaningful on use edges.
+(same-region). Only meaningful on use edges and on trade edges.
+
+**Trade edge** (`trade` mask, PSUT block `T`):
+A `Flow → Flow` edge `f(r) → f(s)`, r ≠ s, between the nodes of one tradable flow in two
+regions ([ADR 0048](docs/adr/0048-trade-runs-over-flow-to-flow-edges.md)); exists only where
+Accounting declares the pair `Flow → Flow`. Each flow node is then a regional **pool** fed by
+local supply and by the other regions' pools.
+_Avoid_: "trade leg" for it (a bilateral leg is a cross-region use edge, ADR 0014).
 
 **Final-demand category**:
 A destination sector where flows terminate: `FU` (Final Use), `MESC` (Metal Exchange Stock

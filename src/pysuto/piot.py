@@ -61,7 +61,11 @@ _COMMODITY_KEY = ["period", "valuation", "commodity_region", "commodity"]
 def market_shares(psut: PSUT) -> pd.DataFrame:
     """``D`` in tidy form: each producer's share of every commodity it
     supplies, per (period, valuation) — ``S[p,f] / Σ_p S[p,f]``. Commodities
-    nobody supplies in a period have no row."""
+    nobody supplies in a period have no row. With trade edges (block ``T``,
+    ADR 0048) a commodity node is also fed by the other regions' nodes, and the
+    shares are traced through them (:func:`_traded_shares`)."""
+    if (psut.table["block"] == "T").any():
+        return _traded_shares(psut)
     S = psut.table[psut.table["block"] == "S"]
     q = S.groupby(["period", "valuation", "to_region", "to_sector"])["val"].transform("sum")
     share = np.where(q > 0, S["val"].to_numpy() / np.where(q > 0, q, 1.0), np.nan)
@@ -70,6 +74,40 @@ def market_shares(psut: PSUT) -> pd.DataFrame:
              .rename(columns={"from_region": "region", "from_sector": "process",
                               "to_region": "commodity_region", "to_sector": "commodity"}))
     return out[_SHARE_COLUMNS].reset_index(drop=True)
+
+
+def _traded_shares(psut: PSUT) -> pd.DataFrame:
+    """Market shares through trade edges: per (period, valuation, commodity), with
+    ``q`` the commodity's inflow per region (local supply + trade in),
+    ``D = S·q̂⁻¹·(I − T·q̂⁻¹)⁻¹`` — the producer shares of each region's node,
+    following every trade chain back to the regions where the commodity is supplied.
+    A node with no inflow has no row."""
+    tbl  = psut.table
+    rows = []
+    for (period, valuation, f), g in tbl[tbl["block"].isin(["S", "T"])].groupby(
+            ["period", "valuation", "to_sector"], sort=False):
+        S = g[g["block"] == "S"]
+        T = g[g["block"] == "T"]
+        regions = sorted(set(S["to_region"]) | set(T["to_region"]) | set(T["from_region"]))
+        k = {r: i for i, r in enumerate(regions)}
+        n = len(regions)
+        trade = np.zeros((n, n))
+        np.add.at(trade, (T["from_region"].map(k).to_numpy(), T["to_region"].map(k).to_numpy()),
+                  T["val"].to_numpy())
+        q = (np.bincount(S["to_region"].map(k).to_numpy(), weights=S["val"].to_numpy(), minlength=n)
+             + trade.sum(axis=0))
+        q_inv = np.where(q > 0, 1.0 / np.where(q > 0, q, 1.0), 0.0)
+        # G[r, s]: share of node s's inflow that originates in node r's local supply
+        G = np.linalg.solve((np.eye(n) - trade * q_inv[None, :]).T, np.eye(n)).T
+        for prod in S.itertuples(index=False):
+            r = k[prod.to_region]
+            local = prod.val * q_inv[r]                    # producer's share of its own node
+            for s in range(n):
+                share = local * G[r, s]
+                if q[s] > 0 and share > 0:
+                    rows.append((period, valuation, prod.from_region, prod.from_sector,
+                                 regions[s], f, share))
+    return pd.DataFrame(rows, columns=_SHARE_COLUMNS)
 
 
 def _allocate(rows: pd.DataFrame, shares: pd.DataFrame, block: str,
@@ -121,6 +159,8 @@ def market_share_network(psut: PSUT) -> tuple[pd.DataFrame, pd.DataFrame]:
     tbl     = psut.table
     crossed = "region_crossed" in tbl.columns
     by      = lambda b: tbl[tbl["block"] == b]
+    # trade edges (T) are not process-network edges: their goods are traced to the
+    # producers through the shares and land on the U and Y rows of the destination
     parts = [
         _allocate(by("U"), shares, "Z", crossed),
         _allocate(by("Y"), shares, "Y", crossed),

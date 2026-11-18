@@ -20,6 +20,8 @@ An accounting structure is declared by one dict, the **acc spec** (ADR 0046)::
      "use":        {"Ore": ["MF", "SXEW"], ...},
      "tradable":   ["Concentrate", ...],
      "accounting": [{"from": "Flow", "to": "Process", "same_region": False}, ...],
+                                                    # + {"from": "Flow", "to": "Flow",
+                                                    #    "same_region": False}: trade edges
      "bounds":     [...],    # optional: records with the bounds file's column names
      "masks":      [...]}    # optional: records with the masks.csv column names
 
@@ -90,6 +92,16 @@ In plain English:
   • Use edges where the flow is tradable CAN be cross-region.
   • Use edges where the flow is non-tradable are same-region.
   • SB→Process edges follow the Accounting Same_reg flag.
+
+Trade edges (ADR 0048)
+----------------------
+An Accounting pair ``Flow → Flow`` (``same_region`` False) adds one **trade edge**
+``f(r) → f(s)``, r ≠ s, per tradable flow ``f`` and ordered region pair: the flow node of a
+region is then a pool fed by local supply and by the other regions' pools, and trade between
+regions runs over these edges. With ``Flow → Process`` set ``same_region`` True, use edges stay
+in their region and the trade edges are the only route between regions. Without the pair the
+structure is unchanged (use edges of tradable flows cross regions). The trade pairs are implied
+by the tradable flows; the supply and use tables do not list them.
 
 Bounds design
 -------------
@@ -772,8 +784,11 @@ class RuleSet:
         Sector names that are internationally tradable.
     accounting : dict mapping (entity_from, entity_to) → same_region (bool)
         Whether the entity-pair requires same-region placement.
+    trade_pairs : set of (sector, sector)
+        ``(f, f)`` for every tradable flow when Accounting holds ``Flow → Flow`` (trade
+        edges, ADR 0048); empty otherwise.
     all_pairs : set of (sector_from, sector_to)
-        Union of supply_pairs and use_pairs.
+        Union of supply_pairs, use_pairs and trade_pairs.
     """
 
     def __init__(self, rules_file_path: str):
@@ -796,7 +811,9 @@ class RuleSet:
         self.use_pairs      = set(use_pairs)
         self.tradable_flows = set(tradable)
         self.accounting     = dict(accounting)
-        self.all_pairs      = self.supply_pairs | self.use_pairs
+        self.trade_pairs    = ({(f, f) for f in self.tradable_flows}
+                               if ("Flow", "Flow") in self.accounting else set())
+        self.all_pairs      = self.supply_pairs | self.use_pairs | self.trade_pairs
 
     # ------------------------------------------------------------------
 
@@ -817,7 +834,9 @@ class RuleSet:
           1. If the entity-pair Accounting row explicitly says Same_reg=1 → True.
           2. If this is a Use edge (Flow/SB → Process) AND the from-sector
              is a tradable flow → False (cross-region OK).
-          3. Otherwise → True (same-region by default).
+          3. If this is a trade edge (:meth:`is_trade_pair`) → False; the edge must
+             cross regions (ADR 0048).
+          4. Otherwise → True (same-region by default).
         """
         acc_same = self.accounting.get((entity_from, entity_to), True)
         if acc_same:
@@ -828,12 +847,28 @@ class RuleSet:
         if in_use and sector_from in self.tradable_flows:
             return False
 
+        if self.is_trade_pair(sector_from, sector_to, entity_from, entity_to):
+            return False
+
         return True  # supply edges and non-tradable use edges stay same-region
+
+    def is_trade_pair(
+        self,
+        sector_from:  str,
+        sector_to:    str,
+        entity_from:  str,
+        entity_to:    str,
+    ) -> bool:
+        """True for the sector pair of a trade edge ``f(r) → f(s)`` (ADR 0048), which is
+        admissible only between two different regions."""
+        return ((entity_from, entity_to) == ("Flow", "Flow")
+                and (sector_from, sector_to) in self.trade_pairs)
 
     def summary(self) -> str:
         return (
             f"RuleSet: {len(self.supply_pairs)} supply pairs, "
             f"{len(self.use_pairs)} use pairs, "
+            f"{len(self.trade_pairs)} trade pairs, "
             f"{len(self.tradable_flows)} tradable flows, "
             f"{len(self.accounting)} accounting entity-pair rules"
         )
@@ -1332,6 +1367,8 @@ class AccountingStructure:
           supply       — (sector_from, sector_to) in ruleset.supply_pairs
           use          — (sector_from, sector_to) in ruleset.use_pairs
           tradable     — sector_from in ruleset.tradable_flows
+          trade        — (sector_from, sector_to) in ruleset.trade_pairs: the trade edges
+                         f(r) → f(s) (ADR 0048); all False without them
           sb           — entity_to == "SB" (system-boundary endpoint)
           cross_region — region_from != region_to (trade edges; the edge scope
                          for bilateral feeds, which must never inform domestic
@@ -1360,10 +1397,14 @@ class AccountingStructure:
             supply   = np.array([(s, d) in sp_set for s, d in zip(sf, st)], dtype=bool)
             use      = np.array([(s, d) in up_set for s, d in zip(sf, st)], dtype=bool)
             tradable = np.array([s in tr_set for s in sf], dtype=bool)
+            trade    = (ef == "Flow") & (et == "Flow") & (sf == st) & tradable
+            if not self.ruleset.trade_pairs:
+                trade[:] = False
         else:
             supply   = np.isin(ef, ["Process"]) & np.isin(et, ["Flow", "SB"])
             use      = np.isin(ef, ["Flow", "SB"]) & np.isin(et, ["Process"])
             tradable = np.zeros(len(ei), dtype=bool)
+            trade    = np.zeros(len(ei), dtype=bool)
 
         sb = (et == "SB")
         cross_region = (ni["region"].values != nj["region"].values)
@@ -1372,6 +1413,7 @@ class AccountingStructure:
             "supply":       supply,
             "use":          use,
             "tradable":     tradable,
+            "trade":        trade,
             "sb":           sb,
             "cross_region": cross_region,
         }
@@ -1493,6 +1535,8 @@ class AccountingStructure:
         same_req = self.ruleset.requires_same_region(sf, st, ef, et)
         if same_req and rf != rt:
             return False
+        if rf == rt and self.ruleset.is_trade_pair(sf, st, ef, et):
+            return False                        # a trade edge joins two regions
 
         return True
 
@@ -1722,9 +1766,12 @@ class AccountingStructure:
             ids_t, reg_t = by_sector[st]
             ii = np.repeat(ids_f, len(ids_t))
             jj = np.tile(ids_t, len(ids_f))
-            if admissible_edges_only and rs.requires_same_region(sf, st, ef, et):
-                keep = np.repeat(reg_f, len(reg_t)) == np.tile(reg_t, len(reg_f))
-                ii, jj = ii[keep], jj[keep]
+            if admissible_edges_only:
+                same = np.repeat(reg_f, len(reg_t)) == np.tile(reg_t, len(reg_f))
+                if rs.requires_same_region(sf, st, ef, et):
+                    ii, jj = ii[same], jj[same]
+                elif rs.is_trade_pair(sf, st, ef, et):
+                    ii, jj = ii[~same], jj[~same]
             froms.append(ii)
             tos.append(jj)
         if not froms:

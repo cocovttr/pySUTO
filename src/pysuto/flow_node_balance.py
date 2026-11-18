@@ -4,8 +4,8 @@ flow_node_balance.py
 Prior-consistency check at Flow nodes, shared by Stage 2 and Stage 3.
 
 A Flow node carries a **hard** mass balance (``sense = "eq"``, ``is_hard``): its
-inflow (``Process→Flow``) must equal its outflow (``Flow→Process`` +
-``Flow→SB``). Two *scale totals* (ADR 0006) sit on either side of that
+inflow (``Process→Flow``, and ``Flow→Flow`` trade edges from other regions, ADR 0048)
+must equal its outflow (``Flow→Process`` + ``Flow→SB`` + trade edges to other regions). Two *scale totals* (ADR 0006) sit on either side of that
 balance — ``supplytotout`` on the inflow, ``usetotout`` on the outflow —
 each anchored tightly at ``σ_c = ANCHOR_CV·|c|``.
 
@@ -52,7 +52,8 @@ def flow_node_balance(acc, agg_result, valuation: str | None = None) -> pd.DataF
     ei = ei[ei["valuation"].eq(valuation)].copy()
     ei["f"] = f[ei["edge_id"].to_numpy()]
 
-    inflow = (ei[ei["entity_from"].eq("Process") & ei["entity_to"].eq("Flow")]
+    into   = ei["entity_from"].isin(["Process", "Flow"]) & ei["entity_to"].eq("Flow")
+    inflow = (ei[into]
               .groupby(["sector_to", "region_to", "time"])["f"].sum())
     outflow = (ei[ei["entity_from"].eq("Flow")]
                .groupby(["sector_from", "region_from", "time"])["f"].sum())
