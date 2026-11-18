@@ -20,7 +20,7 @@ from __future__ import annotations
 
 import pkgutil
 
-from pysuto.case import resolve_case
+from pysuto.case import ALIASES, resolve_case
 
 
 def case_ids() -> list:
@@ -42,16 +42,23 @@ def load_case(case_id: str):
     return resolve_case(case_id)
 
 
-def add_case_arg(parser) -> None:
-    """Add ``--case <reference>`` (default ``copper``) to a stage driver's parser."""
-    parser.add_argument("--case", default="copper",
-                        help="Case: a bundled alias, a dotted module or a file path "
-                             "(default copper).")
+def add_case_arg(parser, default: str = "copper") -> None:
+    """Add ``--case <reference>`` to a driver's parser: ``default`` is the case it runs
+    without the option; ``None`` makes the option required, which
+    :func:`case_from_args` enforces (exit 2, listing the aliases)."""
+    parser.add_argument("--case", default=default, metavar="CASE",
+                        help="Case: a bundled alias (" + ", ".join(sorted(ALIASES))
+                             + "), a dotted module or a file path"
+                             + (" (required)." if default is None
+                                else f" (default {default})."))
 
 
 def case_from_args(parser, args):
     """The case ``--case`` names; an unknown reference ends the driver through
     ``parser.error`` (exit 2, naming what was tried)."""
+    if args.case is None:
+        parser.error("--case is required: a bundled alias (" + ", ".join(sorted(ALIASES))
+                     + "), a dotted module or a file path")
     try:
         return load_case(args.case)
     except ValueError as exc:

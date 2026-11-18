@@ -11,11 +11,15 @@ argument handling and the step commands are checked without running a driver.
 """
 from __future__ import annotations
 
+import json
 import os
+import re
 import subprocess
 import sys
 from pathlib import Path
 
+import numpy as np
+import pandas as pd
 import pytest
 
 import test_toy_case as toy_checks
@@ -46,6 +50,73 @@ def chain(tmp_path_factory):
     return {"root": root, "cwd": cwd, "ids": ids, "stdout": proc.stdout,
             "acc": AccountingStructure.load(toy.ACC_ID,
                                             storage_dir=str(root / "proc" / "acc"))}
+
+
+@pytest.fixture(scope="module")
+def file_chain(tmp_path_factory):
+    """The same chain through ``--case <file>``, the file re-exporting the toy's CASE."""
+    root, cwd = tmp_path_factory.mktemp("toy_file_data"), tmp_path_factory.mktemp("cwd2")
+    case_file = cwd / "zinc_case.py"
+    case_file.write_text("from pysuto.cases.toy import CASE\n")
+    proc = _run(cwd, "--case", "./zinc_case.py", "--from", "feed", "--to", "psut",
+                "--data-dir", str(root))
+    assert proc.returncode == 0, f"{proc.stdout[-1500:]}\n{proc.stderr[-3000:]}"
+    printed = {line.split()[0]: line.split()[1:] for line in proc.stdout.splitlines()}
+    return {"root": root, "case_file": case_file,
+            "ids": {s: printed[s][0] for s in ("imp", "const", "opt", "uncprop", "psut")}}
+
+
+def _stored(run_dir: Path) -> dict:
+    """Every stored array and frame of a run directory (diagnostics left out) by file and
+    key, and its ``parents.inputs`` without the registry date and code stamps."""
+    out = {}
+    for path in sorted(run_dir.rglob("*")):
+        rel = path.relative_to(run_dir)
+        if "diag" in rel.parts or not path.is_file():
+            continue
+        if path.suffix == ".parquet":
+            out[(str(rel), None)] = pd.read_parquet(path)
+        elif path.suffix in (".npy", ".npz"):
+            data = np.load(path, allow_pickle=True)
+            for key in ([None] if path.suffix == ".npy" else list(data.keys())):
+                out[(str(rel), key)] = data if key is None else data[key]
+    inputs = json.loads((run_dir / "metadata.json").read_text())["parents"]["inputs"]
+    out["inputs"] = json.loads(re.sub(r'"(date|code)": "[^"]*"', '"x": 0',
+                                      json.dumps(inputs)))
+    return out
+
+
+def test_a_case_file_outside_src_runs_the_chain_bit_identical_to_the_alias(
+        chain, file_chain):
+    """#187 AC1: every stored array and frame and ``parents.inputs`` equal; only the
+    provenance of the sidecars differs."""
+    regs = {"imp": ImputationRunRegistry, "const": ConstraintRunRegistry,
+            "opt": OptimRunRegistry, "uncprop": UncPropRunRegistry,
+            "psut": PsutRunRegistry}
+    for stage, reg in regs.items():
+        a_id, b_id = chain["ids"][stage], file_chain["ids"][stage]
+        a = _stored(chain["root"] / "proc" / stage / a_id)
+        b = _stored(file_chain["root"] / "proc" / stage / b_id)
+        assert a.keys() == b.keys() and len(a) > 1, stage
+        for key in a:
+            if key == "inputs":
+                assert a[key] == b[key], stage
+            elif isinstance(a[key], pd.DataFrame):
+                assert a[key].equals(b[key]), (stage, key)
+            else:
+                nan = a[key].dtype.kind in "fc"     # NaN is "not covered", equal to itself
+                assert np.array_equal(a[key], b[key], equal_nan=nan), (stage, key)
+        ca = reg(str(chain["root"] / "proc" / stage)).load_sidecar(
+            a_id)["stage_config"]["case"]
+        cb = reg(str(file_chain["root"] / "proc" / stage)).load_sidecar(
+            b_id)["stage_config"]["case"]
+        assert ca["case_source"] == "alias:toy"
+        assert cb["case_source"] == f"path:{file_chain['case_file']}"
+        assert re.fullmatch(r"[0-9a-f]{64}", ca["case_sha256"])
+        assert re.fullmatch(r"[0-9a-f]{64}", cb["case_sha256"])
+        assert ca["case_sha256"] != cb["case_sha256"]
+        assert {k: v for k, v in ca.items() if not k.startswith("case_")} == \
+            {k: v for k, v in cb.items() if not k.startswith("case_")}
 
 
 def test_the_command_leaves_six_stages_linked_through_their_sidecars(chain):

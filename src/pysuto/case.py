@@ -227,8 +227,9 @@ class CaseSpec:
     step of ``python -m pysuto run``); ``None`` is a case with no hook.
 
     ``case_source`` and ``case_sha256`` are where the case came from (``alias:toy``,
-    ``module:mylab.zinc`` or ``path:<abs>``) and the sha256 of that module's source file.
-    Only :func:`resolve_case` sets them, and a run records them in ``stage_config["case"]``;
+    ``module:mylab.zinc`` or ``path:<abs>``) and the sha256 of that module's source
+    file. Only :func:`resolve_case` sets them, and a run records them in
+    ``stage_config["case"]``; they are left out of equality (provenance, not the case);
     a case built in Python has neither and records neither. ``with_knobs`` keeps them (a
     run records its knobs); code that changes a resolved case structurally, with
     ``dataclasses.replace`` on builders, selectors or sections, must clear both
@@ -241,8 +242,8 @@ class CaseSpec:
     const:        ConstSection
     driver_knobs: Mapping[str, Mapping[str, object]] = field(default_factory=dict)
     stage1:       Optional[Callable] = None
-    case_source:  Optional[str] = None
-    case_sha256:  Optional[str] = None
+    case_source:  Optional[str] = field(default=None, compare=False)
+    case_sha256:  Optional[str] = field(default=None, compare=False)
 
     def with_knobs(self, stage: str, overrides: Mapping[str, object]) -> "CaseSpec":
         """This case with ``overrides`` replacing knob fields of section ``stage``."""
@@ -367,7 +368,8 @@ def resolve_case(reference: str) -> CaseSpec:
         raise ValueError(f"case {reference!r}: module {module.__name__} declares no "
                          f"CASE that is a CaseSpec")
     if not getattr(module, "__file__", None):
-        raise ValueError(f"case {reference!r}: module {module.__name__} has no source file")
+        raise ValueError(f"case {reference!r}: module {module.__name__} has no "
+                         f"source file")
     return replace(case, case_source=source, case_sha256=_sha256(module.__file__))
 
 

@@ -1,6 +1,6 @@
-"""test_case_resolution.py — ``--case`` resolves a bundled alias, a dotted module or a file
-path (#187): the resolver of :mod:`pysuto.case` that the pipeline's parent and its step
-children share, the provenance a resolved case records, and the layering it keeps.
+"""test_case_resolution.py — ``--case`` resolves a bundled alias, a dotted module or a
+file path (#187): the resolver of :mod:`pysuto.case` that the pipeline's parent and its
+step children share, the provenance a resolved case records, and the layering it keeps.
 """
 from __future__ import annotations
 
@@ -68,7 +68,8 @@ class TestForms:
         assert case.case_sha256 == resolve_case("toy").case_sha256
 
     def test_a_relative_path_is_made_absolute_against_the_given_cwd(self, tmp_path):
-        assert case_reference("./a/zinc.py", str(tmp_path)) == str(tmp_path / "a" / "zinc.py")
+        assert case_reference("./a/zinc.py", str(tmp_path)) == str(
+            tmp_path / "a" / "zinc.py")
         assert case_reference("toy", str(tmp_path)) == "toy"
         assert case_reference("mylab.zinc", str(tmp_path)) == "mylab.zinc"
         assert case_reference("/abs/zinc.py", str(tmp_path)) == "/abs/zinc.py"
@@ -112,6 +113,9 @@ class TestProvenance:
         assert kept.case_source == "alias:toy" and kept.case_sha256 == case.case_sha256
         assert dataclasses.replace(case, acc_id="x").ref()["case_source"] == "alias:toy"
 
+    def test_provenance_is_left_out_of_equality(self):
+        assert resolve_case("toy") == toy.CASE
+
     def test_a_case_built_in_python_records_neither_field(self):
         assert toy.CASE.ref() == {"id": "toy", "acc_id": toy.CASE.acc_id}
         built = dataclasses.replace(toy.CASE, const=dataclasses.replace(
@@ -138,7 +142,8 @@ class TestSeams:
         assert spec.case == str(tmp_path / "zinc_case.py")
         assert pipe.case_id == "toy"
 
-    def test_python_m_pysuto_run_without_case_exits_2_and_lists_the_aliases(self, tmp_path):
+    def test_python_m_pysuto_run_without_case_exits_2_and_lists_the_aliases(
+            self, tmp_path):
         src = str(Path(pysuto.__file__).resolve().parents[1])
         proc = subprocess.run([sys.executable, "-m", "pysuto", "run", "--data-dir", "d"],
                               cwd=tmp_path, capture_output=True, text=True,
@@ -162,7 +167,8 @@ def test_the_resolver_and_the_pipeline_load_no_case_module_until_an_alias_is_res
     an alias, so importing the resolver, the pipeline and the stages loads none."""
     src = str(Path(pysuto.__file__).resolve().parents[1])
     code = ("import sys, pysuto.case, pysuto.pipeline, pysuto.stages, pysuto._step\n"
-            "assert not [m for m in sys.modules if m.startswith('pysuto.cases')], 'early'\n"
+            "assert not [m for m in sys.modules if m.startswith('pysuto.cases')], "
+            "'early'\n"
             "pysuto.case.resolve_case('toy')\n"
             "assert 'pysuto.cases.toy' in sys.modules\n")
     proc = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True,
