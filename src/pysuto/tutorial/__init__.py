@@ -14,7 +14,7 @@ copies the notebooks out of the installed package.
 * ``params_template.csv`` — the schema and two worked examples of a params family
   (#197), copied out beside the notebooks.
 
-Import direction: ``tutorial`` sits at the top of the stack, beside ``pysuto.cases``, the
+Import direction: ``tutorial`` sits at the top of the stack, beside the
 stage drivers and the ``python -m pysuto`` entry point. It imports the library; the
 library never imports it (:func:`pysuto.case.resolve_case` reaches the toy aliases only
 by name, at call time).

@@ -243,15 +243,15 @@ def test_use_params_records_an_entry_once_and_returns_its_csv(tmp_path):
     assert ctx.param_refs == [{"id": "conc", "version": 1}, {"id": "eff", "version": 1}]
 
 
-def test_the_library_never_imports_the_cases():
-    """README §5: ``pysuto.cases`` and ``pysuto.tutorial`` sit at the top of the import
-    direction, beside ``__main__``."""
-    top = ("cases", "tutorial")
+def test_the_library_never_imports_the_tutorial():
+    """README §5: ``pysuto.tutorial`` sits at the top of the import direction, beside
+    ``__main__``."""
+    top = ("tutorial",)
     offenders = []
     for path in SRC.rglob("*.py"):
-        if (top[0] in path.relative_to(SRC).parts or top[1] in path.relative_to(SRC).parts
+        if (top[0] in path.relative_to(SRC).parts
                 or path.name in ("__main__.py", "_step.py")):
-            continue        # the cases, the tutorial, ``python -m pysuto`` (#125), its child (#186)
+            continue        # the tutorial, ``python -m pysuto`` (#125), its child (#186)
         for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
             names = ([a.name for a in node.names] if isinstance(node, ast.Import)
                      else [node.module or ""] if isinstance(node, ast.ImportFrom)

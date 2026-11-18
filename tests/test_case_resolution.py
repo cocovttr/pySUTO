@@ -192,8 +192,7 @@ def test_the_resolver_and_the_pipeline_load_no_case_module_until_an_alias_is_res
     an alias, so importing the resolver, the pipeline and the stages loads none."""
     src = str(Path(pysuto.__file__).resolve().parents[1])
     code = ("import sys, pysuto.case, pysuto.pipeline, pysuto.stages, pysuto._step\n"
-            "assert not [m for m in sys.modules if m.startswith(('pysuto.cases', "
-            "'pysuto.tutorial'))], "
+            "assert not [m for m in sys.modules if m.startswith('pysuto.tutorial')], "
             "'early'\n"
             "pysuto.case.resolve_case('toy')\n"
             "assert 'pysuto.tutorial.toy' in sys.modules\n")

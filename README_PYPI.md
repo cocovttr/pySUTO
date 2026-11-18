@@ -16,5 +16,10 @@ The second line adds Jupyter and Plotly; `pysuto tutorial DEST` copies the tutor
 notebooks into the directory `DEST`. Without a Chrome browser, run `plotly_get_chrome -y`
 once: Kaleido needs it to write the Sankey figures. Python 3.9 or newer is required.
 
+`python -m pysuto run` requires `--case` and `--data-dir`. `--case` is a bundled alias
+(`toy`, `toy_coproduct`), a dotted module or a file path, each naming a module that declares
+a `CASE`; the package ships no study case. The copper chain runs only from a repository
+checkout (`--case scripts/copper.py`) with the licensed original data.
+
 Documentation, the method and the source are in the GitHub repository:
 https://github.com/florihu/pySUTO

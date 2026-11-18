@@ -28,7 +28,7 @@ import sys
 # takes the acc id from the case (`--case`, default scripts/copper.py; `--config` may replace it)
 # and derives every path from `--data-dir` (default data): proc/acc, proc/imp,
 # proc/const, input/. Every knob (P_PROP, σ floors, builder registrations) lives in the
-# case spec (pysuto.cases.<id>).
+# case spec (`--case`).
 
 # ---------------------------------------------------------------------------
 # END USER CONFIGURATION
@@ -40,7 +40,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 from dataclasses import replace
 from pathlib import Path
 from pysuto.case import CaseSpec, resolve_case
-from pysuto.cases import add_case_arg, case_from_args
+from pysuto.case import add_case_arg, case_from_args
 from pysuto.config import load_config
 from pysuto.registry import stage_lock
 from pysuto.logging import get_logger, start_run_log

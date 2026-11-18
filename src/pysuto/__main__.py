@@ -6,7 +6,7 @@ six stages, each in a fresh child process (#186), from a Stage 1 hook or a base 
 to any later stage::
 
     python -m pysuto run --case toy --from feed --to psut --data-dir /tmp/toy
-    python -m pysuto run --case scripts/copper.py --from imp --to psut --base opt_20261022_112855_928da10c
+    python -m pysuto run --case scripts/copper.py --from imp --base <opt> --data-dir data
 
 ``--case`` is required: a bundled alias (``toy``, ``toy_coproduct``), a dotted module
 (``mylab.zinc``) or a file path (``./zinc_case.py``), each naming a module that declares a
@@ -38,7 +38,7 @@ import argparse
 import os
 import sys
 
-from pysuto.cases import add_case_arg, case_from_args
+from pysuto.case import add_case_arg, case_from_args
 from pysuto.logging import configure_file_logs
 from pysuto.pipeline import ALL_STEPS, Chain, Pipeline
 from pysuto.tutorial import copy_tutorial
@@ -54,7 +54,8 @@ def _parser() -> argparse.ArgumentParser:
     run.add_argument("--to", dest="last", choices=ALL_STEPS, default="psut",
                      help="Last stage to run (default psut).")
     run.add_argument("--base", default=None, metavar="OPT_RUN_ID",
-                     help="Opt run whose chain supplies the upstream of a --from past feed.")
+                     help="Opt run whose chain supplies the upstream of a "
+                          "--from past feed.")
     run.add_argument("--data-dir", required=True,
                      help="Data root with proc/ and input/; logs go to <data-dir>/logs.")
     run.add_argument("--config", default=None,

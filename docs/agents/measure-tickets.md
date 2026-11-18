@@ -43,3 +43,12 @@ in the main checkout.
    maintainer's decision, which the REP states. *Done when* the merge is on main.
 7. **Close** with `gh issue close <N> --comment` naming the REP, the verdict and the new reference
    chain. *Done when* the issue is closed and the comment links the REP.
+
+## Executable-doc tickets
+
+A ticket for a notebook or other executable doc states a headline effect as an acceptance criterion
+only after a run has measured it on the case the doc ships. Until then it is a **hypothesis** with a
+report-if-not path: the ticket says what the chapter and the closing comment carry when the number
+does not appear (quote the measured case from the real data, or recast the effect). #61 shows both
+outcomes: experiment 3 could not hold on the toy and the chapter quotes copper's measurement
+instead; experiment 1 had to be recast.

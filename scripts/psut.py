@@ -42,7 +42,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
 from pathlib import Path
 from pysuto.case import CaseSpec, resolve_case
-from pysuto.cases import add_case_arg, case_from_args
+from pysuto.case import add_case_arg, case_from_args
 from pysuto.knobs import write_run_id
 from pysuto.registry import stage_lock
 from pysuto.logging import get_logger, start_run_log
