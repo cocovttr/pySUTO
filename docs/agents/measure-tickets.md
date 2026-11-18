@@ -43,3 +43,15 @@ in the main checkout.
    maintainer's decision, which the REP states. *Done when* the merge is on main.
 7. **Close** with `gh issue close <N> --comment` naming the REP, the verdict and the new reference
    chain. *Done when* the issue is closed and the comment links the REP.
+
+## Executable-doc tickets
+
+A ticket for a notebook or other executable doc (#60, #61) states a headline effect as an
+acceptance criterion only after a run has measured it on the case the doc ships. Until then it is
+a **hypothesis** with a report-if-not path: the ticket says what to write in the closing comment
+and in the chapter when the number does not appear. #61 shows both outcomes. Experiment 3 (a loose
+solver gap moves the result) could not hold on the toy: without bands the QP solves in 0
+iterations and gaps 1e-3 and 1e-6 are bit-identical, so the chapter quotes copper's measured case
+(ADR 0039) instead. Experiment 1 (loosening a contradicted scale total repairs the fit) had to be
+recast: the z falls 587× but `a*` moves by under 0.05 kt, so only the fixed input removes the
+contradiction.
