@@ -85,7 +85,8 @@ jobs:
           want = {f"pysuto/tutorial/{n}.ipynb" for n in (
               "00_world", "01_datafeed", "02_aggregate_impute", "03_constraints",
               "04_solver", "05_posterior", "06_psut_piot", "07_scoreboard",
-              "08_break_it", "09_bridge")} | {"pysuto/tutorial/README.md"}
+              "08_break_it", "09_bridge", "10_your_case")} | {
+              "pysuto/tutorial/README.md", "pysuto/tutorial/params_template.csv"}
           if want - tut:
               raise SystemExit(f"wheel lacks tutorial files: {sorted(want - tut)}")
           stray = [n for n in wheel if "/runs/" in n or ".ipynb_checkpoints" in n]
@@ -120,11 +121,11 @@ jobs:
           python -m pysuto tutorial tutorial
       - name: Make Chrome available for the Sankey PNG (kaleido)
         run: plotly_get_chrome -y
-      - name: Execute the ten chapters in order
-        timeout-minutes: 10             # the ticket's bound: ten chapters in under 10 minutes
+      - name: Execute the eleven chapters in order
+        timeout-minutes: 10             # the ticket's bound: the chapters in under 10 minutes
         working-directory: ${{ runner.temp }}/tutorial
         run: |
-          for nb in 0[0-9]_*.ipynb; do
+          for nb in [01][0-9]_*.ipynb; do
             echo "== $nb"
             jupyter execute --timeout=900 "$nb"
           done
