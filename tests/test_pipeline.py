@@ -16,9 +16,11 @@ from dataclasses import asdict
 import json
 import math
 import os
+import site
 import subprocess
 import uuid
 from collections import Counter
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -639,3 +641,31 @@ def test_the_sweep_driver_dry_run_lists_the_points_and_writes_nothing(repo):
     assert "p003" in r.stdout and "plan:" in r.stdout and "GB" in r.stdout
     assert not (repo.root / "data" / "proc" / "sweep").exists()
     assert len(_runs(repo, "imp")) == 1
+
+
+# =============================================================================
+# The step child's PYTHONPATH (#186; found by CI's first run, #196)
+# =============================================================================
+
+def _package_dir() -> Path:
+    import pysuto
+    return Path(pysuto.__file__).resolve().parents[1]
+
+
+def test_a_source_tree_goes_first_on_the_step_childs_pythonpath(monkeypatch):
+    import pysuto.pipeline as pipeline
+    monkeypatch.setattr(site, "getsitepackages", lambda: [])
+    monkeypatch.setattr(site, "getusersitepackages", lambda: "/nonexistent/user-site")
+    monkeypatch.setenv("PYTHONPATH", "/elsewhere")
+    path = pipeline._child_env()["PYTHONPATH"].split(os.pathsep)
+    assert path == [str(_package_dir()), "/elsewhere"]
+
+
+def test_an_installed_package_stays_off_the_childs_pythonpath_through_a_symlink(
+        monkeypatch, tmp_path):
+    import pysuto.pipeline as pipeline
+    link = tmp_path / "site-packages"
+    link.symlink_to(_package_dir(), target_is_directory=True)
+    monkeypatch.setattr(site, "getsitepackages", lambda: [str(link)])
+    monkeypatch.delenv("PYTHONPATH", raising=False)
+    assert "PYTHONPATH" not in pipeline._child_env()

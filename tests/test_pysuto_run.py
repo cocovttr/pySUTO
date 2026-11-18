@@ -175,7 +175,6 @@ def test_the_command_runs_six_real_children_and_looks_up_no_scripts_directory(
     """#186: each step, the feed hook included, is a fresh ``python -m pysuto._step``
     child of the parent's own ``pysuto``; no driver script or ``REPO_ROOT`` is
     involved."""
-    import pysuto
     import pysuto.pipeline as pipeline_module
     from pysuto.__main__ import main
 
@@ -190,11 +189,13 @@ def test_the_command_runs_six_real_children_and_looks_up_no_scripts_directory(
     assert main(["run", "--case", "toy", "--data-dir", str(tmp_path / "d")]) == 0
     assert not hasattr(pipeline_module, "REPO_ROOT")
     assert len(launched) == 6
-    src = str(Path(pysuto.__file__).resolve().parents[1])
+    # the parent's own pysuto: its source tree first, or nothing added for an installed
+    # wheel (the rule's two branches are tested in test_pipeline.py)
+    expected = pipeline_module._child_env().get("PYTHONPATH", "")
     for cmd, pythonpath in launched:
         assert cmd[1:3] == ["-m", "pysuto._step"]
         assert not any("scripts" in part for part in cmd)
-        assert pythonpath.split(os.pathsep)[0] == src
+        assert pythonpath == expected
     printed = {l.split()[0] for l in capsys.readouterr().out.splitlines() if l.split()}
     assert {"feed", "imp", "const", "opt", "uncprop", "psut"} <= printed
     for stage in ("imp", "const", "opt", "uncprop", "psut"):
