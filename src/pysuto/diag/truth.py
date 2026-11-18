@@ -4,7 +4,7 @@ truth.py
 ``TruthDiag`` — every stage's estimate of the edges scored against a **ground truth**.
 
 Only a synthetic case knows the values its feeds were drawn from (the toy case,
-:mod:`pysuto.cases.toy`); a real case never does, which is why this diagnostic exists at
+:mod:`pysuto.tutorial.toy`); a real case never does, which is why this diagnostic exists at
 all. Three figures, each a question the truth answers:
 
 1. **Error by stage** — how far each stage's estimate (feed → aggregate → imputed prior

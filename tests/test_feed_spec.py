@@ -17,7 +17,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from pysuto.cases import toy
+from pysuto.tutorial import toy
 import copper_case  # noqa: F401  (puts scripts/ on sys.path, #189)
 from copper_feed import BACI_FEED, CRUDE_ORE_FEED, ICSG_FEED, icsg_sector_key
 from pysuto.feedpipe import FeedSpec, run_feed

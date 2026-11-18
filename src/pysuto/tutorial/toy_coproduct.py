@@ -2,7 +2,7 @@
 toy_coproduct.py
 ================
 The **toy case with a co-product** (#130, #26 §2 item 5): the toy world of
-:mod:`pysuto.cases.toy`, plus a second content-bearing Flow out of the smelter.
+:mod:`pysuto.tutorial.toy`, plus a second content-bearing Flow out of the smelter.
 
 Smelting now supplies ``Metal``, ``Dust`` and ``Slag``. ``Dust`` is a Flow product, a
 fume-capture by-product at grade 0.20 that a ``Use`` edge consumes, so the smelter has two
@@ -19,7 +19,7 @@ ADR 0004's rejected option E (a fabricated split) would otherwise have to invent
 Stage 3's agg eff row pools both products.
 
 Run it as ``python -m pysuto run --case toy_coproduct --data-dir <dir>``; the module is
-the toy's with ``coproduct=True``: ``CASE`` is :data:`pysuto.cases.toy.CASE` under another
+the toy's with ``coproduct=True``: ``CASE`` is :data:`pysuto.tutorial.toy.CASE` under another
 id and acc id, and the Stage 1 hook of the toy's generator.
 """
 
@@ -27,7 +27,7 @@ from __future__ import annotations
 
 from dataclasses import replace
 
-from pysuto.cases import toy
+from pysuto.tutorial import toy
 
 CASE = replace(
     toy.CASE,

@@ -17,7 +17,7 @@ import pandas as pd
 import pytest
 
 import pysuto.constraints as constraints_pkg
-from pysuto.cases import toy
+from pysuto.tutorial import toy
 from pysuto.constraints import ConstraintEngine, anchors
 
 

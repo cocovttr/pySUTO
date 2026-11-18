@@ -1351,7 +1351,7 @@ sidecar" (a built structure is not a run).
 **Acc ref** — `{id, version}` naming one acc input version, as a sidecar's `parents.inputs.acc`
 records it.
 
-**Toy case** — the synthetic **Case** of the fictional metal orium (`pysuto.cases.toy`, #59),
+**Toy case** — the synthetic **Case** of the fictional metal orium (`pysuto.tutorial.toy`, #59),
 declared in code with its own labels (`Gross`/`Content` valuations, `Raw`/`Sec`/`Demand`
 boundary subs, bound to roles), generated from a **ground truth** and observed through
 **synthetic feeds**.

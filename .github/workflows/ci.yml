@@ -1,6 +1,6 @@
-# ci.yml: the suite on 3.9/3.12/3.13, ruff (pyflakes rules), the build, and PyPI trusted
-# publishing on a pushed v* tag (#196). No token: PyPI trusts this workflow and the `pypi`
-# environment (a pending publisher for florihu/pySUTO, set up once on pypi.org).
+# ci.yml: the suite on 3.9/3.12/3.13, ruff (pyflakes rules), the build, the tutorial
+# executed from a fresh install (#188), and PyPI trusted publishing on a pushed v* tag
+# (#196). No token: PyPI trusts this workflow and the `pypi` environment (a pending publisher for florihu/pySUTO, set up once on pypi.org).
 name: ci
 
 on:
@@ -81,6 +81,17 @@ jobs:
           bad = [n for n in sdist if n.split("/", 1)[-1].startswith(banned)]
           if bad:
               raise SystemExit(f"sdist holds excluded files: {bad[:10]}")
+          tut = {n for n in wheel if n.startswith("pysuto/tutorial/")}
+          want = {f"pysuto/tutorial/{n}.ipynb" for n in (
+              "00_world", "01_datafeed", "02_aggregate_impute", "03_constraints",
+              "04_solver", "05_posterior", "06_psut_piot", "07_scoreboard",
+              "08_break_it", "09_bridge", "10_your_case")} | {
+              "pysuto/tutorial/README.md", "pysuto/tutorial/params_template.csv"}
+          if want - tut:
+              raise SystemExit(f"wheel lacks tutorial files: {sorted(want - tut)}")
+          stray = [n for n in wheel if "/runs/" in n or ".ipynb_checkpoints" in n]
+          if stray:
+              raise SystemExit(f"wheel holds tutorial run output: {stray[:10]}")
           print(f"wheel {len(wheel)} files, sdist {len(sdist)} files: clean")
           PY
       - uses: actions/upload-artifact@v7.0.2
@@ -89,9 +100,39 @@ jobs:
           path: dist/
           if-no-files-found: error
 
+  tutorial:
+    # The shipped tutorial (#188): a plain `pip install` of the checkout, no checkout on
+    # sys.path, the notebooks copied out by `python -m pysuto tutorial` and executed in
+    # order on the python3 kernel.
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v7.1.0
+        with:
+          python-version: "3.12"
+      - run: python -m pip install ".[tutorial]"
+      - name: Copy the tutorial out
+        working-directory: ${{ runner.temp }}
+        run: |
+          python -c "import pysuto; assert 'site-packages' in pysuto.__file__, pysuto.__file__"
+          python -m pysuto tutorial tutorial
+      - name: Make Chrome available for the Sankey PNG (kaleido)
+        run: plotly_get_chrome -y
+      - name: Execute the eleven chapters in order
+        timeout-minutes: 10             # the ticket's bound: the chapters in under 10 minutes
+        working-directory: ${{ runner.temp }}/tutorial
+        run: |
+          for nb in [01][0-9]_*.ipynb; do
+            echo "== $nb"
+            jupyter execute --timeout=900 "$nb"
+          done
+
   publish:
     if: startsWith(github.ref, 'refs/tags/v')
-    needs: [test, lint, build]
+    needs: [test, lint, build, tutorial]
     runs-on: ubuntu-latest
     environment: pypi
     permissions:

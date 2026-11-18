@@ -9,7 +9,8 @@ and jags the cold time series; a throughput-scaled prior fixes both.
 
 Each stock leg is declared as a ``StockLeg`` (its stock sector, its mode, the net
 edge's selector and its base selectors), so the sector labels are the caller's;
-the copper instances are in ``scripts/copper.py``. Two per-leg modes:
+the toy's instances are in ``pysuto.tutorial.toy``, the copper ones in
+``scripts/copper.py``. Two per-leg modes:
 
 * ``"transfer"`` (copper: PSC): ``share(t) = f[net(t)] / f[base(t)]`` computed where the
   net edge is already covered, interpolated across the region's time series and

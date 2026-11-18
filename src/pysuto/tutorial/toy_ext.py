@@ -2,7 +2,7 @@
 toy_ext.py
 ==========
 The toy case's **extras** (#61): the code behind the notebooks ``08_break_it`` and
-``09_bridge``. Nothing here belongs to the core toy chain; :mod:`pysuto.cases.toy` is
+``09_bridge``. Nothing here belongs to the core toy chain; :mod:`pysuto.tutorial.toy` is
 imported, never edited.
 
 Break it
@@ -30,12 +30,23 @@ The three seams a user extends, each a few lines: :class:`ScrapShareSeed` (a
 ``BaseImputer``), :class:`NetStockRow` (a ``BaseConstraintBuilder``) and
 :func:`fourth_feed` (a synthetic feed through the Stage 1 API). The posterior-propagator
 seam is described by the notebook, not coded.
+
+Your own case
+-------------
+The helpers of ``10_your_case`` (#197): :func:`params_from_template` (a params family
+under the shipped template's header), :func:`register_feeds` (the acc built from its
+registered spec, the feeds run through ``run_feed``) and :func:`run_case`
+(``python -m pysuto run`` as a call).
 """
 
 from __future__ import annotations
 
 import contextlib
+import csv
 import dataclasses
+import subprocess
+import sys
+from pathlib import Path
 from typing import Callable, Optional
 
 import numpy as np
@@ -43,13 +54,16 @@ import pandas as pd
 import scipy.sparse as sp
 
 from pysuto._conditioning import condition_prior
-from pysuto.cases import toy
+from pysuto.acc import AccountingStructure, read_acc_spec_dir, write_build_record
+from pysuto.tutorial import toy
 from pysuto.clarabel_backend import ClarabelBackend
 from pysuto.constraints import (BaseConstraintBuilder, ConstraintBlock, FlowBoundsBuilder,
                                 anchors)
 from pysuto.constraints.naming import ROW_META_COLS, build_constraint_id
 from pysuto.impute import BaseImputer
 from pysuto.input_registry import InputRegistries
+from pysuto.feedpipe import FeedSpec, run_feed
+from pysuto.pipeline import ALL_STEPS
 from pysuto.registry import (
     ConstraintRunRegistry,
     DataFeedRegistry,
@@ -512,3 +526,93 @@ def run_seams(run_root, base: Optional[dict] = None, label: str = "toy_seams") -
         runs["imp"]).imputation_log.as_dataframe()
     return {"runs": {"feed": feeds, **runs},
             "n_seeded": int((log["imputer_id"] == "scrap_seed").sum())}
+
+
+# =============================================================================
+# Your own case (#197): the helpers of chapter 10
+# =============================================================================
+# A case outside the package needs three things its author does not want to type out:
+# a params family in the template's schema, a feed with its concordance maps, and a
+# Stage 1 that builds the acc from the registered spec and registers the feeds.
+
+def params_from_template(template, rows: "list[dict]", dest) -> Path:
+    """Write ``rows`` as a params family under the header of ``template``.
+
+    ``template`` is the shipped ``params_template.csv`` (``;``-separated; its ``#`` lines
+    are the column reference and two worked examples). The copy keeps the template's
+    columns and delimiter, and none of its examples: a row names columns of the template,
+    every other column is left blank.
+
+    Raises
+    ------
+    KeyError
+        A row names a column the template does not have; nothing is written.
+    """
+    lines = [ln for ln in Path(template).read_text(encoding="utf-8").splitlines()
+             if ln.strip() and not ln.startswith("#")]
+    columns = lines[0].split(";")
+    for row in rows:
+        unknown = sorted(set(row) - set(columns))
+        if unknown:
+            raise KeyError(f"{unknown} are not columns of {template}; its columns are "
+                           f"{';'.join(columns)}")
+    dest = Path(dest)
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    with dest.open("w", encoding="utf-8", newline="") as f:
+        writer = csv.DictWriter(f, columns, delimiter=";", lineterminator="\n")
+        writer.writeheader()
+        writer.writerows({c: row.get(c, "") for c in columns} for row in rows)
+    return dest
+
+
+def register_feeds(data_dir, acc_id: str, specs: "list[FeedSpec]") -> "dict[str, str]":
+    """Stage 1 of a case of your own, through the public API: build the accounting
+    structure from the acc spec registered under ``<data_dir>/input/acc/<acc_id>`` (the
+    structure and its build record go to ``<data_dir>/proc/acc``), then run each
+    :class:`~pysuto.feedpipe.FeedSpec` through :func:`~pysuto.feedpipe.run_feed`, which
+    reads the feed's registered ``values.csv``, ``conc.xlsx`` and ``meta.xlsx``.
+    Returns ``{feed_id: feed_run_id}``."""
+    data_dir  = Path(data_dir)
+    inputs    = InputRegistries.initialize(root=str(data_dir / "input"))
+    acc_dir   = data_dir / "proc" / "acc"
+    spec      = read_acc_spec_dir(inputs.acc.resolve(acc_id))
+    AccountingStructure.from_spec(spec, acc_id, storage_dir=str(acc_dir)).save()
+    write_build_record(str(acc_dir), inputs.acc.entry(acc_id))
+    return {s.feed_id: run_feed(s, acc_id=acc_id, data_dir=str(data_dir),
+                                diag=False).run_id for s in specs}
+
+
+def run_case(case: str, data_dir, *args: str) -> "dict[str, str]":
+    """Run ``python -m pysuto run --case <case> --data-dir <data_dir> <args>`` with this
+    interpreter, from the current working directory, and return ``{stage: run id}`` from
+    its stdout. The log lines it also prints are skipped; ``feed`` holds the feed run ids
+    as the command prints them, and a stage the command did not run maps to ``""``.
+    ``case`` is anything ``--case`` takes: an alias, a module or a path such as
+    ``./my_case.py``.
+
+    Raises
+    ------
+    RuntimeError
+        The command exited non-zero; the message carries the end of its stderr.
+    """
+    cmd = [sys.executable, "-m", "pysuto", "run", "--case", str(case),
+           "--data-dir", str(data_dir), *args]
+    done = subprocess.run(cmd, capture_output=True, text=True)
+    if done.returncode:
+        tail = "\n".join(done.stderr.strip().splitlines()[-12:])
+        raise RuntimeError(f"`python -m pysuto run --case {case}` exited "
+                           f"{done.returncode}:\n{tail}")
+    lines = [ln.split(None, 1) + [""] for ln in done.stdout.splitlines() if ln.strip()]
+    return {ln[0]: ln[1].strip() for ln in lines if ln[0] in ALL_STEPS}
+
+
+def check_10_1(table: pd.DataFrame, tailings: float, year: str = "2002") -> str:
+    """Exercise 10.1: the ``Content`` the Mill books into ``Tailings`` in ``year``, read
+    from a PSUT table, to 1 %."""
+    rows = table[(table["period"] == year) & (table["valuation"] == toy.CONTENT)
+                 & (table["to_sector"] == "Tailings")]
+    if len(rows) != 1:
+        raise ValueError(f"expected one Mill → Tailings row in {year}, found {len(rows)}")
+    expected = float(rows["val"].iloc[0])
+    toy._close(tailings, expected, f"Mill → Tailings {year}", rtol=1e-2)
+    return f"✓ 10.1  Mill → Tailings {year}: {expected:.3f} {toy.UNITS[toy.CONTENT]}"
