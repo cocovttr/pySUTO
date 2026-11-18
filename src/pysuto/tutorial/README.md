@@ -4,6 +4,7 @@ Notebooks on the toy case of the fictional metal orium. Install the tutorial ext
 
 ```
 pip install "pysuto[tutorial]"
+plotly_get_chrome -y              # once: Kaleido draws the chapter-06 Sankeys with Chrome
 python -m pysuto tutorial pysuto-tutorial
 cd pysuto-tutorial && jupyter lab 00_world.ipynb
 ```
