@@ -1,8 +1,8 @@
 """refresh_tutorial.py
 =====================
 The one way to refresh the executed outputs of the tutorial notebooks (#188). It copies
-the ten chapters out with ``python -m pysuto tutorial`` into a temporary folder, executes
-them in order on the ``python3`` kernel of the running interpreter, rewrites the
+the eleven chapters out with ``python -m pysuto tutorial`` into a temporary folder,
+executes them in order on the ``python3`` kernel of the running interpreter, rewrites the
 machine-specific prefixes of the outputs (the temporary folder, the installed or
 checked-out ``pysuto`` package directory, the home directory) to stable relative forms,
 and writes the notebooks back into ``src/pysuto/tutorial/``. It fails, writing nothing,
@@ -39,7 +39,11 @@ def _variants(path) -> list:
 def normalise(text: str, work: Path, tmp: Path, pkg: Path) -> str:
     """``text`` with the chapters' folder ``work``'s ``runs/`` as ``runs/``, the rest of
     the temporary folder ``tmp`` without its prefix, the ``pysuto`` package directory as
-    ``pysuto``, and the home directory as ``~``."""
+    ``pysuto``, and the home directory as ``~``. A ``path:<work>/`` provenance string
+    (``case_source``) is the exception: it keeps its shape as ``path:/path/to/tutorial/``,
+    still an absolute path."""
+    for p in _variants(work):
+        text = text.replace("path:" + p + "/", "path:/path/to/tutorial/")
     for p in _variants(work):
         text = text.replace(p + "/", "")
     for p in _variants(tmp):
@@ -70,21 +74,21 @@ def main(argv=None) -> int:
     subprocess.run([sys.executable, "-m", "pysuto", "tutorial", str(work)], cwd=tmp,
                    check=True)
     t0, out = time.time(), {}
-    for path in sorted(work.glob("0[0-9]_*.ipynb")):
+    for path in sorted(work.glob("[01][0-9]_*.ipynb")):
         t = time.time()
         nb = nbformat.read(path, as_version=4)
         NotebookClient(nb, timeout=TIMEOUT, kernel_name="python3",
                        resources={"metadata": {"path": str(work)}}).execute()
         out[path.name] = normalise(nbformat.writes(nb), work, tmp, pkg)
         print(f"{path.name:26s}{time.time() - t:6.1f} s", flush=True)
-    if len(out) != 10:
-        raise SystemExit(f"expected ten chapters, executed {len(out)}")
+    if len(out) != 11:
+        raise SystemExit(f"expected eleven chapters, executed {len(out)}")
     bad = {n: leaks(t, tmp) for n, t in out.items() if leaks(t, tmp)}
     if bad:
         raise SystemExit(f"machine-specific paths survive, nothing written: {bad}")
     for name, text in out.items():
         (PKG_DEST / name).write_text(text, encoding="utf-8")
-    print(f"ten chapters in {time.time() - t0:.1f} s; no /home/, temp-dir or home path "
+    print(f"eleven chapters in {time.time() - t0:.1f} s; no /home/, temp-dir or home path "
           f"in any of them; written to {PKG_DEST}")
     if not args.keep_tmp:
         import shutil

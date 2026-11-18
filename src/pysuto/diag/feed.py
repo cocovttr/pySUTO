@@ -15,17 +15,7 @@ from typing import Optional
 import numpy as np
 import pandas as pd
 
-from ._plot import _C, _savefig
-
-
-def _hist_bins(values: np.ndarray, n: int) -> int:
-    """``n``, or 1 when ``values`` span too narrow a range for ``n`` finite-sized bins.
-
-    NumPy ≥ 2 refuses such bins ("Too many bins for data range"); a feed with one cv
-    for every row gives CV_root values a few ulps apart.
-    """
-    edges = np.linspace(np.min(values), np.max(values), n + 1)
-    return n if np.all(np.diff(edges) > 0) else 1
+from ._plot import _C, _hist_bins, _savefig
 
 
 class FeedDiagnostics:

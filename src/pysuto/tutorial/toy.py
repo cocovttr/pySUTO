@@ -718,7 +718,8 @@ _CONC_ROWS_COPRODUCT = (
 def write_params(params_dir: PathLike, coproduct: bool = False) -> "dict[str, Path]":
     """Write the toy's ``conc``, ``eff`` and ``stripping_ratio`` CSVs as
     ``params_dir/<param_id>/current/params.csv`` in the project's params schema
-    (``data/input/params/params_template.csv``). Returns ``{param_id: path}``.
+    (``pysuto/tutorial/params_template.csv``, which ``python -m pysuto tutorial`` copies
+    out). Returns ``{param_id: path}``.
 
     ``coproduct`` adds the Dust concentration rows and pools both Smelting products on
     the ``effsmelting`` row (product ``*``, the Flow outputs of Smelting): Stage 3's agg

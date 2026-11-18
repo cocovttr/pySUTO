@@ -46,6 +46,16 @@ _STATUS = {"good": "#0ca30c", "warning": "#fab219", "critical": "#d03b3b"}
 _INK    = {"primary": "#0b0b0b", "muted": "#898781"}
 
 
+def _hist_bins(values: np.ndarray, n: int) -> int:
+    """``n``, or 1 when ``values`` span too narrow a range for ``n`` finite-sized bins.
+
+    NumPy >= 2 refuses such bins ("Too many bins for data range"); a feed with one cv
+    for every row gives CV_root values a few ulps apart.
+    """
+    edges = np.linspace(np.min(values), np.max(values), n + 1)
+    return n if np.all(np.diff(edges) > 0) else 1
+
+
 def _seq_cmap():
     """The default colormap for every continuous colour scale: viridis."""
     import matplotlib.pyplot as plt
