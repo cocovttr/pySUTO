@@ -477,7 +477,7 @@ Data-rich neighbourhoods (ρ ≈ 1) get the tight $\mathrm{cv}_\text{lo}$; data-
 2. if (1) is empty, mean $|f_\mathrm{agg}|$ over $(\text{sector\_from}, \text{valuation})$ — broader fallback;
 3. if (2) is also empty, the global median of finite, non-zero $|f_\mathrm{agg}|$.
 
-Only finite, non-zero values count at every level, so upstream-imputed zeros never pull the scale to zero. The previous single-level rule collapsed σ to 0 on ~40 k copper edges, which then pinned them at $\sigma_a = 10^{-6}$ via the constraints-side floor (see [REP/analysis_optim_const_copper_…_20260513_112419.md](REP/analysis_optim_const_copper_20260513_091054_65b9133e_20260513_112419.md)).
+Only finite, non-zero values count at every level, so upstream-imputed zeros never pull the scale to zero. The previous single-level rule collapsed σ to 0 on ~40 k copper edges, which then pinned them at $\sigma_a = 10^{-6}$ via the constraints-side floor (see [analysis_optim_const_copper_…_20260513_112419.md](docs/rep/analysis_optim_const_copper_20260513_091054_65b9133e_20260513_112419.md)).
 
 #### Classes
 
@@ -809,8 +809,6 @@ Without it, the full-G path falls back to `scipy.sparse.linalg.splu` — same an
 
 The full-G (legacy) path is **bound-blind**: it has no active set, so every hard inequality row enters as an equality (the block path linearises at the active set, #27). Per the spec (`docs/rep/plans/stage3_posterior_uncertainty_approach_A.md` §6), the closed form is also the **Laplace approximation** of the true posterior — acceptable for tightly-distributed flows but increasingly approximate for wide log-normal pedigree tails.
 
-See [`docs/rep/plans/stage5_uncprop_integration_plan.md`](docs/rep/plans/stage5_uncprop_integration_plan.md) for the full integration plan and the v1 scope cuts.
-
 ### Stage 6 — PSUT/PIOT builder
 
 Downstream of the solver: **materialise** the solved edge vector `a*` (`OptimResult.F_opt`) as numeric **physical supply-use tables (PSUT)** — supply `S`, use `U`, final use `Y`, plus boundary blocks `E`/`O`/`P` — per period and per valuation (`CC`, `Mass`), reusing the existing supply/use masks and the SB nodes' boundary roles. From each PSUT it builds the symmetric **physical input-output table (PIOT)** following PIOLab (Wieland et al. 2022) and Suh (2004) — by-products endogenised as negative inputs, then `A`, `Z`, `L = (I−A)⁻¹` over a full **MRIO** (region × flow) — and ships the classical analytics: footprints / embodied flows, embodied bilateral trade, ew-MFA headline indicators, and multipliers / SDA. v1 is point-estimate only (Stage-5 σ propagation deferred). Rationale and the deliberate *no pySUT / pymrio dependency* are recorded in [ADR 0007](docs/adr/0007-downstream-psut-piot-follows-piolab-suh-no-external-io-lib.md).
@@ -871,7 +869,7 @@ Run Stage 6 on the toy case in [tutorial/06_psut_piot.ipynb](src/pysuto/tutorial
 | [piot.py](src/pysuto/piot.py) | `PIOT`, `market_share_network`, `market_shares`, `CONSTRUCTS`, `LEVELS` | Stage-6 PIOT as a construct family: the market-share process network (`Z()`, `D()`, process-network `sankey()`), levels `A`/`L` (`x`, `y`, `A`, `L`), `intensity`, `footprint`, `embodied_trade`, `ew_mfa`, `multipliers`, `sda`; `suh_product` is a stub until #20. A derived view of a PSUT, never persisted. |
 | [_conditioning.py](src/pysuto/_conditioning.py) | `condition_prior`, `condition_sigma_c` | Shared σ_a / σ_c conditioning rules — guarantees uncprop sees the same effective prior the solver did. |
 | [diag/](src/pysuto/diag/) | `FeedDiagnostics`, `AggDiagnostic`, `ImpDiagnostic`, `ConstDiagnostic`, `SolverDiag`, `UncPropDiag`, `SweepDiag`, `sankey_figure`, `sankey_tables`, `SankeySpec`, `TruthDiag`; `stats/`: `CoverageDiagnostic`, `StatsDiagnostic`, `ConstStatsDiagnostic`, `SolverStatsDiagnostic`, `UncPropStatsDiagnostic`, `SweepStatsDiagnostic` | Cross-stage diagnostic plot suites (figures), row-level stats tables (CSVs), the Stage-6 supply-use Sankey (Plotly, lazy) and, for a synthetic case, every stage's estimate scored against its ground truth (`truth.py`: error by stage, calibration and coverage, residual rank). **Subpackage layout:** `feed.py`, `agg.py`, `imp.py`, `const.py`, `solver.py`, `uncprop.py`, `sweep.py`, `psut.py`, `truth.py`, `_plot.py`, `stats/{_core,coverage,val,const,solver,objective,uncprop,sweep}.py`. |
-| [tutorial/](src/pysuto/tutorial/) | `toy`: `ACC_SPEC`, `ACC_REF`, `build_acc`, `truth`, `world_totals`, `make_feeds`, `SyntheticFeed`, `write_params`, `write_inputs`, `CASE`, `run_stage1` … `run_stage6`, `soft_residuals`, `scoreboard`, `reveal`, `check_<chapter>_<n>`, `solution` | The tutorial: the eleven notebooks, the params template (`params_template.csv`) and the toy cases (`toy.py`, `toy_coproduct.py`, `toy_ext.py`), at the top of the import stack beside the stage drivers and `pysuto.cases`; `python -m pysuto tutorial DEST` copies the notebooks and the template out (#188, #197). `toy.py` is the **toy case** (#59): a three-region orium case generated from a planted ground truth, its three synthetic feeds, its params CSVs, and the six stages wired into a caller-chosen data dir (the drivers run it with `--case toy --data-dir <dir>`, #124); the tutorial's exercise hooks (#60). It declares its own labels, bound to roles (ADR 0034, #123), and registers no hard bands (#27). |
+| [tutorial/](src/pysuto/tutorial/) | `toy`: `ACC_SPEC`, `ACC_REF`, `build_acc`, `truth`, `world_totals`, `make_feeds`, `SyntheticFeed`, `write_params`, `write_inputs`, `CASE`, `run_stage1` … `run_stage6`, `soft_residuals`, `scoreboard`, `reveal`, `check_<chapter>_<n>`, `solution` | The tutorial: the eleven notebooks, the params template (`params_template.csv`) and the toy cases (`toy.py`, `toy_coproduct.py`, `toy_ext.py`), at the top of the import stack beside the stage drivers; `python -m pysuto tutorial DEST` copies the notebooks and the template out (#188, #197). `toy.py` is the **toy case** (#59): a three-region orium case generated from a planted ground truth, its three synthetic feeds, its params CSVs, and the six stages wired into a caller-chosen data dir (the drivers run it with `--case toy --data-dir <dir>`, #124); the tutorial's exercise hooks (#60). It declares its own labels, bound to roles (ADR 0034, #123), and registers no hard bands (#27). |
 
 ---
 
@@ -1380,7 +1378,7 @@ acc  →  relation  →  impute  →  constraints   (relation: the params reader
 collector  →  agg  →  impute  →  constraints  →  solver  →  uncprop
 _conditioning  ←  solver, uncprop          (shared σ-conditioning helper)
 knobs          ←  the stage drivers        (the --set / --run-id-file protocol)
-case           ←  cases, the stage drivers (CaseSpec; imports nothing from pysuto); its `resolve_case` reaches a bundled case only by `importlib.import_module` on a name → module string, at call time: the one sanctioned reference from the library to `pysuto.cases` and `pysuto.tutorial`, kept by the runtime layering test (`tests/test_case_resolution.py`)
+case           ←  the tutorial, the stage drivers (CaseSpec; imports nothing from pysuto); its `resolve_case` reaches a bundled case only by `importlib.import_module` on a name → module string, at call time: the one sanctioned reference from the library to `pysuto.tutorial`, kept by the runtime layering test (`tests/test_case_resolution.py`)
 stages         ←  cases, pipeline, the stage drivers (the Stage 2–6 bodies over a CaseSpec; driver-level code like the scripts, not the data layer, so it imports diag; never imports cases)
 cases, tutorial ──── top, beside the drivers and `python -m pysuto` (`__main__`): case instances and the toy cases (`pysuto.tutorial`, #188); never imported by the library
 pipeline       ←  stages, registry, logging (runs each step as a child of pysuto._step; never imports scripts/, the cases or the tutorial)
@@ -1406,7 +1404,7 @@ Each layer has a dedicated test file in `tests/`. There is no `conftest.py`: fix
 |---|---|
 | [test_accounting_structure.py](tests/test_accounting_structure.py) | `AccountingStructure` index, masks, bounds |
 | [test_acc_spec.py](tests/test_acc_spec.py) | The acc spec: dict, `acc.json` and ODS routes build one structure; reader, `RuleSet.from_tables` and validation seams; `scripts/acc.py` reader choice |
-| [test_case.py](tests/test_case.py) | The `CaseSpec`: a section's knobs are its UPPER_CASE fields, `--set` replaces them through `pysuto.knobs`' checks, a section serialises with functions by qualified name; the library never imports `pysuto.cases` (#120) |
+| [test_case.py](tests/test_case.py) | The `CaseSpec`: a section's knobs are its UPPER_CASE fields, `--set` replaces them through `pysuto.knobs`' checks, a section serialises with functions by qualified name; the library never imports `pysuto.tutorial` (#120) |
 | [test_acc_roles.py](tests/test_acc_roles.py) | Roles, not labels (#119): own-label save/load round-trip, role validation on build and load, the label-literal grep gate, acc compatibility by spec comparison, the copper `root.ods` role column |
 | [test_conc.py](tests/test_conc.py) | Concordance and `WeightMatrix` construction / sparse round-trip |
 | [test_unc.py](tests/test_unc.py) | Pedigree → CV formulas; CV-invariant Lp propagation invariants |
@@ -1440,10 +1438,10 @@ indistinguishable from real data once it reaches the model:
 | [test_icsg_2014_region_fill.py](tests/test_icsg_2014_region_fill.py) | Which country a row belongs to when the yearbook's label sits on the middle row of its block, and the sheet's own WORLD/TOTALS block ([ADR 0035](docs/adr/0035-the-yearbooks-label-is-not-on-the-row-it-owns.md)) |
 | [test_icsg_comb_renamed_collisions.py](tests/test_icsg_comb_renamed_collisions.py) | Rows a rename folds onto one key sum *within* a vintage; a cross-vintage restatement is left to the dedup ([ADR 0036](docs/adr/0036-a-renamed-type-is-a-second-stream-not-a-restatement.md)) |
 | [test_baci_quantity_recon.py](tests/test_baci_quantity_recon.py) | Value-implied Cu fraction detector, its two gates on each side of the band (above: raise; below: lower, the PNG kg-as-t regression), `g_ref` calibration, σ scale composition across sidecar files ([ADR 0033](docs/adr/0033-baci-quantity-contradicts-its-own-value.md)) |
-| [test_build_baci_reexport.py](tests/test_build_baci_reexport.py) | Re-export netting and its residual ledger ([ADR 0027](docs/adr/0027-re-exports-are-re-attributed-at-feed-time.md)) |
+| [test_feedprep_reexport.py](tests/test_feedprep_reexport.py) | Re-export netting and its residual ledger ([ADR 0027](docs/adr/0027-re-exports-are-re-attributed-at-feed-time.md)) |
 | [test_icsg_stock_levels.py](tests/test_icsg_stock_levels.py) | Every stock level the yearbooks print survives the parse: the 2014 exchange sheet, lone totals, reported zeros (a blank is not one), the U.S. producers row, the 2025 sheet's last year, whole region names, Korea's merged cell (#35) |
 | [test_icsg_nas.py](tests/test_icsg_nas.py) | Net addition to stock: one year's change within one vintage, newest vintage wins, `USC` / `MESC` sum their series, a lone or contradicted total is producer stock, no change in a total's takeover year, a reporting gap warns (#35) |
-| [test_build_trade_shares.py](tests/test_build_trade_shares.py) | Fan weights and the ADR 0024 domestic bound |
+| [test_feedprep_trade_shares.py](tests/test_feedprep_trade_shares.py) | Fan weights and the ADR 0024 domestic bound |
 
 The two tables above cover the core layers and the parse stage; `tests/` holds further modules for
 diagnostics, params and helpers not itemised here.
@@ -1455,11 +1453,24 @@ Run with `pytest tests/ -v` — **1,159 passing, 1 skipped** as of 2026-10-12 (i
 ## Installation
 
 ```bash
+pip install pysuto
+pip install "pysuto[tutorial]"     # Jupyter, Plotly and Kaleido, for the notebooks
+plotly_get_chrome -y               # once: Kaleido needs Chrome to write the Sankey PNGs
+pysuto tutorial DEST               # copies the eleven notebooks and the params template to DEST
+```
+
+Python 3.9 or newer is required. **Running a chain:** `python -m pysuto run` requires `--case` and `--data-dir`. `--case` takes one of three forms, resolved by `pysuto.case.resolve_case`: a bundled alias (`toy`, `toy_coproduct`), a dotted module on `sys.path` (`mylab.zinc`) or a file path (`./my_case.py`), each naming a module that declares a `CASE`. pySUTO ships no study case (ADR 0047); chapter `10_your_case` of the tutorial writes one. The copper chain runs only from a repository checkout (`--case scripts/copper.py`) with the licensed original data under `data/input/raw`, which the repository does not hold.
+
+**Development from a checkout:**
+
+```bash
 git clone https://github.com/florihu/pySUTO.git
 cd pySUTO
-pip install -e .
-pytest tests/ -v
+pip install -e ".[dev]"
+python -m pytest tests/
 ```
+
+**Reproduce the reference environment.** Bit-identity of the stored arrays is claimed in the environment pinned by [environment-reference.yml](environment-reference.yml) (linux-64, every build): `conda env create -f environment-reference.yml && conda activate pysuto-ref`. [environment.yml](environment.yml) builds a development environment on any platform.
 
 **Core dependencies (from `pyproject.toml`):** `numpy`, `pandas`, `scipy`, `pyarrow`, `clarabel`, `pyyaml`, `matplotlib` (the last is used only by [diag/](src/pysuto/diag/) for plotting).
 
