@@ -1,0 +1,77 @@
+param_id;param_type;description;a_sector_from;a_entity_from;a_region_from;a_sector_to;a_entity_to;a_region_to;a_time;a_valuation;b_sector_from;b_entity_from;b_region_from;b_sector_to;b_entity_to;b_region_to;b_time;b_valuation;value_nominal;unc_type;value_sd;value_min;value_max;pedigree_reliability;pedigree_completeness;pedigree_temporal_correlation;pedigree_geographical_correlation;pedigree_other_correlation;epsilon;bound_lower;bound_upper;source;comment
+# ── COLUMN REFERENCE ──────────────────────────────────────────────────────────────────────────────────────
+# param_id          Unique string key. MUST be underscore-free: it becomes the
+#                   constraint-id `variant` slot, and `_` is the id separator
+#                   (see constraints/naming._safe). Use e.g. effsmelting, conccosupply.
+# param_type        concentration | efficiency | stripping_ratio
+#                   stripping_ratio: a Mass→Mass ratio between two process OUTPUTS
+#                   (WR_Mass = stripping_ratio·Ore_Mass at Mining); not a CC recovery
+#                   fraction. Read by NetworkImputer (WR fill) + the ratio builders.
+# agg               blank | true. true = set-scoped: the ratio builders pool every
+#                   matched a-side edge against every matched b-side edge per
+#                   (region_to, time, valuation) bucket → one row Σb − r·Σa.
+#                   Used for pooled recipes, e.g. eff on (Concentrate + Scrap), and
+#                   for stock-change bounds. ParametricImputer skips agg rows.
+# description       Human-readable note
+#
+# Edge A and edge B together define a bidirectional linear constraint: f_b = coeff × f_a
+#   The imputer applies f_b = coeff × f_a when A is observed and B is missing,
+#   or f_a = f_b / coeff when B is observed and A is missing.
+#   Both edges are identified in root-system coordinates (acc_struct names).
+#
+# a_sector_from / a_sector_to / a_entity_from / a_entity_to
+#   Sector and entity names from the Sector_Entity sheet of root.ods.
+#   Use * to match any admissible value.
+#   Use same in a_region_to to require same-region edges (region_to == region_from).
+# a_region_from / a_region_to
+#   Region names from the Region sheet of root.ods, or * for all regions.
+#   same in a_region_to filters to same-region edges only.
+# a_time            Time period from the Time sheet, or * for all time steps.
+# a_valuation       Valuation name from the Valuation sheet (no wildcard).
+#
+# b_sector_from … b_valuation
+#   Same as A fields, with the additional binding keyword:
+#   same  →  bind to the value resolved for the corresponding A field in each match.
+#   Concentration rows: all B fields are same except b_valuation (which changes).
+#   Efficiency rows: b_region_from, b_region_to, b_time, b_valuation are same; sector/entity differ.
+#
+# ── UNCERTAINTY ──────────────────────────────────────────────────────────────────────────────────────────
+# unc_type          sd | min_max | pedigree
+# value_sd          [sd]       σ used directly
+# value_min/max     [min_max]  σ = (max − min) / 4  (2σ convention)
+# pedigree_*        [pedigree] Five Laner et al. (2016) scores 1–4 (1 = best):
+#                     reliability, completeness, temporal_correlation,
+#                     geographical_correlation, other_correlation
+#                   σ = PedigreeScores(...).total_cv() × value_nominal
+# epsilon           Relative model uncertainty added in quadrature: σ²_j += (ε·f_j)²
+#
+# ── PHYSICAL BOUNDS ──────────────────────────────────────────────────────────────────────────────────────
+# bound_lower       Physical minimum; filled values are clipped (default 0)
+# bound_upper       Physical maximum; blank = ∞. Use 1.0 for concentration / efficiency.
+#
+# ── PROVENANCE ───────────────────────────────────────────────────────────────────────────────────────────
+# source            Full citation string
+# comment           Any note
+#
+# ── EXAMPLES ─────────────────────────────────────────────────────────────────────────────────────────────
+#
+# CONCENTRATION (type: same edge, different valuation)
+# Two rows are needed per flow sector: one where the sector is the to-node (use direction)
+# and one where it is the from-node (supply direction).
+#
+# Concentrate/Flow grade — use-direction edges (to-node = Concentrate/Flow):
+conc_concentrate_use;concentration;Cu grade in Concentrate — use-direction edges;*;*;*;Concentrate;Flow;*;*;Mass;same;same;same;same;same;same;same;CC;0.275;min_max;;0.20;0.35;;;;;0.05;0.0;1.0;"Schlesinger et al. (2022, Ch.3)";~20-35% Cu; same binds all B fields to matched A values except valuation
+#
+# Concentrate/Flow grade — supply-direction edges (from-node = Concentrate/Flow):
+conc_concentrate_supply;concentration;Cu grade in Concentrate — supply-direction edges;Concentrate;Flow;*;*;*;*;*;Mass;same;same;same;same;same;same;same;CC;0.275;min_max;;0.20;0.35;;;;;0.05;0.0;1.0;"Schlesinger et al. (2022, Ch.3)";~20-35% Cu
+#
+# EFFICIENCY (type: different edges, same valuation and region/time)
+# Edge A = USE edge (input into process).  Edge B = SUPPLY edge (output from same process).
+# The process node appears as (a_sector_to, a_entity_to) = (b_sector_from, b_entity_from).
+# a_region_to=same enforces same-region USE edge; b_region_from/to and b_time inherit via same.
+#
+# SXEW Cu recovery:
+eff_sxew;efficiency;Cu recovery in SXEW process;Ore;Flow;*;SXEW;Process;same;*;CC;SXEW;Process;same;CSXEW;Flow;same;same;same;0.725;min_max;;0.60;0.85;;;;;0.05;;1.0;"Schlesinger et al. (2022, Ch.14-16)";;
+#
+# Flotation (MF) Cu recovery:
+eff_mf;efficiency;Cu recovery in Flotation (MF) process;Ore;Flow;*;MF;Process;same;*;CC;MF;Process;same;Concentrate;Flow;same;same;same;0.80;min_max;;0.70;0.90;;;;;0.05;;1.0;"Schlesinger et al. (2022, Ch.3)";;

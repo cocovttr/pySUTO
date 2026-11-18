@@ -30,12 +30,23 @@ The three seams a user extends, each a few lines: :class:`ScrapShareSeed` (a
 ``BaseImputer``), :class:`NetStockRow` (a ``BaseConstraintBuilder``) and
 :func:`fourth_feed` (a synthetic feed through the Stage 1 API). The posterior-propagator
 seam is described by the notebook, not coded.
+
+Your own case
+-------------
+The helpers of ``10_your_case`` (#197): :func:`params_from_template` (a params family
+under the shipped template's header), :func:`own_feed` (a feed with its concordance maps),
+:func:`stage1` (the acc built from its registered spec, the feeds registered) and
+:func:`run_case` (``python -m pysuto run`` as a call).
 """
 
 from __future__ import annotations
 
 import contextlib
+import csv
 import dataclasses
+import subprocess
+import sys
+from pathlib import Path
 from typing import Callable, Optional
 
 import numpy as np
@@ -43,6 +54,7 @@ import pandas as pd
 import scipy.sparse as sp
 
 from pysuto._conditioning import condition_prior
+from pysuto.acc import AccountingStructure, read_acc_spec_dir, write_build_record
 from pysuto.tutorial import toy
 from pysuto.clarabel_backend import ClarabelBackend
 from pysuto.constraints import (BaseConstraintBuilder, ConstraintBlock, FlowBoundsBuilder,
@@ -50,6 +62,7 @@ from pysuto.constraints import (BaseConstraintBuilder, ConstraintBlock, FlowBoun
 from pysuto.constraints.naming import ROW_META_COLS, build_constraint_id
 from pysuto.impute import BaseImputer
 from pysuto.input_registry import InputRegistries
+from pysuto.pipeline import ALL_STEPS
 from pysuto.registry import (
     ConstraintRunRegistry,
     DataFeedRegistry,
@@ -512,3 +525,116 @@ def run_seams(run_root, base: Optional[dict] = None, label: str = "toy_seams") -
         runs["imp"]).imputation_log.as_dataframe()
     return {"runs": {"feed": feeds, **runs},
             "n_seeded": int((log["imputer_id"] == "scrap_seed").sum())}
+
+
+# =============================================================================
+# Your own case (#197): the helpers of chapter 10
+# =============================================================================
+# A case outside the package needs three things its author does not want to type out:
+# a params family in the template's schema, a feed with its concordance maps, and a
+# Stage 1 that builds the acc from the registered spec and registers the feeds.
+
+def params_from_template(template, rows: "list[dict]", dest) -> Path:
+    """Write ``rows`` as a params family under the header of ``template``.
+
+    ``template`` is the shipped ``params_template.csv`` (``;``-separated; its ``#`` lines
+    are the column reference and two worked examples). The copy keeps the template's
+    columns and delimiter, and none of its examples: a row names columns of the template,
+    every other column is left blank.
+
+    Raises
+    ------
+    KeyError
+        A row names a column the template does not have; nothing is written.
+    """
+    lines = [ln for ln in Path(template).read_text(encoding="utf-8").splitlines()
+             if ln.strip() and not ln.startswith("#")]
+    columns = lines[0].split(";")
+    for row in rows:
+        unknown = sorted(set(row) - set(columns))
+        if unknown:
+            raise KeyError(f"{unknown} are not columns of {template}; its columns are "
+                           f"{';'.join(columns)}")
+    dest = Path(dest)
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    with dest.open("w", encoding="utf-8", newline="") as f:
+        writer = csv.DictWriter(f, columns, delimiter=";", lineterminator="\n")
+        writer.writeheader()
+        writer.writerows({c: row.get(c, "") for c in columns} for row in rows)
+    return dest
+
+
+def own_feed(feed_id: str, raw: pd.DataFrame, sectors: dict, regions: dict, units: dict,
+             variables: list, scores: tuple = (2, 3, 2, 2, 2)) -> toy.SyntheticFeed:
+    """A feed of your own, ready for :func:`stage1`: the table ``raw`` in the feed's
+    vocabulary, its concordance maps (source label to root label for sectors, regions and
+    valuations; ``variables`` binds raw columns to ``src_*`` roles as in chapter 01), and
+    its pedigree ``scores`` (reliability, completeness, temporal, geographical, other).
+    The time map is the identity on the years ``raw`` holds."""
+    maps = toy._maps(sectors, regions, units, variables)
+    years = sorted(raw["Year"].astype(str).unique())
+    maps["time_map_df"] = pd.DataFrame({"src_time": years, "root_time": years})
+    meta = dataclasses.replace(toy._metadata("survey"), feed_name=feed_id,
+                               dataset_link="synthetic (pysuto.tutorial.toy_ext.own_feed)",
+                               **dict(zip(_PEDIGREE_FIELDS, scores)))
+    return toy.SyntheticFeed(feed_id, raw, maps, meta)
+
+
+_PEDIGREE_FIELDS = ("reliability", "completeness", "temporal_correlation",
+                    "geographical_correlation", "other_correlation")
+
+
+def stage1(data_dir, acc_id: str, feeds: "dict[str, toy.SyntheticFeed]",
+           seed: int = 0) -> "dict[str, str]":
+    """Stage 1 of a case of your own: build the accounting structure from the acc spec
+    registered under ``<data_dir>/input/acc/<acc_id>`` (the structure and its build record
+    go to ``<data_dir>/proc/acc``), then register each feed under its ``feed_id``.
+    Returns ``{feed_id: feed_run_id}``; ``seed`` is recorded in every feed sidecar."""
+    data_dir  = Path(data_dir)
+    inputs    = InputRegistries.initialize(root=str(data_dir / "input"))
+    acc_entry = inputs.acc.entry(acc_id)
+    acc_dir   = data_dir / "proc" / "acc"
+    acc = AccountingStructure.from_spec(read_acc_spec_dir(inputs.acc.resolve(acc_id)),
+                                        acc_id, storage_dir=str(acc_dir))
+    acc.save()
+    write_build_record(str(acc_dir), acc_entry)
+    registry = DataFeedRegistry(odir=str(data_dir / "proc" / "feed" / "registry"))
+    registry.load_index()
+    return {fid: toy._register_synthetic_feed(feed, acc, acc_entry, registry, fid,
+                                              seed)[0].run_id
+            for fid, feed in feeds.items()}
+
+
+def run_case(case: str, data_dir, *args: str) -> "dict[str, str]":
+    """Run ``python -m pysuto run --case <case> --data-dir <data_dir> <args>`` with this
+    interpreter, from the current working directory, and return ``{stage: run id}`` from
+    its stdout (the log lines it also prints are skipped; ``feed`` holds the feed run ids, one per line, as the command prints them;
+    a stage the command did not run maps to ``""``). ``case`` is anything ``--case``
+    takes: an alias, a module or a path such as ``./my_case.py``.
+
+    Raises
+    ------
+    RuntimeError
+        The command exited non-zero; the message carries the end of its stderr.
+    """
+    cmd = [sys.executable, "-m", "pysuto", "run", "--case", str(case),
+           "--data-dir", str(data_dir), *args]
+    done = subprocess.run(cmd, capture_output=True, text=True)
+    if done.returncode:
+        tail = "\n".join(done.stderr.strip().splitlines()[-12:])
+        raise RuntimeError(f"`python -m pysuto run --case {case}` exited "
+                           f"{done.returncode}:\n{tail}")
+    lines = [ln.split(None, 1) + [""] for ln in done.stdout.splitlines() if ln.strip()]
+    return {ln[0]: ln[1].strip() for ln in lines if ln[0] in ALL_STEPS}
+
+
+def check_10_1(table: pd.DataFrame, tailings: float, year: str = "2002") -> str:
+    """Exercise 10.1: the ``Content`` the Mill books into ``Tailings`` in ``year``, read
+    from a PSUT table, to 1 %."""
+    rows = table[(table["period"] == year) & (table["valuation"] == toy.CONTENT)
+                 & (table["to_sector"] == "Tailings")]
+    if len(rows) != 1:
+        raise ValueError(f"expected one Mill → Tailings row in {year}, found {len(rows)}")
+    expected = float(rows["val"].iloc[0])
+    toy._close(tailings, expected, f"Mill → Tailings {year}", rtol=1e-2)
+    return f"✓ 10.1  Mill → Tailings {year}: {expected:.3f} {toy.UNITS[toy.CONTENT]}"
