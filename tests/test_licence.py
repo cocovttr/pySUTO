@@ -18,9 +18,17 @@ def test_the_code_licence_is_mit():
     assert "Copyright (c) 2026 Florian Huber" in text
 
 
-def test_the_tables_licence_is_cc_by_4():
+def test_the_tables_licence_grants_cc_by_4_to_the_decided_tables_only():
+    # #118 decision 1: acc, conc, eff and the masks; decision 5 holds the derived tables
+    # back until their licence check is recorded.
     text = (ROOT / "LICENSE-DATA").read_text(encoding="utf-8")
-    assert "CC BY 4.0" in text and "data/input/" in text
+    granted, withheld = text.split("No licence is granted yet", 1)
+    assert "CC BY 4.0" in granted
+    for path in ("data/input/acc/", "data/input/params/conc/", "data/input/params/eff/",
+                 "data/input/mask/"):
+        assert path in granted, path
+    for name in ("scrap_share", "stock_bounds", "ore_grade", "data/input/feed/"):
+        assert name not in granted and name in withheld, name
 
 
 def test_the_citation_file_names_the_author_and_the_licence():

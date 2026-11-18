@@ -2,15 +2,20 @@ Hand-authored input tables: Creative Commons Attribution 4.0 International (CC B
 
 Copyright (c) 2026 Florian Huber
 
-The hand-authored tables of this repository under data/input/ -- the accounting-structure
-specs (data/input/acc/), the feed concordances, metadata and weights (data/input/feed/),
-the parameter tables (data/input/params/) and the masks (data/input/mask/), in their
-current/ folders -- are licensed under CC BY 4.0:
-https://creativecommons.org/licenses/by/4.0/
+These tables of this repository are licensed under CC BY 4.0
+(https://creativecommons.org/licenses/by/4.0/):
+
+  data/input/acc/copper/current/      the accounting structure (root, rules, bounds, masks)
+  data/input/params/conc/current/     the concentrate-grade parameter tables and their sources
+  data/input/params/eff/current/      the efficiency parameter tables and their sources
+  data/input/mask/row/current/        the row masks
 
 You may share and adapt them for any purpose, provided you give appropriate credit, link
 to the licence and indicate whether changes were made.
 
-The original source data these tables describe (for example the ICSG and BACI releases)
-are not part of this repository and remain under their owners' terms. The code is
-licensed under the MIT License (LICENSE).
+No licence is granted yet for the other tables under data/input/: the feed concordances,
+metadata and weights (data/input/feed/) and the parameter tables icsg_aggregates,
+ore_grade, scrap_share, stock_bounds and stripping_ratio (data/input/params/). Several are
+statistics derived from licensed sources (ICSG, S&P), and their release waits for a
+recorded licence check. The original source data are not part of this repository and
+remain under their owners' terms. The code is licensed under the MIT License (LICENSE).
