@@ -65,6 +65,9 @@ raw-options = { fallback_version = "0.0.0+unknown" }
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/pysuto"]
+# The tutorial notebooks and their README ship as package data (#188); what a chapter
+# writes beside them never does.
+exclude = ["src/pysuto/tutorial/runs", "**/.ipynb_checkpoints"]
 
 [tool.hatch.build.targets.sdist]
 # Project history and working material stay in the repository; tests/ ships.

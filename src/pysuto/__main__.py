@@ -25,6 +25,11 @@ id(s) it produced (``feed`` lists its three feed runs), and nothing else; that i
 command's result, not a log. The log lines of the pipeline go to the logging handlers and
 ``<data-dir>/logs/``; each step's stdout and stderr are captured in
 ``<data-dir>/logs/pipeline/<label>_<step>.log``.
+
+``python -m pysuto tutorial [DEST]`` (#188) copies the ten tutorial notebooks and their
+README out of the installed package into a writable folder (default ``./pysuto-tutorial``,
+which must not exist or be empty); open ``00_world.ipynb`` there with the ``python3`` kernel
+(``pip install "pysuto[tutorial]"``).
 """
 
 from __future__ import annotations
@@ -36,6 +41,7 @@ import sys
 from pysuto.cases import add_case_arg, case_from_args
 from pysuto.logging import configure_file_logs
 from pysuto.pipeline import ALL_STEPS, Chain, Pipeline
+from pysuto.tutorial import copy_tutorial
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -55,12 +61,23 @@ def _parser() -> argparse.ArgumentParser:
                      help="Config passed to the imp and const steps only.")
     run.add_argument("--label", default=None,
                      help="Label of every run in the chain (default: the case id).")
+    tut = sub.add_parser("tutorial", help="Copy the tutorial notebooks into a folder.")
+    tut.add_argument("dest", nargs="?", default="pysuto-tutorial",
+                     help="Folder to write; must not exist or be empty "
+                          "(default ./pysuto-tutorial).")
     return parser
 
 
 def main(argv=None) -> int:
     parser = _parser()
     args = parser.parse_args(argv)
+    if args.command == "tutorial":
+        try:
+            written = copy_tutorial(args.dest)
+        except FileExistsError as exc:
+            parser.error(str(exc))
+        print(f"{len(written)} files written to {args.dest}; open 00_world.ipynb")
+        return 0
     case = case_from_args(parser, args)
     first, last = ALL_STEPS.index(args.first), ALL_STEPS.index(args.last)
     if first > last:
