@@ -216,6 +216,36 @@ def test_not_exactly_one_content_and_one_gross_valuation_raises(roles):
         AccountingStructure.from_spec(spec, "toy")
 
 
+@pytest.mark.parametrize("role", ["gross", "content"])
+def test_a_single_valuation_carries_both_roles(role):
+    """One quantity per structure (CarIO solves Mass and each carbon kind in its own run):
+    the one valuation, whichever role it declares, is bound to both roles."""
+    spec = dict(OWN_LABELS, valuations=[{"name": "Gross", "role": role}], bounds=[])
+    acc  = AccountingStructure.from_spec(spec, "one")
+    assert acc.valuation == ["Gross"]
+    assert acc.valuation_roles == ValuationRoles(content="Gross", gross="Gross")
+    two  = AccountingStructure.from_spec(OWN_LABELS, "two")
+    assert acc.n_edges * 2 == two.n_edges
+
+
+def test_a_single_valuation_round_trips_through_save_and_load(tmp_path):
+    spec = dict(OWN_LABELS, valuations=[{"name": "Content", "role": "content"}],
+                bounds=[])
+    acc  = AccountingStructure.from_spec(spec, "one", storage_dir=str(tmp_path))
+    acc.save()
+    loaded = AccountingStructure.load("one", storage_dir=str(tmp_path))
+    _assert_same(loaded, acc)
+    assert loaded.valuation_roles == ValuationRoles(content="Content", gross="Content")
+
+
+def test_three_valuations_still_need_exactly_one_content_and_one_gross():
+    spec = dict(COPPER_LABELS, valuations=[{"name": "Mass", "role": "gross"},
+                                           {"name": "CF",   "role": "content"},
+                                           {"name": "CB",   "role": "content"}])
+    with pytest.raises(ValueError, match="exactly one content and one gross"):
+        AccountingStructure.from_spec(spec, "toy")
+
+
 def test_a_valuation_without_a_role_raises_naming_the_key():
     spec = copy.deepcopy(COPPER_LABELS)
     del spec["valuations"][1]["role"]
