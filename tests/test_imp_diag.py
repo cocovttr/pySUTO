@@ -348,8 +348,9 @@ def test_imp_diag_filenames_have_no_prefix(acc, tmp_path):
 
 
 def test_imp_diag_plots_fills_that_share_one_cv(acc, tmp_path):
-    """The CV panel of a one-feed case (#197): every filled edge has CV 0.1 to rounding
-    (not exactly: numpy 2 raises only on a range of 1e-17, not of 0)."""
+    """The CV panel of a one-feed case (#197): every filled edge has CV 0.1 up to a few
+    ulps, and numpy 2 refuses 60 bins of such a range ("Too many bins for data range");
+    exactly equal CVs would be drawn."""
     from pysuto.diag import ImpDiagnostic
 
     fills = [{"edge_id": i, "step": 1, "method": "time_linear", "f_after": f,

@@ -15,7 +15,7 @@ from typing import Optional
 import numpy as np
 import pandas as pd
 
-from ._plot import _C, _bins, _grouped_box_grid, _savefig
+from ._plot import _C, _grouped_box_grid, _hist_bins, _savefig
 
 
 class ImpDiagnostic:
@@ -419,7 +419,8 @@ class ImpDiagnostic:
             vals = fv[np.isfinite(fv) & (fv > 0)]
             if not len(vals):
                 continue
-            ax.hist(np.log10(vals), bins=_bins(np.log10(vals)), alpha=0.45,
+            logs = np.log10(vals)
+            ax.hist(logs, bins=_hist_bins(logs, 60), alpha=0.45,
                     color=self._step_color[lbl], label=lbl,
                     density=True, histtype="stepfilled", edgecolor="none")
         # The dashed 1995 reference curve is redundant once the whole panel is
@@ -460,7 +461,7 @@ class ImpDiagnostic:
             vals = np.log10(cv)
         else:
             return
-        ax.hist(vals, bins=_bins(vals), density=True, histtype="step",
+        ax.hist(vals, bins=_hist_bins(vals, 60), density=True, histtype="step",
                 color="black", linestyle="--", linewidth=1.4,
                 label=f"ref {year}")
 
@@ -503,7 +504,8 @@ class ImpDiagnostic:
             vals = cv[np.isfinite(cv) & (cv > 0)]
             if not len(vals):
                 continue
-            ax.hist(np.log10(vals), bins=_bins(np.log10(vals)), alpha=0.45,
+            logs = np.log10(vals)
+            ax.hist(logs, bins=_hist_bins(logs, 60), alpha=0.45,
                     color=self._step_color[lbl], label=lbl,
                     density=True, histtype="stepfilled", edgecolor="none")
         for ref in (0.1, 1.0, 10.0, 100.0):

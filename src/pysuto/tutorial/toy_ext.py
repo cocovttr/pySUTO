@@ -34,9 +34,9 @@ seam is described by the notebook, not coded.
 Your own case
 -------------
 The helpers of ``10_your_case`` (#197): :func:`params_from_template` (a params family
-under the shipped template's header), :func:`own_feed` (a feed with its concordance maps),
-:func:`stage1` (the acc built from its registered spec, the feeds registered) and
-:func:`run_case` (``python -m pysuto run`` as a call).
+under the shipped template's header), :func:`register_feeds` (the acc built from its
+registered spec, the feeds run through ``run_feed``) and :func:`run_case`
+(``python -m pysuto run`` as a call).
 """
 
 from __future__ import annotations
@@ -62,6 +62,7 @@ from pysuto.constraints import (BaseConstraintBuilder, ConstraintBlock, FlowBoun
 from pysuto.constraints.naming import ROW_META_COLS, build_constraint_id
 from pysuto.impute import BaseImputer
 from pysuto.input_registry import InputRegistries
+from pysuto.feedpipe import FeedSpec, run_feed
 from pysuto.pipeline import ALL_STEPS
 from pysuto.registry import (
     ConstraintRunRegistry,
@@ -564,53 +565,30 @@ def params_from_template(template, rows: "list[dict]", dest) -> Path:
     return dest
 
 
-def own_feed(feed_id: str, raw: pd.DataFrame, sectors: dict, regions: dict, units: dict,
-             variables: list, scores: tuple = (2, 3, 2, 2, 2)) -> toy.SyntheticFeed:
-    """A feed of your own, ready for :func:`stage1`: the table ``raw`` in the feed's
-    vocabulary, its concordance maps (source label to root label for sectors, regions and
-    valuations; ``variables`` binds raw columns to ``src_*`` roles as in chapter 01), and
-    its pedigree ``scores`` (reliability, completeness, temporal, geographical, other).
-    The time map is the identity on the years ``raw`` holds."""
-    maps = toy._maps(sectors, regions, units, variables)
-    years = sorted(raw["Year"].astype(str).unique())
-    maps["time_map_df"] = pd.DataFrame({"src_time": years, "root_time": years})
-    meta = dataclasses.replace(toy._metadata("survey"), feed_name=feed_id,
-                               dataset_link="synthetic (pysuto.tutorial.toy_ext.own_feed)",
-                               **dict(zip(_PEDIGREE_FIELDS, scores)))
-    return toy.SyntheticFeed(feed_id, raw, maps, meta)
-
-
-_PEDIGREE_FIELDS = ("reliability", "completeness", "temporal_correlation",
-                    "geographical_correlation", "other_correlation")
-
-
-def stage1(data_dir, acc_id: str, feeds: "dict[str, toy.SyntheticFeed]",
-           seed: int = 0) -> "dict[str, str]":
-    """Stage 1 of a case of your own: build the accounting structure from the acc spec
-    registered under ``<data_dir>/input/acc/<acc_id>`` (the structure and its build record
-    go to ``<data_dir>/proc/acc``), then register each feed under its ``feed_id``.
-    Returns ``{feed_id: feed_run_id}``; ``seed`` is recorded in every feed sidecar."""
+def register_feeds(data_dir, acc_id: str, specs: "list[FeedSpec]") -> "dict[str, str]":
+    """Stage 1 of a case of your own, through the public API: build the accounting
+    structure from the acc spec registered under ``<data_dir>/input/acc/<acc_id>`` (the
+    structure and its build record go to ``<data_dir>/proc/acc``), then run each
+    :class:`~pysuto.feedpipe.FeedSpec` through :func:`~pysuto.feedpipe.run_feed`, which
+    reads the feed's registered ``values.csv``, ``conc.xlsx`` and ``meta.xlsx``.
+    Returns ``{feed_id: feed_run_id}``."""
     data_dir  = Path(data_dir)
     inputs    = InputRegistries.initialize(root=str(data_dir / "input"))
-    acc_entry = inputs.acc.entry(acc_id)
     acc_dir   = data_dir / "proc" / "acc"
-    acc = AccountingStructure.from_spec(read_acc_spec_dir(inputs.acc.resolve(acc_id)),
-                                        acc_id, storage_dir=str(acc_dir))
-    acc.save()
-    write_build_record(str(acc_dir), acc_entry)
-    registry = DataFeedRegistry(odir=str(data_dir / "proc" / "feed" / "registry"))
-    registry.load_index()
-    return {fid: toy._register_synthetic_feed(feed, acc, acc_entry, registry, fid,
-                                              seed)[0].run_id
-            for fid, feed in feeds.items()}
+    spec      = read_acc_spec_dir(inputs.acc.resolve(acc_id))
+    AccountingStructure.from_spec(spec, acc_id, storage_dir=str(acc_dir)).save()
+    write_build_record(str(acc_dir), inputs.acc.entry(acc_id))
+    return {s.feed_id: run_feed(s, acc_id=acc_id, data_dir=str(data_dir),
+                                diag=False).run_id for s in specs}
 
 
 def run_case(case: str, data_dir, *args: str) -> "dict[str, str]":
     """Run ``python -m pysuto run --case <case> --data-dir <data_dir> <args>`` with this
     interpreter, from the current working directory, and return ``{stage: run id}`` from
-    its stdout (the log lines it also prints are skipped; ``feed`` holds the feed run ids, one per line, as the command prints them;
-    a stage the command did not run maps to ``""``). ``case`` is anything ``--case``
-    takes: an alias, a module or a path such as ``./my_case.py``.
+    its stdout. The log lines it also prints are skipped; ``feed`` holds the feed run ids
+    as the command prints them, and a stage the command did not run maps to ``""``.
+    ``case`` is anything ``--case`` takes: an alias, a module or a path such as
+    ``./my_case.py``.
 
     Raises
     ------

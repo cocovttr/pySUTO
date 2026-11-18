@@ -12,7 +12,7 @@ import os
 
 import numpy as np
 
-from ._plot import _C, _bins, _savefig
+from ._plot import _C, _hist_bins, _savefig
 
 
 class AggDiagnostic:
@@ -200,7 +200,8 @@ class AggDiagnostic:
         f_pos = np.abs(f_agg[coverage])
         f_pos = f_pos[f_pos > 0]
         if f_pos.size:
-            ax.hist(np.log10(f_pos), bins=_bins(np.log10(f_pos)), color=_C["blue"], alpha=0.8)
+            logs = np.log10(f_pos)
+            ax.hist(logs, bins=_hist_bins(logs, 60), color=_C["blue"], alpha=0.8)
         ax.set_title("|f_agg|  (log10)", fontweight="bold")
         ax.set_xlabel("log10 |f_agg|")
         ax.set_ylabel("count")
@@ -211,7 +212,8 @@ class AggDiagnostic:
         s_pos = sigma_agg[coverage]
         s_pos = s_pos[s_pos > 0]
         if s_pos.size:
-            ax.hist(np.log10(s_pos), bins=_bins(np.log10(s_pos)), color=_C["orange"], alpha=0.8)
+            logs = np.log10(s_pos)
+            ax.hist(logs, bins=_hist_bins(logs, 60), color=_C["orange"], alpha=0.8)
         ax.set_title("σ_agg  (log10)", fontweight="bold")
         ax.set_xlabel("log10 σ_agg")
         ax.set_ylabel("count")
@@ -223,7 +225,8 @@ class AggDiagnostic:
             cv_agg = np.where(np.abs(f_agg) > 0, sigma_agg / np.abs(f_agg), np.nan)
         cv_valid = cv_agg[coverage & np.isfinite(cv_agg) & (cv_agg > 0)]
         if cv_valid.size:
-            ax.hist(np.log10(cv_valid), bins=_bins(np.log10(cv_valid)), color=_C["purple"], alpha=0.8)
+            logs = np.log10(cv_valid)
+            ax.hist(logs, bins=_hist_bins(logs, 60), color=_C["purple"], alpha=0.8)
         for ref, lbl in [(0.1, "0.1"), (1.0, "1"), (10.0, "10"), (100.0, "100")]:
             ax.axvline(np.log10(ref), color=_C["red"], lw=0.8, ls="--", alpha=0.6)
             ax.text(np.log10(ref), ax.get_ylim()[1] * 0.95, lbl,

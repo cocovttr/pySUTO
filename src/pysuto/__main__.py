@@ -28,8 +28,8 @@ command's result, not a log. The log lines of the pipeline go to the logging han
 
 ``python -m pysuto tutorial [DEST]`` (#188) copies the eleven tutorial notebooks, their
 README and the params template out of the installed package into a writable folder
-(default ``./pysuto-tutorial``, which must not exist or be empty); open ``00_world.ipynb`` there with the ``python3`` kernel
-(``pip install "pysuto[tutorial]"``).
+(default ``./pysuto-tutorial``, which must not exist or be empty); open
+``00_world.ipynb`` there with the ``python3`` kernel (``pip install "pysuto[tutorial]"``).
 """
 
 from __future__ import annotations

@@ -9,8 +9,9 @@ import json
 import pandas as pd
 import pytest
 
+from pysuto.feedpipe import FeedSpec
 from pysuto.registry import DataFeedRegistry
-from pysuto.tutorial import PACKAGE_DIR, toy, toy_ext
+from pysuto.tutorial import PACKAGE_DIR, toy_ext
 
 TEMPLATE = PACKAGE_DIR / "params_template.csv"
 
@@ -42,29 +43,62 @@ def test_a_row_naming_a_column_the_template_lacks_raises_and_writes_nothing(tmp_
     assert not (tmp_path / "params.csv").exists()
 
 
-def test_a_feed_of_ones_own_maps_the_years_it_holds_and_carries_its_pedigree():
-    raw = pd.DataFrame({"Year": ["2001", "2002"], "Region": "Aland", "Material": "ore",
-                        "Unit": "kt", "Value": [1.0, 2.0]})
-    maps = dict(sectors={"ore": "Deposit"}, regions={"Aland": "Aland"},
-                units={"kt": "Gross"}, variables=[("Year", "src_time")])
-    feed = toy_ext.own_feed("gauge", raw, **maps)
-    assert feed.feed_id == feed.metadata.feed_name == "gauge"
-    assert feed.maps["time_map_df"]["src_time"].tolist() == ["2001", "2002"]
-    good = toy_ext.own_feed("gauge", raw, scores=(1, 1, 1, 1, 1), **maps)
-    assert (good.metadata.to_pedigree_scores().total_cv()
-            < feed.metadata.to_pedigree_scores().total_cv())
+ACC = {
+    "sectors": [{"name": "Deposit", "entity": "SB", "sub": "Raw", "role": "nature"},
+                {"name": "Mill", "entity": "Process"},
+                {"name": "Concentrate", "entity": "Flow"},
+                {"name": "Use", "entity": "SB", "sub": "Demand", "role": "final_demand"}],
+    "regions": ["Aland"],
+    "valuations": [{"name": "Gross", "role": "gross"}, {"name": "Content", "role": "content"}],
+    "times": ["2001", "2002"],
+    "supply": {"Mill": ["Concentrate"]},
+    "use": {"Deposit": ["Mill"], "Concentrate": ["Use"]},
+    "tradable": [],
+    "accounting": [{"from": "Process", "to": "Flow", "same_region": True},
+                   {"from": "Flow", "to": "SB", "same_region": False},
+                   {"from": "SB", "to": "Process", "same_region": True}],
+}
 
 
-def test_stage1_builds_the_acc_from_the_registered_spec_and_registers_each_feed(tmp_path):
-    toy.write_inputs(tmp_path)
-    feed = toy.make_feeds(toy.truth())["survey"]
-    ids = toy_ext.stage1(tmp_path, toy.ACC_ID, {"survey": feed}, seed=7)
-    assert list(ids) == ["survey"]
-    assert (tmp_path / "proc" / "acc" / toy.ACC_ID).is_dir()
+def _write_inputs(root) -> None:
+    acc = root / "input" / "acc" / "mycase" / "current"
+    feed = root / "input" / "feed" / "gauge" / "current"
+    acc.mkdir(parents=True)
+    feed.mkdir(parents=True)
+    (acc / "acc.json").write_text(json.dumps(ACC))
+    pd.DataFrame({"Year": ["2001", "2002"], "Region": "Aland", "Material": "ore feed",
+                  "Unit": "kt", "Value": [98.0, 103.5]}).to_csv(feed / "values.csv",
+                                                                 index=False)
+    tables = {"sector_map": (["ore feed"], ["Deposit"]), "region_map": (["Aland"], ["Aland"]),
+              "time_map": (["2001", "2002"], ["2001", "2002"]),
+              "valuation_map": (["kt"], ["Gross"])}
+    with pd.ExcelWriter(feed / "conc.xlsx") as xl:
+        for name, (src, root_) in tables.items():
+            key = name[:-4]
+            pd.DataFrame({f"src_{key}": src, f"root_{key}": root_}).to_excel(
+                xl, sheet_name=name, index=False)
+        pd.DataFrame([("Year", "src_time"), ("Material", "src_sector_from"),
+                      ("Region", "src_region_from"), ("Region", "src_region_to"),
+                      ("Unit", "src_valuation")], columns=["raw_var", "src_var"]
+                     ).to_excel(xl, sheet_name="var_map", index=False)
+
+
+def _load_tables(path) -> dict:
+    return pd.read_excel(path, sheet_name=None, dtype=str)
+
+
+def test_register_feeds_builds_the_acc_and_runs_each_feed_spec_through_run_feed(tmp_path):
+    _write_inputs(tmp_path)
+    spec = FeedSpec("gauge", load_raw=lambda p: pd.read_csv(p, dtype={"Year": str}),
+                    load_tables=_load_tables)
+    ids = toy_ext.register_feeds(tmp_path, "mycase", [spec])
+    assert list(ids) == ["gauge"]
+    assert (tmp_path / "proc" / "acc" / "mycase").is_dir()
     registry = DataFeedRegistry(odir=str(tmp_path / "proc" / "feed" / "registry"))
     registry.load_index()
-    sidecar = registry.load_sidecar(ids["survey"])
-    assert sidecar["label"] == "survey" and sidecar["stage_config"]["seed"] == 7
+    sidecar = registry.load_sidecar(ids["gauge"])
+    assert sidecar["label"] == "gauge"
+    assert sidecar["parents"]["inputs"]["acc"]["id"] == "mycase"
 
 
 def test_run_case_takes_a_path_and_returns_the_run_ids_the_command_printed(
