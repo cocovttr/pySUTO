@@ -1205,8 +1205,7 @@ class AccountingStructure:
         self.A_nodes        = self._build_node_mask()
         self.A              = self._build_tensor()
         self.edge_index     = self._build_edge_index()
-        self.edge_index_all = self._build_edge_index(admissible_only=False)
-        self.n_edges_all    = len(self.edge_index_all)
+        self.n_edges_all    = n_theoretical         # edge_index_all is built on demand
 
         # Report edge reduction
         n_after_node_rules = int(self.A_nodes.nnz) * len(self.time_range) * len(self.valuation)
@@ -1598,6 +1597,10 @@ class AccountingStructure:
 
     def _build_node_mask(self) -> sp.csr_matrix:
         self.logger.info("Building 2-D node admissibility mask...")
+        if self.ruleset is not None:
+            c0, c1 = self._ruleset_node_pairs(admissible_edges_only=False)
+            data = np.ones(len(c0), dtype=np.int8)
+            return sp.csr_matrix((data, (c0, c1)), shape=(self.n_nodes, self.n_nodes))
         c0, c1 = [], []
         keys = list(self.id_to_node.values())
 
@@ -1620,6 +1623,10 @@ class AccountingStructure:
 
     def _build_tensor(self) -> "_SparseCOO4D":
         self.logger.info("Building 4-D admissibility tensor...")
+        shape = (self.n_nodes, self.n_nodes, self.n_timeps, self.n_valtns)
+        if self.ruleset is not None:
+            coords = self._ruleset_edge_coords()
+            return _SparseCOO4D(np.ones(coords.shape[1], dtype=np.int8), coords, shape)
         c0, c1, c2, c3 = [], [], [], []
         keys = list(self.id_to_node.values())
 
@@ -1647,6 +1654,8 @@ class AccountingStructure:
     # ------------------------------------------------------------------
 
     def _build_edge_index(self, admissible_only=True) -> pd.DataFrame:
+        if self.ruleset is not None or not admissible_only:
+            return self._edge_index_frame(admissible_only)
         rows, cols, times, vals, edge_ids = [], [], [], [], []
         edge_id = 0
         keys    = list(self.id_to_node.values())
@@ -1679,6 +1688,91 @@ class AccountingStructure:
             "time":      times,
             "valuation": vals,
         })
+
+    # ------------------------------------------------------------------
+    # RuleSet path, vectorised: edges from the rule pairs, not from node pairs
+    # ------------------------------------------------------------------
+
+    def _ruleset_node_pairs(self, admissible_edges_only: bool = True) -> tuple:
+        """``(from_id, to_id)`` int64 arrays of the node pairs the RuleSet admits, sorted
+        by ``(from_id, to_id)`` — the order of the node-pair loops they replace.
+
+        A pair is node-admissible when its sector pair is a supply or use pair and its
+        entity pair is in Accounting, in any regions (``admissible_edges_only=False``,
+        :meth:`_node_pair_admissible_ruleset`); it is edge-admissible when, in addition,
+        a same-region pair has equal regions (:meth:`_edge_admissible_ruleset`). Built
+        per sector pair from the sectors' node ids, so the cost grows with the rule pairs
+        × regions², not with the nodes².
+        """
+        ni = self.node_index
+        by_sector = {
+            sec: (g.index.to_numpy(dtype=np.int64), g["region"].to_numpy())
+            for sec, g in ni.groupby("sector", sort=False)
+        }
+        entity = dict(zip(ni["sector"], ni["entity"]))
+        rs = self.ruleset
+        froms, tos = [], []
+        for sf, st in rs.all_pairs:
+            if sf not in by_sector or st not in by_sector:
+                continue
+            ef, et = entity[sf], entity[st]
+            if (ef, et) not in rs.accounting:
+                continue
+            ids_f, reg_f = by_sector[sf]
+            ids_t, reg_t = by_sector[st]
+            ii = np.repeat(ids_f, len(ids_t))
+            jj = np.tile(ids_t, len(ids_f))
+            if admissible_edges_only and rs.requires_same_region(sf, st, ef, et):
+                keep = np.repeat(reg_f, len(reg_t)) == np.tile(reg_t, len(reg_f))
+                ii, jj = ii[keep], jj[keep]
+            froms.append(ii)
+            tos.append(jj)
+        if not froms:
+            return np.empty(0, dtype=np.int64), np.empty(0, dtype=np.int64)
+        c0, c1 = np.concatenate(froms), np.concatenate(tos)
+        order = np.lexsort((c1, c0))
+        return c0[order], c1[order]
+
+    def _ruleset_edge_coords(self) -> np.ndarray:
+        """``(4, n)`` int64 coordinates (from, to, time, valuation) of the admissible
+        edges, in edge-id order: node pairs ascending, then time, then valuation."""
+        c0, c1 = self._ruleset_node_pairs()
+        tv = self.n_timeps * self.n_valtns
+        return np.vstack([
+            np.repeat(c0, tv),
+            np.repeat(c1, tv),
+            np.tile(np.repeat(np.arange(self.n_timeps, dtype=np.int64), self.n_valtns), len(c0)),
+            np.tile(np.arange(self.n_valtns, dtype=np.int64), len(c0) * self.n_timeps),
+        ])
+
+    def _edge_index_frame(self, admissible_only: bool) -> pd.DataFrame:
+        """The edge index the loops in :meth:`_build_edge_index` would return: the
+        admissible edges (RuleSet path), or every node pair × time × valuation."""
+        if admissible_only:
+            c0, c1, t_idx, v_idx = self._ruleset_edge_coords()
+        else:
+            n, tv = self.n_nodes, self.n_timeps * self.n_valtns
+            ids   = np.arange(n, dtype=np.int64)
+            c0    = np.repeat(ids, n * tv)
+            c1    = np.tile(np.repeat(ids, tv), n)
+            t_idx = np.tile(np.repeat(np.arange(self.n_timeps), self.n_valtns), n * n)
+            v_idx = np.tile(np.arange(self.n_valtns), n * n * self.n_timeps)
+        frame = pd.DataFrame({
+            "edge_id":   np.arange(len(c0), dtype=np.int64),
+            "from_id":   c0,
+            "to_id":     c1,
+            "time":      np.asarray(self.time_range, dtype=object)[t_idx],
+            "valuation": np.asarray(self.valuation,  dtype=object)[v_idx],
+        })
+        if admissible_only:
+            self.n_edges = len(frame)
+        return frame
+
+    @cached_property
+    def edge_index_all(self) -> pd.DataFrame:
+        """Every node pair × time × valuation, admissible or not; built on first access
+        (n_nodes² rows per period and valuation: never persisted)."""
+        return self._edge_index_frame(admissible_only=False)
 
     # ------------------------------------------------------------------
     # compress  (unchanged)
@@ -1783,7 +1877,6 @@ class AccountingStructure:
         sp.save_npz(os.path.join(path, "A_nodes.npz"), self.A_nodes)
 
         self.edge_index.to_csv(    os.path.join(path, "edge_index.csv"),     index=False)
-        self.edge_index_all.to_csv(os.path.join(path, "edge_index_all.csv"), index=False)
         self.node_index.to_csv(    os.path.join(path, "node_index.csv"),     index=False)
         self.root_nodes.to_csv(    os.path.join(path, "root_nodes.csv"),     index=False)
 
@@ -1833,10 +1926,8 @@ class AccountingStructure:
         obj.A_nodes  = sp.load_npz(os.path.join(path, "A_nodes.npz"))
 
         obj.edge_index     = pd.read_csv(os.path.join(path, "edge_index.csv"))
-        obj.edge_index_all = pd.read_csv(os.path.join(path, "edge_index_all.csv"))
         # Ensure time column is string — pandas infers year integers from CSV
         obj.edge_index["time"]     = obj.edge_index["time"].astype(str)
-        obj.edge_index_all["time"] = obj.edge_index_all["time"].astype(str)
         obj.root_nodes     = pd.read_csv(os.path.join(path, "root_nodes.csv"))
         obj.node_index     = pd.read_csv(os.path.join(path, "node_index.csv"))
         if "entity_sub" not in obj.node_index.columns:
@@ -1860,7 +1951,7 @@ class AccountingStructure:
         obj.n_timeps    = len(obj.time_range)
         obj.n_valtns    = len(obj.valuation)
         obj.n_edges     = len(obj.edge_index)
-        obj.n_edges_all = len(obj.edge_index_all)
+        obj.n_edges_all = obj.n_nodes * obj.n_nodes * obj.n_timeps * obj.n_valtns
         obj.time_to_idx = {t: i for i, t in enumerate(obj.time_range)}
         obj.val_to_idx  = {v: i for i, v in enumerate(obj.valuation)}
         obj.rules       = []

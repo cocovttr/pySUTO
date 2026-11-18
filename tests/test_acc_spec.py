@@ -392,7 +392,7 @@ def test_acc_script_builds_from_acc_json_what_it_builds_from_the_ods_files(tmp_p
     _write_json_case(tmp_path / "json" / "acc" / "toy" / "current")
     _run_acc_script(monkeypatch, tmp_path, tmp_path / "ods",  tmp_path / "out_ods")
     _run_acc_script(monkeypatch, tmp_path, tmp_path / "json", tmp_path / "out_json")
-    for name in ("edge_index.csv", "edge_index_all.csv", "node_index.csv",
+    for name in ("edge_index.csv", "node_index.csv",
                  "root_nodes.csv", "bounds_l.npy", "bounds_u.npy", "masks_user.npz"):
         assert ((tmp_path / "out_json" / "toy" / name).read_bytes()
                 == (tmp_path / "out_ods" / "toy" / name).read_bytes()), name

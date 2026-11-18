@@ -6,6 +6,13 @@ is byte-identical in `edge_index.csv`, `edge_index_all.csv`, `node_index.csv`,
 `root_nodes.csv`, `bounds_l.npy`, `bounds_u.npy` and `masks_user.npz` (854,460 admissible
 edges); `acc/copper` v4 is not re-versioned.
 
+Amended 2026-11-18 (`feat/vectorised-edges`): `edge_index_all.csv` is no longer written.
+`edge_index_all` lists every node pair × period × valuation (n_nodes² rows per period and
+valuation; 2.7 bn for a 7,542-node, 16-year, 3-valuation case) and is built on first access;
+`n_edges_all` is that count, computed. The RuleSet path builds the node mask, the tensor and
+the edge index from the rule pairs instead of looping over every node pair, in the same edge
+order (`tests/test_acc_vectorised.py` checks it against the per-pair predicates).
+
 The copper accounting structure could be declared only by its four files, `root.ods`,
 `rules.ods`, `bounds.ods` and `masks.csv`, which `AccountingStructure` parsed sheet by sheet.
 Its Python-object path took a different, procedural schema: callable rules that built no
