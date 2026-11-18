@@ -1,5 +1,5 @@
-# ci.yml: the suite on 3.9/3.12/3.13, ruff (pyflakes rules), the build, and PyPI trusted
-# publishing on a pushed v* tag (#196). No token: PyPI trusts this workflow and the `pypi`
+# ci.yml: the suite on 3.9/3.12/3.13, ruff (pyflakes rules), the build, the tutorial
+# executed from a fresh install (#188), and PyPI trusted publishing on a pushed v* tag (#196). No token: PyPI trusts this workflow and the `pypi`
 # environment (a pending publisher for florihu/pySUTO, set up once on pypi.org).
 name: ci
 
@@ -89,9 +89,36 @@ jobs:
           path: dist/
           if-no-files-found: error
 
+  tutorial:
+    # The shipped tutorial (#188): a plain `pip install` of the checkout, no checkout on
+    # sys.path, the notebooks copied out by `python -m pysuto tutorial` and executed in
+    # order on the python3 kernel.
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v7.1.0
+        with:
+          python-version: "3.12"
+      - run: python -m pip install ".[tutorial]"
+      - name: Copy the tutorial out
+        working-directory: ${{ runner.temp }}
+        run: |
+          python -c "import pysuto; assert 'site-packages' in pysuto.__file__, pysuto.__file__"
+          python -m pysuto tutorial tutorial
+      - name: Execute the ten chapters in order
+        working-directory: ${{ runner.temp }}/tutorial
+        run: |
+          for nb in 0[0-9]_*.ipynb; do
+            echo "== $nb"
+            jupyter execute --timeout=900 "$nb"
+          done
+
   publish:
     if: startsWith(github.ref, 'refs/tags/v')
-    needs: [test, lint, build]
+    needs: [test, lint, build, tutorial]
     runs-on: ubuntu-latest
     environment: pypi
     permissions:
