@@ -1158,10 +1158,12 @@ def run_stage6(run_root: PathLike, opt_run_id: Optional[str] = None,
         try:
             psut.sankey(period, unit=UNITS[CONTENT]).write_image(
                 str(path), width=1400, height=800, scale=1.5)
-            _log.info("stage 6: Sankey → %s", path)
-        except Exception as exc:        # kaleido missing or no browser: the PSUT stands
-            _log.warning("stage 6: PNG skipped (%s: %s)", type(exc).__name__,
-                         str(exc)[:120])
+        except Exception as exc:
+            raise RuntimeError(
+                f"stage 6: the Sankey PNG {path} was requested and could not be written "
+                f"({type(exc).__name__}: {exc}); kaleido needs Chrome or Chromium "
+                f"(`plotly_get_chrome`), or pass png=False") from exc
+        _log.info("stage 6: Sankey → %s", path)
     return run_id
 
 

@@ -54,6 +54,31 @@ def test_a_folder_that_is_not_empty_is_refused_and_left_untouched(tmp_path):
     assert [p.name for p in tmp_path.iterdir()] == ["mine.txt"]
 
 
+def test_a_copy_that_fails_midway_leaves_dest_as_it_was(tmp_path, monkeypatch):
+    import shutil
+    real, calls = shutil.copyfile, []
+
+    def failing(src, dst, *a, **k):
+        calls.append(dst)
+        if len(calls) == 3:
+            raise OSError("disk full")
+        return real(src, dst, *a, **k)
+
+    monkeypatch.setattr(shutil, "copyfile", failing)
+    for dest in (tmp_path / "new", tmp_path / "empty"):
+        if dest.name == "empty":
+            dest.mkdir()
+        calls.clear()
+        with pytest.raises(OSError, match="disk full"):
+            copy_tutorial(dest)
+    assert not (tmp_path / "new").exists()
+    assert list((tmp_path / "empty").iterdir()) == []
+    assert sorted(p.name for p in tmp_path.iterdir()) == ["empty"]
+    monkeypatch.setattr(shutil, "copyfile", real)
+    copy_tutorial(tmp_path / "empty")                       # the retry works
+    assert (tmp_path / "empty" / "00_world.ipynb").is_file()
+
+
 def test_a_file_as_dest_is_refused(tmp_path):
     target = tmp_path / "file"
     target.write_text("x")

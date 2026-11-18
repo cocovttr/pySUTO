@@ -358,6 +358,18 @@ def test_stage6_titles_its_sankey_png_in_the_content_unit(chain, monkeypatch):
     assert seen.get("unit") == toy.UNITS[toy.CONTENT]
 
 
+def test_stage6_raises_with_the_cause_when_the_requested_png_cannot_be_written(
+        chain, monkeypatch):
+    class _Figure:
+        def write_image(self, *args, **kwargs):
+            raise ValueError("Chrome not found")
+
+    monkeypatch.setattr(toy.PSUT, "sankey", lambda self, *a, **k: _Figure())
+    with pytest.raises(RuntimeError, match="Chrome not found.*plotly_get_chrome"):
+        toy.run_stage6(chain["root"], chain["ids"]["opt"])
+    toy.run_stage6(chain["root"], chain["ids"]["opt"], png=False)
+
+
 def test_truth_diag_draws_its_three_figures_and_summarises(chain, tmp_path, capsys):
     board = toy.scoreboard(chain["root"], chain["ids"])
     paths = board.plot(str(tmp_path))

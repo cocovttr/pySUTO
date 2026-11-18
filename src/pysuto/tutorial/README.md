@@ -8,4 +8,5 @@ python -m pysuto tutorial pysuto-tutorial
 cd pysuto-tutorial && jupyter lab 00_world.ipynb
 ```
 
+The toy case the notebooks run is Python source in the package: `python -c "import pysuto.tutorial.toy as t; print(t.__file__)"` prints where it lives.
 `runs/` is scratch: the chapters write their run trees there, next to the notebooks, and you may delete it at any time.

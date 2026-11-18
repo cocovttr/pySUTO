@@ -15,10 +15,9 @@ fields; the library names none of them. ``--set KNOB=VALUE`` replaces a knob fie
 (:meth:`CaseSpec.describe`).
 
 The library never imports ``pysuto.cases`` or ``pysuto.tutorial`` by name: a case module
-sits at the top of the import direction, beside the drivers. :func:`resolve_case` finds
-a case from the string
-``--case`` carries (#187) and imports a bundled alias's module only at call time, through
-:data:`ALIASES`, a name-to-module table, so the pipeline, the drivers and a step's child
+sits at the top of the import direction, beside the drivers. :func:`resolve_case` finds a
+case from the string ``--case`` carries (#187) and imports a bundled alias's module only
+at call time, through :data:`ALIASES`, a name-to-module table, so the pipeline, the drivers and a step's child
 share one resolver without the library importing a case.
 """
 

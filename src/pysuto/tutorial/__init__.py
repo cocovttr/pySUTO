@@ -20,7 +20,9 @@ by name, at call time).
 
 from __future__ import annotations
 
+import os
 import shutil
+import tempfile
 from pathlib import Path
 
 #: The notebooks and their README, which ship as package data beside this module.
@@ -43,16 +45,24 @@ def copy_tutorial(dest) -> list:
     Raises
     ------
     FileExistsError
-        ``dest`` exists and is not an empty directory; nothing is written.
+        ``dest`` exists and is not an empty directory; nothing is written. A copy that
+    fails midway leaves ``dest`` as it was: the files are written into a temporary
+    sibling folder, which replaces ``dest`` only once all of them are in.
     """
     dest = Path(dest)
     if dest.exists() and (not dest.is_dir() or any(dest.iterdir())):
         raise FileExistsError(f"{dest} exists and is not an empty directory")
-    dest.mkdir(parents=True, exist_ok=True)
-    out = []
-    for src in sorted(PACKAGE_DIR.glob("*.ipynb")) + [PACKAGE_DIR / "README.md"]:
-        target = dest / src.name
-        shutil.copyfile(src, target)
-        target.chmod(0o644)
-        out.append(target)
-    return out
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    stage = Path(tempfile.mkdtemp(prefix=f".{dest.name}-", dir=dest.parent))
+    try:
+        for src in sorted(PACKAGE_DIR.glob("*.ipynb")) + [PACKAGE_DIR / "README.md"]:
+            shutil.copyfile(src, stage / src.name)
+            (stage / src.name).chmod(0o644)
+        stage.chmod(0o755)
+        if dest.exists():
+            dest.rmdir()
+        os.replace(stage, dest)
+    except BaseException:
+        shutil.rmtree(stage, ignore_errors=True)
+        raise
+    return sorted(dest / p.name for p in dest.iterdir())

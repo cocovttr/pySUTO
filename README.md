@@ -1344,7 +1344,8 @@ pysuto/
 │                          tidy table · block views · realized_conc · aggregate     │
 ├── piot.py                PIOT · market_share_network · market_shares       │
 │                                                                            │
-├── tutorial/              the toy cases and the notebooks (top layer, like drivers)  │
+├── cases/                 case modules: copper only (top layer)             │
+├── tutorial/              toy cases · notebooks (top layer)                 │
 │   └── toy.py              the toy case: ACC_SPEC · truth · make_feeds ·    │
 │                           write_params · run_stage1..6 · scoreboard        │
 │                                                                            │

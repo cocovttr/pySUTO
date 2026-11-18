@@ -455,7 +455,8 @@ class ConstDiagnostic:
         ax.set_xlabel("log₁₀(|c|)")
         ax.set_ylabel("density")
         if n <= 12:
-            ax.legend(fontsize=6, framealpha=0.6)
+            if ax.get_legend_handles_labels()[0]:     # no soft |c| > 0: nothing to label
+                ax.legend(fontsize=6, framealpha=0.6)
         else:
             # Numeric x-axis for the colorbar; falls back to integer indices
             # when timestep labels are not parseable as numbers.
