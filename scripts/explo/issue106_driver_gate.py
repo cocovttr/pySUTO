@@ -50,7 +50,6 @@ import numpy as np
 import pandas as pd
 
 sys.path.insert(0, "src")
-from pysuto.cases import load_case                                # noqa: E402
 from pysuto.pipeline import Chain, Pipeline                       # noqa: E402
 from pysuto.stages import opt_defaults                            # noqa: E402
 
@@ -85,13 +84,12 @@ def driver_defaults() -> dict:
 
 def run_chains(ref: str) -> tuple:
     base = Chain.from_opt_run(ref)
-    two = Pipeline(base=base, cwd=os.getcwd(), case="copper", resolve=load_case).run(
+    two = Pipeline(base=base, cwd=os.getcwd(), case="copper").run(
         {}, label="r106 zero overrides")
     print(f"chain 2: {two}", flush=True)
     lock_after = [os.path.exists(os.path.join(PROC, ".stage.lock"))]
     dirs = {s: os.path.join(SCRATCH, s) for s in ("imp", "const")}
-    three = Pipeline(base=base, cwd=os.getcwd(), run_dirs=dirs, case="copper",
-                     resolve=load_case).run(
+    three = Pipeline(base=base, cwd=os.getcwd(), run_dirs=dirs, case="copper").run(
         driver_defaults(), label="r106 explicit defaults")
     print(f"chain 3: {three}", flush=True)
     lock_after.append(os.path.exists(os.path.join(PROC, ".stage.lock")))

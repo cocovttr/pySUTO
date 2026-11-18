@@ -13,11 +13,11 @@ protocol (:mod:`pysuto.knobs`), with the same names, types and precedence as the
 does not do across points. A step's stdout and stderr go to
 ``<log_dir>/<label>_<step>.log``; the parent holds the stage lock of the data dir around
 each child (#101). The module never imports ``scripts/`` or the cases (README §5, import
-direction): the caller passes the resolver of its case references.
+direction): the parent and the child resolve the case reference with the one resolver of
+:mod:`pysuto.case` (#187).
 
     base  = Chain.from_opt_run("opt_20261020_112726_2f451f31")
-    chain = Pipeline(steps=("imp", "const", "opt"), base=base, case="copper",
-                     resolve=load_case).run(
+    chain = Pipeline(steps=("imp", "const", "opt"), base=base, case="copper").run(
         {"imp.P_PROP": 1.5, "const.P_PROP": 1.5}, label="p = 1.5")
 
 A chain can also start at Stage 1 and end at Stage 6 (#125): the steps are
@@ -56,7 +56,7 @@ import tempfile
 import time
 from dataclasses import asdict, dataclass, replace
 from pathlib import Path
-from typing import Callable, Mapping, Optional, Sequence
+from typing import Mapping, Optional, Sequence
 
 import numpy as np
 import scipy
@@ -64,6 +64,7 @@ from scipy.stats import loguniform, qmc, uniform
 
 import pysuto
 from pysuto._step import StepSpec
+from pysuto.case import case_reference, resolve_case
 from pysuto.logging import get_logger
 from pysuto.registry import SweepRunRegistry, stage_lock
 
@@ -144,13 +145,11 @@ class Pipeline:
         needs none.
     cwd : the directory ``data_dir``, ``config``, ``log_dir`` and ``run_dirs`` are
         relative to; default the working directory.
-    case : the case reference every step runs (the ``--case`` string; required). Each
-        child resolves it again, with :func:`pysuto.cases.load_case`.
-    resolve : the caller's resolver of a case reference to its
-        :class:`~pysuto.case.CaseSpec` (required): the pipeline resolves ``case`` once
-        to validate it and never imports the cases. It has to be the resolver the child
-        uses, ``pysuto.cases.load_case``; a stub is for tests that fake ``_launch``
-        only. #187 moves case resolution below the pipeline and removes the parameter.
+    case : the case reference every step runs (the ``--case`` string, required: an alias,
+        a dotted module or a file path). The pipeline resolves it once with
+        :func:`pysuto.case.resolve_case` to validate it, and each child resolves it again
+        with the same function; a file path is made absolute against ``cwd`` here, and
+        the children receive that form.
     data_dir : the data root of every step, holding ``proc/`` and ``input/`` (default
         ``data``, relative to ``cwd``); the child's file logs go to ``<data_dir>/logs``.
     config : a config whose ``pipeline.acc_id`` replaces the case's acc id in the imp and
@@ -168,7 +167,7 @@ class Pipeline:
     def __init__(self, steps: tuple = STEPS, base: Optional[Chain] = None,
                  cwd: Optional[str] = None, log_dir: Optional[str] = None,
                  run_dirs: Optional[Mapping[str, str]] = None, *, case: str,
-                 resolve: Callable, data_dir: Optional[str] = None,
+                 data_dir: Optional[str] = None,
                  config: Optional[str] = None) -> None:
         steps = tuple(steps)
         if not _is_contiguous_slice(steps):
@@ -177,7 +176,8 @@ class Pipeline:
             base = Chain(feed_run_ids=())
         if base is None:
             raise ValueError("a pipeline needs a base chain for its first step's upstream")
-        spec = resolve(case)
+        case = case_reference(case, cwd)
+        spec = resolve_case(case)
         if "feed" in steps and spec.stage1 is None:
             raise ValueError(f"the feed step is the case's Stage 1 hook, and case "
                              f"{spec.id!r} declares none")
@@ -186,7 +186,6 @@ class Pipeline:
         self.steps       = steps
         self.base        = base
         self.case        = case
-        self.resolve     = resolve
         self.case_id     = spec.id
         self.data_dir    = None if data_dir is None else str(data_dir)
         self.cwd         = str(cwd or os.getcwd())
@@ -605,7 +604,7 @@ class Sweep:
         dirs = {**p.run_dirs, **{s: os.path.join(self.scratch_dir, sid, s)
                                  for s in self._scratch_steps()}}
         return Pipeline(steps=p.steps, base=p.base, cwd=p.cwd, log_dir=p.log_dir,
-                        run_dirs=dirs, case=p.case, resolve=p.resolve,
+                        run_dirs=dirs, case=p.case,
                         data_dir=p.data_dir, config=p.config)
 
     def _release(self, pt, remaining, memo, runner) -> None:

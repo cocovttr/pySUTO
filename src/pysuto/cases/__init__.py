@@ -18,8 +18,9 @@ Import direction: ``cases`` sits at the top of the stack, beside the stage drive
 
 from __future__ import annotations
 
-import importlib
 import pkgutil
+
+from pysuto.case import ALIASES, resolve_case
 
 
 def case_ids() -> list:
@@ -29,32 +30,35 @@ def case_ids() -> list:
 
 
 def load_case(case_id: str):
-    """The :class:`pysuto.case.CaseSpec` ``CASE`` of ``pysuto.cases.<case_id>``.
+    """The :class:`pysuto.case.CaseSpec` ``--case <case_id>`` names, as
+    :func:`pysuto.case.resolve_case` resolves it: a bundled alias, a dotted module or a
+    file path.
 
     Raises
     ------
     ValueError
-        ``case_id`` is not a case module of this package, or the module declares no
-        ``CASE``; the message lists the known ids.
+        Nothing of that name is found, or the module declares no ``CASE``.
     """
-    ids = case_ids()
-    if case_id not in ids:
-        raise ValueError(f"unknown case {case_id!r}; the known cases are {', '.join(ids)}")
-    module = importlib.import_module(f"{__name__}.{case_id}")
-    if not hasattr(module, "CASE"):
-        raise ValueError(f"pysuto.cases.{case_id} declares no CASE")
-    return module.CASE
+    return resolve_case(case_id)
 
 
-def add_case_arg(parser) -> None:
-    """Add ``--case <id>`` (default ``copper``) to a stage driver's parser."""
-    parser.add_argument("--case", default="copper",
-                        help="Case id: the module pysuto.cases.<id> (default copper).")
+def add_case_arg(parser, default: str = "copper") -> None:
+    """Add ``--case <reference>`` to a driver's parser: ``default`` is the case it runs
+    without the option; ``None`` makes the option required, which
+    :func:`case_from_args` enforces (exit 2, listing the aliases)."""
+    parser.add_argument("--case", default=default, metavar="CASE",
+                        help="Case: a bundled alias (" + ", ".join(sorted(ALIASES))
+                             + "), a dotted module or a file path"
+                             + (" (required)." if default is None
+                                else f" (default {default})."))
 
 
 def case_from_args(parser, args):
-    """The case ``--case`` names; an unknown id ends the driver through
-    ``parser.error`` (exit 2, listing the known ids)."""
+    """The case ``--case`` names; an unknown reference ends the driver through
+    ``parser.error`` (exit 2, naming what was tried)."""
+    if args.case is None:
+        parser.error("--case is required: a bundled alias (" + ", ".join(sorted(ALIASES))
+                     + "), a dotted module or a file path")
     try:
         return load_case(args.case)
     except ValueError as exc:
