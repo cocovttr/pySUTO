@@ -38,24 +38,28 @@ import sys
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
 from dataclasses import replace
-from pysuto.case import CaseSpec
+from pathlib import Path
+from pysuto.case import CaseSpec, resolve_case
 from pysuto.cases import add_case_arg, case_from_args
-import copper
 from pysuto.config import load_config
 from pysuto.registry import stage_lock
 from pysuto.logging import get_logger, start_run_log
 from pysuto.knobs import add_knob_args, overrides_from_cli, write_run_id
 from pysuto.stages import run_const
 
+# The case the driver runs without --case: the repository's copper case, next to it.
+DEFAULT_CASE = str(Path(__file__).resolve().with_name("copper.py"))
+CASE = resolve_case(DEFAULT_CASE)
+
 # The knobs a pipeline step may override with --set (#100, pysuto.knobs): the UPPER_CASE
 # fields of the case's Stage 3 section. Paths and the acc id are not knobs.
-KNOBS = tuple(copper.CASE.const.knobs())
+KNOBS = tuple(CASE.const.knobs())
 
 _log = get_logger("init_copper_constraints")
 
 
 def main(imp_run_id: str, label: str, overrides: dict | None = None, *,
-         case: CaseSpec = copper.CASE,
+         case: CaseSpec = CASE,
          data_dir: str = "data", config: str | None = None,
          imp_dir: str | None = None, const_dir: str | None = None) -> str:
     """Build and persist the constraint run of ``imp_run_id``; return its id.
@@ -81,7 +85,7 @@ if __name__ == "__main__":
         help="ImputationRun ID to load from --imp-dir.",
     )
     parser.add_argument("label", help="Label for this constraint run")
-    add_case_arg(parser, default=copper.__file__)
+    add_case_arg(parser, default=DEFAULT_CASE)
     parser.add_argument("--data-dir", default="data",
                         help="Data root holding proc/ and input/ (default 'data').")
     parser.add_argument("--config", default=None,

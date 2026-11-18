@@ -23,7 +23,7 @@ import numpy as np
 import pytest
 
 from pysuto.registry import stage_lock
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))   # copper (#189)
+import copper_case  # noqa: F401  (puts scripts/ on sys.path, #189)
 
 REPO = Path(__file__).resolve().parents[1]
 STAGE_DRIVERS = ["collect_aggregate_impute.py", "constraints.py", "run_solver.py",

@@ -5,9 +5,7 @@ import numpy as np
 import pandas as pd
 
 from pysuto.acc import ValuationRoles
-import sys
-from pathlib import Path
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))   # copper (#189)
+import copper_case  # noqa: F401  (puts scripts/ on sys.path, #189)
 from copper import CASE
 from pysuto.impute import (
     damp_leg_sigma as _damp_leg_sigma,

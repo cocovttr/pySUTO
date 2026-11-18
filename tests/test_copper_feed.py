@@ -13,9 +13,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-import sys
-from pathlib import Path
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))   # copper (#189)
+import copper_case  # noqa: F401  (puts scripts/ on sys.path, #189)
 import copper_feed                              # noqa: E402
 from copper_feed import (ICSG_SPEC, OBSERVED_ZERO_FLOOR_KT,   # noqa: E402
                                       icsg_coverage, load_trade_shares,
@@ -409,7 +407,7 @@ def test_the_feed_refuses_weights_it_cannot_check(tmp_path):
 
 def test_the_complete_icsg_spec_carries_the_trade_share_and_observed_zero_hooks():
     """#147: the loaders' ICSG_FEED plus the two hooks, importable without a script."""
-    from copper import ICSG_FEED
+    from copper_feed import ICSG_FEED
 
     assert ICSG_FEED.user_weights is None and ICSG_FEED.post_propagate is None
     assert ICSG_SPEC.user_weights is not None and ICSG_SPEC.post_propagate is not None

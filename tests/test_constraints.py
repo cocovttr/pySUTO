@@ -31,9 +31,7 @@ import numpy as np
 import pandas as pd
 import pytest
 import scipy.sparse as sp
-import sys
-from pathlib import Path
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))   # copper (#189)
+import copper_case  # noqa: F401  (puts scripts/ on sys.path, #189)
 
 # ---------------------------------------------------------------------------
 # Helpers to build a minimal toy AccountingStructure without file I/O

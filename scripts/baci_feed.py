@@ -53,12 +53,12 @@ import sys
 # USER CONFIGURATION
 # ---------------------------------------------------------------------------
 # The feed's policy (loaders, concordance tables, ROW region, the weights file, the
-# cv-scale files) is the copper case's BACI_FEED, scripts/copper.py; the acc id is
+# cv-scale files) is the copper case's BACI_FEED, scripts/copper_feed.py; the acc id is
 # config/config.yaml's pipeline.acc_id, read inside main().
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
-from copper import BACI_FEED
+from copper_feed import BACI_FEED
 from pysuto.config import load_config
 from pysuto.feedpipe import run_feed
 from pysuto.logging import start_run_log

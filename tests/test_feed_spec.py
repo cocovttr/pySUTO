@@ -18,8 +18,8 @@ import pandas as pd
 import pytest
 
 from pysuto.cases import toy
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))   # copper (#189)
-from copper import BACI_FEED, CRUDE_ORE_FEED, ICSG_FEED, icsg_sector_key
+import copper_case  # noqa: F401  (puts scripts/ on sys.path, #189)
+from copper_feed import BACI_FEED, CRUDE_ORE_FEED, ICSG_FEED, icsg_sector_key
 from pysuto.feedpipe import FeedSpec, run_feed
 
 SCRIPTS = os.path.join(os.path.dirname(__file__), "..", "scripts")

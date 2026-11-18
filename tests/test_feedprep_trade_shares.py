@@ -11,9 +11,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-import sys
-from pathlib import Path
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))   # copper (#189)
+import copper_case  # noqa: F401  (puts scripts/ on sys.path, #189)
 import copper_feed
 from copper_feed import (check_trade_share_parents, eff_smelting,
                                       icsg_raw_production, trade_share_parents)

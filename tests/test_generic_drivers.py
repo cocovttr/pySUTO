@@ -18,8 +18,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))   # copper (#189)
-import copper
+from copper_case import copper
 from pysuto.case import CaseSpec, check_case
 from pysuto.cases import case_ids, load_case, toy
 from pysuto.registry import (ConstraintRunRegistry, ImputationRunRegistry,

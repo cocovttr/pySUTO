@@ -62,14 +62,30 @@ class TestForms:
             assert case.id == "toy" and case.case_source == f"path:{path}"
             assert case.case_sha256 == _sha(path)
 
-    def test_a_file_already_imported_as_a_module_resolves_to_that_module(
-            self, module_file):
-        import zinc_case_mod
-        case = resolve_case(str(module_file))
-        assert case.case_source == f"path:{module_file}"
-        assert not any(n.startswith("_pysuto_case_") and getattr(m, "__file__", None)
-                       == str(module_file) for n, m in sys.modules.items())
-        assert case is not None and zinc_case_mod.CASE.id == case.id
+    def test_a_case_file_imports_the_modules_next_to_it_as_a_script_does(
+            self, tmp_path, monkeypatch):
+        (tmp_path / "zinc_sibling_mod.py").write_text("LABEL = 'zinc'\n")
+        path = tmp_path / "zinc_sibling_case.py"
+        path.write_text("import zinc_sibling_mod\n" + REEXPORT)
+        monkeypatch.setattr(sys, "path", list(sys.path))
+        try:
+            case = resolve_case(str(path))
+        finally:
+            sys.modules.pop("zinc_sibling_mod", None)
+        assert case.id == "toy" and sys.path[0] == str(tmp_path)
+
+    def test_a_fresh_interpreter_resolves_copper_and_reaches_its_stage1_imports(
+            self, tmp_path):
+        repo = Path(__file__).resolve().parents[1]
+        code = ("from pysuto.case import resolve_case\n"
+                f"case = resolve_case({str(repo / 'scripts' / 'copper.py')!r})\n"
+                "import copper_feed\n"
+                "assert case.id == 'copper' and case.stage1 is not None\n"
+                "assert case.acc_id == copper_feed.ACC_ID\n")
+        proc = subprocess.run([sys.executable, "-c", code], cwd=str(tmp_path),
+                              capture_output=True, text=True,
+                              env={**os.environ, "PYTHONPATH": str(repo / "src")})
+        assert proc.returncode == 0, proc.stderr
 
     def test_the_module_path_of_a_pysuto_module_is_a_module_not_an_alias(self):
         case = resolve_case("pysuto.cases.toy")

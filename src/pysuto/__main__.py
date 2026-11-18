@@ -6,9 +6,9 @@ six stages, each in a fresh child process (#186), from a Stage 1 hook or a base 
 to any later stage::
 
     python -m pysuto run --case toy --from feed --to psut --data-dir /tmp/toy
-    python -m pysuto run --case copper --from imp --to psut --base opt_20261022_112855_928da10c
+    python -m pysuto run --case scripts/copper.py --from imp --to psut --base opt_20261022_112855_928da10c
 
-``--case`` is required: a bundled alias (``toy``, ``copper``), a dotted module
+``--case`` is required: a bundled alias (``toy``, ``toy_coproduct``), a dotted module
 (``mylab.zinc``) or a file path (``./zinc_case.py``), each naming a module that declares a
 :class:`~pysuto.case.CaseSpec` ``CASE`` (:func:`pysuto.case.resolve_case`, #187).
 

@@ -18,9 +18,7 @@ The library never imports ``pysuto.cases`` by name: a case module sits at the to
 import direction, beside the drivers. :func:`resolve_case` finds a case from the string
 ``--case`` carries (#187) and imports a bundled alias's module only at call time, through
 :data:`ALIASES`, a name-to-module table, so the pipeline, the drivers and a step's child
-share one resolver without the library importing a case. A file already imported as a
-module is reused, so a driver's ``import copper`` and its ``--case scripts/copper.py``
-are one module object.
+share one resolver without the library importing a case.
 """
 
 from __future__ import annotations
@@ -319,9 +317,9 @@ def _load_file(path: str):
     if not os.path.isfile(path):
         raise ValueError(f"unknown case {path!r}: read as a file path (it ends in .py or "
                          f"holds a path separator), and no such file exists")
-    for loaded in list(sys.modules.values()):       # one module object per file
-        if getattr(loaded, "__file__", None) == path:
-            return loaded
+    folder = os.path.dirname(path)
+    if folder not in sys.path:      # as a script run by Python: siblings are importable
+        sys.path.insert(0, folder)
     name = "_pysuto_case_" + hashlib.sha256(path.encode("utf-8")).hexdigest()[:12]
     spec = importlib.util.spec_from_file_location(name, path)
     module = importlib.util.module_from_spec(spec)
@@ -339,7 +337,9 @@ def resolve_case(reference: str) -> CaseSpec:
     where it came from.
 
     ``reference`` is a bundled alias (:data:`ALIASES`), a file path (a string ending in
-    ``.py`` or holding a path separator, relative to the working directory) or a dotted
+    ``.py`` or holding a path separator, relative to the working directory; its folder is
+    put first on ``sys.path`` if absent, before the file runs, so that it can import the
+    modules next to it as a script run by Python can) or a dotted
     module (``mylab.zinc``, found on ``sys.path``). The returned case has ``case_source``
     (``alias:<name>``, ``path:<abs>`` or ``module:<dotted>``) and ``case_sha256``, the
     sha256 of the module's source file.

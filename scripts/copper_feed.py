@@ -1,6 +1,7 @@
 """copper_feed.py
 ===============
-Copper's Stage 1 beyond the loaders of ``copper``: the labels and registered
+Copper's Stage 1: the three feeds as FeedSpecs (``ICSG_FEED``, ``BACI_FEED``,
+``CRUDE_ORE_FEED``, #143) with their loaders, the labels and registered
 inputs the feed-side algorithms of ``pysuto.feedprep`` are bound to, the raw-ICSG readers
 (usage, intake, production), the observed-zero stamping of the ICSG feed (#76–#97), and the
 **complete ICSG FeedSpec**, ``ICSG_SPEC`` (#147): ``ICSG_FEED`` plus the BACI-trade-share
@@ -38,18 +39,266 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-from copper import BACI_FEED, CASE, CRUDE_ORE_FEED, ICSG_FEED, icsg_sector_key
 from pysuto.conc import ConcordanceTable
-from pysuto.feedpipe import run_feed
+from pysuto.feedpipe import FeedSpec, check_file, run_feed
 from pysuto.feedprep.ore_grade import OreGradeLabels
 from pysuto.feedprep.trade_shares import (check_parents_record, decoded_edges,
                                           trade_share_parents as _trade_share_parents)
 from pysuto.feedprep.reexport import icsg_aggregate_members
 from pysuto.input_registry import InputRegistries
 from pysuto.logging import get_logger
+from pysuto.relation.param_relation import expand_edge_index
 from pysuto.relation.params import read_params
 
 _log = get_logger(__name__)
+
+# The acc id the copper feeds are built on (the case's, scripts/copper.py).
+ACC_ID = "copper"
+
+# =============================================================================
+# Stage 1 — the feeds (#143)
+# =============================================================================
+# The three copper feeds as :class:`pysuto.feedpipe.FeedSpec`s, run by
+# ``feedpipe.run_feed``. The loaders and hooks moved here unchanged from
+# ``scripts/{icsg,baci,crude_ore}_feed.py``. ``ICSG_FEED`` is the loaders' part of ICSG's
+# spec: ``ICSG_SPEC`` adds the trade-share weights and the
+# observed-zero stamping (#147).
+
+# The case's rest-of-world region, for the ROW pedigree penalty (#119), and the
+# Supply_Use column's vocabulary: each value mapped to the endpoint its rows classify.
+ROW_REGION      = "ROW"
+ICSG_AUX_SIDES  = {"Supply": "from", "Use": "to"}
+
+
+def icsg_sector_key(proc: str, typ: str, supply_use: str) -> str:
+    """Composite key for ICSG's ``sector_map``: disambiguates process+material combos."""
+    if supply_use == "Supply":
+        return proc
+    if proc == "Smelting" and typ in ("Scrap", "Srap"):
+        return "Smelting_Scrap"
+    if proc == "Smelting":
+        return "Smelting_Concentrate"
+    if proc == "Refining" and typ == "Scrap":
+        return "Refining_Scrap"
+    if proc == "Refining":
+        # ADR 0021: the refining Use row is total refined production placed on
+        # the anode entering ER, not the matte entering CFR.
+        return "Refining_Anode"
+    return proc
+
+
+def _concordance_maps(sheets: dict, sector_cols: list, var_cols: list) -> dict:
+    """The five concordance maps of a feed's workbook ``sheets``; ``sector_cols`` and
+    ``var_cols`` name the columns of ``sector_map`` and ``variable_map`` it reads."""
+    sector_map    = sheets["sector_map"][sector_cols].drop_duplicates()
+    region_map    = sheets["region_map"][
+        ["src_region", "root_region"]].drop_duplicates()
+    time_map      = sheets["time_map"][
+        ["src_time", "root_time"]].drop_duplicates()
+    valuation_map = sheets["valuation_map"][
+        ["src_valuation", "root_valuation"]].drop_duplicates()
+    var_map       = sheets["variable_map"][var_cols].copy()
+
+    time_map["src_time"]  = time_map["src_time"].astype(str)
+    time_map["root_time"] = time_map["root_time"].astype(str)
+
+    return dict(
+        sector_map=sector_map,
+        region_map=region_map,
+        time_map=time_map,
+        valuation_map=valuation_map,
+        var_map=var_map,
+    )
+
+
+def load_icsg_raw(path: str) -> pd.DataFrame:
+    check_file(path, "raw flow data")
+    df = pd.read_csv(path)
+    df["_sector_key"] = df.apply(
+        lambda row: icsg_sector_key(row["Process"], row["Type"], row["Supply_Use"]),
+        axis=1)
+    df["Year"] = df["Year"].astype(str)
+    return df
+
+
+def load_icsg_tables(path: str) -> dict:
+    check_file(path, "concordance workbook")
+    sheets = pd.read_excel(path, sheet_name=None)
+    # icsg_type / supply_use feed the fan-policy leg filter (ADR 0008)
+    tables = _concordance_maps(
+        sheets, ["src_sector", "root_sector", "icsg_type", "supply_use"],
+        ["raw_var", "src_var", "Supply_Use"])
+    tables["var_map"]["Supply_Use"] = tables["var_map"]["Supply_Use"].replace("", pd.NA)
+    return tables
+
+
+def icsg_leg_filter(tables: dict) -> dict:
+    """Fan policy (ADR 0008): each ICSG Use variable names its input product
+    (sector_map icsg_type) — its fan may only land on legs of that supplier
+    sector. Without this, the '<any>' open side fans across every incoming
+    edge of the consumer node (e.g. Smelting_Scrap value on Concentrate
+    legs) and route-keyed trade-share weights bleed across products."""
+    sm = tables["sector_map"]
+    return dict(
+        sm.loc[sm["supply_use"].astype(str).str.lower() == "use",
+               ["src_sector", "icsg_type"]].itertuples(index=False, name=None)
+    )
+
+
+def load_baci_raw(path: str) -> pd.DataFrame:
+    check_file(path, "raw flow data")
+    df = pd.read_csv(path)
+    # Year must be str for time_map lookup; Sector stays int for sector_map lookup
+    df["Year"] = df["Year"].astype(str)
+    return df
+
+
+def load_crude_ore_raw(path: str) -> pd.DataFrame:
+    check_file(path, "raw extraction data")
+    df = pd.read_csv(path)
+    # Year must be str for time_map lookup
+    df["Year"] = df["Year"].astype(str)
+    return df
+
+
+def load_plain_tables(path: str) -> dict:
+    """The concordance maps of a feed whose ``sector_map`` carries no fan-policy columns
+    (BACI, crude ore)."""
+    check_file(path, "concordance workbook")
+    sheets = pd.read_excel(path, sheet_name=None)
+    return _concordance_maps(sheets, ["src_sector", "root_sector"],
+                             ["raw_var", "src_var"])
+
+
+def baci_user_weights(build):
+    """Load optional user weight table; returns ``(None, {})`` if the file is absent.
+
+    The committed baci weights.csv is the legacy sector-pair format
+    (root_sector_from, root_sector_to, weight — e.g. the Cathode→FU/USC/MESC
+    100/0/0 to-side fan split; a zero weight leaves a leg uncovered, #40). Since the
+    route+time-keyed user_weights seam (commit 8faf5a4) ``ConcordanceTable.from_raw``
+    requires the full (sectors, regions, time) key, so a sector-pair row — which by the
+    old semantics applied to every route and year — is expanded across all region
+    pairs × years here, preserving those semantics.
+    """
+    weights_file = os.path.join(build.feed_dir, "weights.csv")
+    if not os.path.isfile(weights_file):
+        _log.info("   weights file not found — using equal allocation")
+        return None, {}
+    wdf = pd.read_csv(weights_file)
+    _log.info("   weights file : %s  (%d entries)", weights_file, len(wdf))
+    route_cols = {"root_region_from", "root_region_to", "root_time"}
+    if route_cols.isdisjoint(wdf.columns):
+        acc = build.acc
+        regions = sorted(acc.node_index["region"].unique())
+        times = [str(t) for t in acc.time_range]
+        key = pd.MultiIndex.from_product(
+            [regions, regions, times],
+            names=["root_region_from", "root_region_to", "root_time"],
+        ).to_frame(index=False)
+        wdf = wdf.merge(key, how="cross")
+        _log.info("   weights expanded: legacy sector-pair rows → %d "
+                  "full-key rows (all routes × years)", len(wdf))
+    return wdf, {}
+
+
+MAX_CV_SCALE = 5.0   # ADR 0027's cap; past ~4.8 ADR 0017's damping ceiling
+                     # (cv 1.0 on a ~0.209 pedigree) makes further inflation inert
+
+# Per-root-edge σ multipliers, applied through the one ``cv_root_scale`` seam
+# ADR 0003's ROW penalty already uses. Each file is one root leg per row
+# (sector, from-region, to-region, year) and the factor by which that leg's σ
+# must grow because part of it is an inference rather than an observation.
+CV_SCALE_FILES = {
+    "reexport_cv_scale.csv": "ADR 0027 re-attributed legs",
+    "quantity_cv_scale.csv": "ADR 0033 reconstructed quantities",
+}
+
+
+def load_cv_scales(acc, feed_dir: str) -> "np.ndarray | None":
+    """Combined per-root-edge CV multiplier from every scale file in ``feed_dir``.
+
+    The factors **multiply**: 3,593 of 6,706 Concentrate legs carry an ADR 0027
+    re-export scale, and the ADR 0033 reconstruction lands on many of the same
+    legs, so assigning would silently undo the netting's σ on every overlap.
+    The *product* is capped at ``MAX_CV_SCALE`` rather than each factor, so two
+    corrections cannot compound past the point where ADR 0017's damping ceiling
+    makes them inert.
+
+    Each factor is applied to **every** cross-region Flow-origin edge of that
+    leg in both valuations — for cathode that is the FU/USC/MESC triplet, which
+    the feed's own fan splits 100/0/0 (#40).
+
+    Returns ``None`` when no file is present, so the build is bit-identical to
+    a feed that has been through neither transformation.
+    """
+    found = {n: os.path.join(feed_dir, n)
+             for n in CV_SCALE_FILES if os.path.isfile(
+                 os.path.join(feed_dir, n))}
+    if not found:
+        _log.info("   cv scales: none (feed is neither netted nor reconstructed)")
+        return None
+
+    ei = expand_edge_index(acc.edge_index, acc.node_index)
+    ei = ei[(ei["region_from"] != ei["region_to"])
+            & (ei["entity_from"] == "Flow")].copy()
+    ei["root_time"] = ei["time"].astype(str)
+
+    scale = np.ones(len(acc.edge_index), dtype=float)
+    for name, path in found.items():
+        df = pd.read_csv(path)
+        df["root_time"] = df["time"].astype(str)
+        j = ei.merge(
+            df[["sector", "region_from", "region_to", "root_time", "cv_scale"]],
+            left_on=["sector_from", "region_from", "region_to", "root_time"],
+            right_on=["sector", "region_from", "region_to", "root_time"],
+            how="inner")
+        ids = j["edge_id"].to_numpy(dtype=int)
+        scale[ids] *= j["cv_scale"].to_numpy(dtype=float)
+        _log.info("   cv scale %-24s %s: %d root legs → %d edges "
+                  "(median %.3f, max %.1f)", name, CV_SCALE_FILES[name],
+                  len(df), len(j), float(j["cv_scale"].median()),
+                  float(j["cv_scale"].max()))
+    np.clip(scale, 1.0, MAX_CV_SCALE, out=scale)
+    _log.info("   cv scale combined: %d edges scaled, max %.2f",
+              int((scale > 1.0).sum()), float(scale.max()))
+    return scale
+
+
+ICSG_FEED = FeedSpec(
+    feed_id               = "icsg",
+    load_raw              = load_icsg_raw,
+    load_tables           = load_icsg_tables,
+    row_region            = ROW_REGION,
+    aux_col               = "Supply_Use",
+    aux_sides             = ICSG_AUX_SIDES,
+    leg_filter            = icsg_leg_filter,
+    # BACI-trade-share weights (ADR 0002 option D): None ⇒ uniform fan, which the fan
+    # policy then refuses to distribute (ADR 0008). Attached by ICSG_SPEC,
+    # with the observed-zero stamping (post_propagate).
+    drop_unweighted_fans  = True,
+)
+
+# BACI has explicit from/to columns, so no aux discriminator; it is scoped to
+# cross_region (mapped self-trade exclusion, ADR 0014).
+BACI_FEED = FeedSpec(
+    feed_id      = "baci",
+    load_raw     = load_baci_raw,
+    load_tables  = load_plain_tables,
+    row_region   = ROW_REGION,
+    edge_scope   = True,
+    user_weights = baci_user_weights,
+    cv_scale     = load_cv_scales,
+)
+
+# A single-region domestic feed: no aux discriminator.
+CRUDE_ORE_FEED = FeedSpec(
+    feed_id     = "crude_ore",
+    load_raw    = load_crude_ore_raw,
+    load_tables = load_plain_tables,
+    row_region  = ROW_REGION,
+)
+
 
 # =============================================================================
 # Labels of the feed-side algorithms
@@ -720,7 +969,7 @@ def run_stage1(data_dir: str) -> "dict[str, str]":
     def feed(spec) -> None:
         run_log = os.path.join(data_dir, "logs",
                                f"{spec.feed_id}_{datetime.now():%Y%m%d_%H%M%S}.log")
-        run_ids[spec.feed_id] = run_feed(spec, acc_id=CASE.acc_id, data_dir=data_dir,
+        run_ids[spec.feed_id] = run_feed(spec, acc_id=ACC_ID, data_dir=data_dir,
                                          run_log=run_log).run_id
 
     feed(BACI_FEED)

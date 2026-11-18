@@ -18,8 +18,7 @@ import pytest
 
 from pysuto.case import (Cascade, CascadeStep, CaseContext, CaseSpec, ConstSection,
                          FillEntry, ImpSection)
-import sys
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))   # copper (#189)
+import copper_case  # noqa: F401  (puts scripts/ on sys.path, #189)
 from copper import CASCADE, CASE, CopperConst, CopperImp, builders, terminal
 from pysuto.knobs import parse_overrides
 from pysuto.registry import _NpEncoder
