@@ -7,10 +7,7 @@ case, wired through the six stages. A Stage 2 and 3 case is a
 
 * :mod:`pysuto.cases.copper` — the **copper case** (#120): the Stage 2 and 3 model of
   the copper application.
-* :mod:`pysuto.cases.toy` — the **toy case** (#59): a synthetic three-region orium case
-  generated from a planted ground truth.
-* :mod:`pysuto.cases.toy_coproduct` — the toy whose smelter has a second Flow product
-  (``Dust``), the co-product case (#130).
+* The toy cases live in :mod:`pysuto.tutorial` (#188).
 
 Import direction: ``cases`` sits at the top of the stack, beside the stage drivers and the
 ``python -m pysuto`` entry point. It imports the library; the library never imports it.
@@ -18,15 +15,12 @@ Import direction: ``cases`` sits at the top of the stack, beside the stage drive
 
 from __future__ import annotations
 
-import pkgutil
-
 from pysuto.case import ALIASES, resolve_case
 
 
 def case_ids() -> list:
-    """The ids of the case modules of this package, sorted."""
-    return sorted(m.name for m in pkgutil.iter_modules(__path__)
-                  if not m.name.startswith("_"))
+    """The bundled case aliases (:data:`pysuto.case.ALIASES`), sorted."""
+    return sorted(ALIASES)
 
 
 def load_case(case_id: str):

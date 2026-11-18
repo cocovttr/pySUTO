@@ -17,7 +17,7 @@ A modular Python framework for constructing, reconciling, and propagating uncert
 
 ## Start here
 
-New to pySUTO? The tutorial is written for researchers and students: it runs the whole six-stage pipeline on a small synthetic toy case in about 1.5 h, starting at [tutorial/00_world.ipynb](tutorial/00_world.ipynb). The chapter list and set-up are in [tutorial/README.md](tutorial/README.md).
+New to pySUTO? The tutorial is written for researchers and students: it runs the whole six-stage pipeline on a small synthetic toy case in about 1.5 h, starting at [tutorial/00_world.ipynb](src/pysuto/tutorial/00_world.ipynb). The chapter list and set-up are in [tutorial/README.md](src/pysuto/tutorial/README.md).
 
 ---
 
@@ -184,9 +184,10 @@ modules:  Registry=registry/ (BaseOutputRegistry · _sidecar · make_run_id)
 LAYERED MODULE STACK   (imports flow downward only — never upward)
 
 ┌────────────────────────────────────────────────────────────────┐
-│  cases (top, beside the stage drivers)  ·  cases/toy — a case  │
-│  declared in code: acc spec, synthetic feeds, params, the six  │
-│  stages wired into a run tree; imported by nothing in pysuto   │
+│  cases · tutorial (top, beside the stage drivers) — tutorial/  │
+│  toy: a case declared in code, acc spec, synthetic feeds,      │
+│  params, the six stages wired into a run tree; imported by     │
+│  nothing in pysuto                                             │
 │  pipeline.py  ·  Pipeline · Sweep — calls pysuto.stages for    │
 │  Stages 2–6, each step in a child process that resolves the    │
 │  case reference; never imports scripts/ or the cases           │
@@ -383,7 +384,7 @@ When a feed sets `Row_penalty: TRUE` in its metadata sidecar, every **ROW-touchi
 
 #### Use case
 
-Run Stage 1 on the toy case in [tutorial/01_datafeed.ipynb](tutorial/01_datafeed.ipynb).
+Run Stage 1 on the toy case in [tutorial/01_datafeed.ipynb](src/pysuto/tutorial/01_datafeed.ipynb).
 
 ---
 
@@ -509,7 +510,7 @@ Only finite, non-zero values count at every level, so upstream-imputed zeros nev
 
 #### Use case
 
-Run Stage 2 on the toy case in [tutorial/02_aggregate_impute.ipynb](tutorial/02_aggregate_impute.ipynb).
+Run Stage 2 on the toy case in [tutorial/02_aggregate_impute.ipynb](src/pysuto/tutorial/02_aggregate_impute.ipynb).
 
 #### Diagnostics
 
@@ -591,7 +592,7 @@ Defaults: $\mathrm{CV}_a^\mathrm{min} = \mathrm{CV}_c^\mathrm{min} = 0.05$, $\si
 
 #### Use case
 
-Run Stage 3 on the toy case in [tutorial/03_constraints.ipynb](tutorial/03_constraints.ipynb).
+Run Stage 3 on the toy case in [tutorial/03_constraints.ipynb](src/pysuto/tutorial/03_constraints.ipynb).
 
 A `ConstDiagnostic` plot suite (in [diag/](src/pysuto/diag/)) can be triggered via `ConstraintEngine.run(..., diag_plot=True)`.
 
@@ -685,7 +686,7 @@ Solver diagnostics live in [diag/](src/pysuto/diag/) (`SolverDiag`, 12 figures: 
 
 #### Use case
 
-Run Stage 4 on the toy case in [tutorial/04_solver.ipynb](tutorial/04_solver.ipynb).
+Run Stage 4 on the toy case in [tutorial/04_solver.ipynb](src/pysuto/tutorial/04_solver.ipynb).
 
 ---
 
@@ -778,7 +779,7 @@ $$\mathrm{var}(w^\top a^*) = w^\top\Sigma_a w - (G\Sigma_a w)^\top S^{-1} (G\Sig
 
 #### Use case
 
-Run Stage 5 on the toy case in [tutorial/05_posterior.ipynb](tutorial/05_posterior.ipynb).
+Run Stage 5 on the toy case in [tutorial/05_posterior.ipynb](src/pysuto/tutorial/05_posterior.ipynb).
 
 #### Diagnostics
 
@@ -825,7 +826,7 @@ Downstream of the solver: **materialise** the solved edge vector `a*` (`OptimRes
 - **Levels `A` and `L`, footprints, ew-MFA** — `to_piot(level='L')` unlocks the industry-by-industry calculus on that network: `x()` (`Z·1 + y`), `y()`, `A()` (`Z·x̂⁻¹`), `L()` (`(I−A)⁻¹`, so `L·y = x` exactly), `intensity(extension)` for the `E` (extraction) or `O` (secondary) inflow per unit of output, `footprint(extension, by='fd'|'region'|None)` (`e·L·ŷ`, summing to the extension's total), `embodied_trade(extension)` (extraction region × consuming region), `ew_mfa()` per region (`DE`, `imports`, `exports`, `PTB`, `DMI`, `DMC`, `RMC`), `multipliers()` (column sums of `L`) and `sda(period_a, period_b)` (two-factor polar decomposition of `Δx`). With one producer per commodity, as in copper, these equal what the Suh construct would give.
 - **Persistence** — `PsutRunRegistry` writes `data/proc/psut/<psut_run_id>/timesteps/t_<period>.parquet` + `nodes.parquet` with `parents.upstream.opt_run_id`, and records `valuations`, `primary` and the blocks in the sidecar; `scripts/psut.py <opt_run_id> [--primary CC] [--sankey 2020 2024] [--figs-dir figs/psut] [--no-png]` is the one-command CLI, the flag writing both Sankeys per period — `sankey_supply_use_World_<period>_<valuation>.html` and `sankey_process_network_…` — plus a PNG when kaleido can render, under `figs/psut/`.
 
-Run Stage 6 on the toy case in [tutorial/06_psut_piot.ipynb](tutorial/06_psut_piot.ipynb); [tutorial/07_scoreboard.ipynb](tutorial/07_scoreboard.ipynb) scores the whole chain.
+Run Stage 6 on the toy case in [tutorial/06_psut_piot.ipynb](src/pysuto/tutorial/06_psut_piot.ipynb); [tutorial/07_scoreboard.ipynb](src/pysuto/tutorial/07_scoreboard.ipynb) scores the whole chain.
 
 ---
 
@@ -870,7 +871,7 @@ Run Stage 6 on the toy case in [tutorial/06_psut_piot.ipynb](tutorial/06_psut_pi
 | [piot.py](src/pysuto/piot.py) | `PIOT`, `market_share_network`, `market_shares`, `CONSTRUCTS`, `LEVELS` | Stage-6 PIOT as a construct family: the market-share process network (`Z()`, `D()`, process-network `sankey()`), levels `A`/`L` (`x`, `y`, `A`, `L`), `intensity`, `footprint`, `embodied_trade`, `ew_mfa`, `multipliers`, `sda`; `suh_product` is a stub until #20. A derived view of a PSUT, never persisted. |
 | [_conditioning.py](src/pysuto/_conditioning.py) | `condition_prior`, `condition_sigma_c` | Shared σ_a / σ_c conditioning rules — guarantees uncprop sees the same effective prior the solver did. |
 | [diag/](src/pysuto/diag/) | `FeedDiagnostics`, `AggDiagnostic`, `ImpDiagnostic`, `ConstDiagnostic`, `SolverDiag`, `UncPropDiag`, `SweepDiag`, `sankey_figure`, `sankey_tables`, `SankeySpec`, `TruthDiag`; `stats/`: `CoverageDiagnostic`, `StatsDiagnostic`, `ConstStatsDiagnostic`, `SolverStatsDiagnostic`, `UncPropStatsDiagnostic`, `SweepStatsDiagnostic` | Cross-stage diagnostic plot suites (figures), row-level stats tables (CSVs), the Stage-6 supply-use Sankey (Plotly, lazy) and, for a synthetic case, every stage's estimate scored against its ground truth (`truth.py`: error by stage, calibration and coverage, residual rank). **Subpackage layout:** `feed.py`, `agg.py`, `imp.py`, `const.py`, `solver.py`, `uncprop.py`, `sweep.py`, `psut.py`, `truth.py`, `_plot.py`, `stats/{_core,coverage,val,const,solver,objective,uncprop,sweep}.py`. |
-| [cases/](src/pysuto/cases/) | `toy`: `ACC_SPEC`, `ACC_REF`, `build_acc`, `truth`, `world_totals`, `make_feeds`, `SyntheticFeed`, `write_params`, `write_inputs`, `CASE`, `run_stage1` … `run_stage6`, `soft_residuals`, `scoreboard`, `reveal`, `check_<chapter>_<n>`, `solution` | Cases declared in code, at the top of the import stack beside the stage drivers. `toy.py` is the **toy case** (#59): a three-region orium case generated from a planted ground truth, its three synthetic feeds, its params CSVs, and the six stages wired into a caller-chosen data dir (the drivers run it with `--case toy --data-dir <dir>`, #124); the tutorial's exercise hooks (#60). It declares its own labels, bound to roles (ADR 0034, #123), and registers no hard bands (#27). |
+| [tutorial/](src/pysuto/tutorial/) | `toy`: `ACC_SPEC`, `ACC_REF`, `build_acc`, `truth`, `world_totals`, `make_feeds`, `SyntheticFeed`, `write_params`, `write_inputs`, `CASE`, `run_stage1` … `run_stage6`, `soft_residuals`, `scoreboard`, `reveal`, `check_<chapter>_<n>`, `solution` | The tutorial: the ten notebooks and the toy cases (`toy.py`, `toy_coproduct.py`, `toy_ext.py`), at the top of the import stack beside the stage drivers and `pysuto.cases`; `python -m pysuto tutorial DEST` copies the notebooks out (#188). `toy.py` is the **toy case** (#59): a three-region orium case generated from a planted ground truth, its three synthetic feeds, its params CSVs, and the six stages wired into a caller-chosen data dir (the drivers run it with `--case toy --data-dir <dir>`, #124); the tutorial's exercise hooks (#60). It declares its own labels, bound to roles (ADR 0034, #123), and registers no hard bands (#27). |
 
 ---
 
@@ -1343,7 +1344,8 @@ pysuto/
 │                          tidy table · block views · realized_conc · aggregate     │
 ├── piot.py                PIOT · market_share_network · market_shares       │
 │                                                                            │
-├── cases/                 cases declared in code (top layer, like drivers)  │
+├── cases/                 case modules: copper only (top layer)             │
+├── tutorial/              toy cases · notebooks (top layer)                 │
 │   └── toy.py              the toy case: ACC_SPEC · truth · make_feeds ·    │
 │                           write_params · run_stage1..6 · scoreboard        │
 │                                                                            │
@@ -1378,15 +1380,15 @@ acc  →  relation  →  impute  →  constraints   (relation: the params reader
 collector  →  agg  →  impute  →  constraints  →  solver  →  uncprop
 _conditioning  ←  solver, uncprop          (shared σ-conditioning helper)
 knobs          ←  the stage drivers        (the --set / --run-id-file protocol)
-case           ←  cases, the stage drivers (CaseSpec; imports nothing from pysuto); its `resolve_case` reaches a bundled case only by `importlib.import_module` on a name → module string, at call time: the one sanctioned reference from the library to `pysuto.cases`, kept by the runtime layering test (`tests/test_case_resolution.py`)
+case           ←  cases, the stage drivers (CaseSpec; imports nothing from pysuto); its `resolve_case` reaches a bundled case only by `importlib.import_module` on a name → module string, at call time: the one sanctioned reference from the library to `pysuto.cases` and `pysuto.tutorial`, kept by the runtime layering test (`tests/test_case_resolution.py`)
 stages         ←  cases, pipeline, the stage drivers (the Stage 2–6 bodies over a CaseSpec; driver-level code like the scripts, not the data layer, so it imports diag; never imports cases)
-cases          ──── top, beside the drivers and `python -m pysuto` (`__main__`): case instances; never imported by the library
-pipeline       ←  stages, registry, logging (runs each step as a child of pysuto._step; never imports scripts/ or the cases)
+cases, tutorial ──── top, beside the drivers and `python -m pysuto` (`__main__`): case instances and the toy cases (`pysuto.tutorial`, #188); never imported by the library
+pipeline       ←  stages, registry, logging (runs each step as a child of pysuto._step; never imports scripts/, the cases or the tutorial)
 psut           ←  acc, registry            (Stage 6 — reads a persisted opt run)
 piot           ←  psut                     (Stage 6 — a derived view of a PSUT)
 diag           ──── consumer; never imported into the data layer
-cases          ──── top: imports the library (diag included) like a stage driver;
-                    nothing in pysuto but `__main__` imports it
+cases, tutorial ──── top: import the library (diag included) like a stage driver;
+                    nothing in pysuto but `__main__` imports them
 utils / logging  ←  imported by any layer, import nothing from pysuto
 ```
 

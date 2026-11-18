@@ -2,7 +2,7 @@
 test_toy_case.py
 ================
 The toy case (#59), the repo's first six-stage end-to-end test. One module-scoped chain
-runs every stage of :mod:`pysuto.cases.toy` into a temporary run tree, and the acceptance
+runs every stage of :mod:`pysuto.tutorial.toy` into a temporary run tree, and the acceptance
 tests read that tree. The unit tests check the generator itself (the truth balances, each
 synthetic feed is noisy at its pedigree CV, every imputer writes) and the tutorial's
 exercise hooks. The structure is the toy module's own ``ACC_SPEC``: no test fixture of a
@@ -22,7 +22,7 @@ import pandas as pd
 import pytest
 
 from pysuto.acc import ALL_SPEC_KEYS, AccountingStructure, check_built_acc
-from pysuto.cases import toy
+from pysuto.tutorial import toy
 from pysuto.diag import FeedDiagnostics, SankeySpec, TruthDiag, sankey_tables
 from pysuto.registry import (ConstraintRunRegistry, DataFeedRegistry,
                              ImputationRunRegistry, OptimRunRegistry, PsutRunRegistry,
@@ -358,6 +358,18 @@ def test_stage6_titles_its_sankey_png_in_the_content_unit(chain, monkeypatch):
     assert seen.get("unit") == toy.UNITS[toy.CONTENT]
 
 
+def test_stage6_raises_with_the_cause_when_the_requested_png_cannot_be_written(
+        chain, monkeypatch):
+    class _Figure:
+        def write_image(self, *args, **kwargs):
+            raise ValueError("Chrome not found")
+
+    monkeypatch.setattr(toy.PSUT, "sankey", lambda self, *a, **k: _Figure())
+    with pytest.raises(RuntimeError, match="Chrome not found.*plotly_get_chrome"):
+        toy.run_stage6(chain["root"], chain["ids"]["opt"])
+    toy.run_stage6(chain["root"], chain["ids"]["opt"], png=False)
+
+
 def test_truth_diag_draws_its_three_figures_and_summarises(chain, tmp_path, capsys):
     board = toy.scoreboard(chain["root"], chain["ids"])
     paths = board.plot(str(tmp_path))
@@ -442,16 +454,19 @@ def test_the_exercise_checks_accept_the_reference_and_reject_a_wrong_answer(chai
         toy.check_6_1(root, supply, use, sector="Mining")
 
 
-def test_imports_flow_one_way_cases_on_top_and_truth_diag_a_leaf():
-    """The library imports no ``pysuto.cases`` (``__main__.py``, the ``python -m pysuto``
+def test_imports_flow_one_way_tutorial_on_top_and_truth_diag_a_leaf():
+    """The library imports no ``pysuto.cases`` or ``pysuto.tutorial`` (``__main__.py``,
+    the ``python -m pysuto``
     driver, and ``_step.py``, its step child, are drivers and do); ``diag/truth.py``
     imports neither the cases nor ``scripts/``."""
     src = Path(toy.__file__).resolve().parents[1]
-    imports_cases   = re.compile(r"^\s*(from|import)\s+(pysuto\.cases|\.+cases)\b",
-                                 re.MULTILINE)
+    imports_cases   = re.compile(
+        r"^\s*(from|import)\s+(pysuto\.(cases|tutorial)|\.+(cases|tutorial))\b",
+        re.MULTILINE)
     imports_scripts = re.compile(r"^\s*(from|import)\s+scripts\b", re.MULTILINE)
     importers = [str(p.relative_to(src)) for p in src.rglob("*.py")
-                 if p.parent.name != "cases" and p.name not in ("__main__.py", "_step.py")
+                 if p.parent.name not in ("cases", "tutorial")
+                 and p.name not in ("__main__.py", "_step.py")
                  and imports_cases.search(p.read_text(encoding="utf-8"))]
     assert importers == []
     truth_py = (src / "diag" / "truth.py").read_text(encoding="utf-8")

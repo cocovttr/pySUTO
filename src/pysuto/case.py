@@ -14,10 +14,10 @@ fields; the library names none of them. ``--set KNOB=VALUE`` replaces a knob fie
 (:meth:`Section.with_knobs`), and a run records its section in its sidecar
 (:meth:`CaseSpec.describe`).
 
-The library never imports ``pysuto.cases`` by name: a case module sits at the top of the
-import direction, beside the drivers. :func:`resolve_case` finds a case from the string
-``--case`` carries (#187) and imports a bundled alias's module only at call time, through
-:data:`ALIASES`, a name-to-module table, so the pipeline, the drivers and a step's child
+The library never imports ``pysuto.cases`` or ``pysuto.tutorial`` by name: a case module
+sits at the top of the import direction, beside the drivers. :func:`resolve_case` finds a
+case from the string ``--case`` carries (#187) and imports a bundled alias's module only
+at call time, through :data:`ALIASES`, a name-to-module table, so the pipeline, the drivers and a step's child
 share one resolver without the library importing a case.
 """
 
@@ -292,8 +292,8 @@ def check_case(sidecar: dict, case: CaseSpec) -> None:
 # ======================================================================================
 # The bundled cases, name to module; the modules are imported at call time only.
 ALIASES = {"copper":        "pysuto.cases.copper",
-           "toy":           "pysuto.cases.toy",
-           "toy_coproduct": "pysuto.cases.toy_coproduct"}
+           "toy":           "pysuto.tutorial.toy",
+           "toy_coproduct": "pysuto.tutorial.toy_coproduct"}
 
 
 def _is_path(reference: str) -> bool:

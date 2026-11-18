@@ -15,9 +15,9 @@ import pytest
 
 import pysuto
 from pysuto.case import ALIASES, CaseSpec, case_reference, resolve_case
-from pysuto.cases import toy
+from pysuto.tutorial import toy
 
-REEXPORT = "from pysuto.cases.toy import CASE\n"
+REEXPORT = "from pysuto.tutorial.toy import CASE\n"
 
 
 def _sha(path) -> str:
@@ -63,8 +63,8 @@ class TestForms:
             assert case.case_sha256 == _sha(path)
 
     def test_the_module_path_of_a_pysuto_module_is_a_module_not_an_alias(self):
-        case = resolve_case("pysuto.cases.toy")
-        assert case.case_source == "module:pysuto.cases.toy"
+        case = resolve_case("pysuto.tutorial.toy")
+        assert case.case_source == "module:pysuto.tutorial.toy"
         assert case.case_sha256 == resolve_case("toy").case_sha256
 
     def test_a_relative_path_is_made_absolute_against_the_given_cwd(self, tmp_path):
@@ -167,10 +167,11 @@ def test_the_resolver_and_the_pipeline_load_no_case_module_until_an_alias_is_res
     an alias, so importing the resolver, the pipeline and the stages loads none."""
     src = str(Path(pysuto.__file__).resolve().parents[1])
     code = ("import sys, pysuto.case, pysuto.pipeline, pysuto.stages, pysuto._step\n"
-            "assert not [m for m in sys.modules if m.startswith('pysuto.cases')], "
+            "assert not [m for m in sys.modules if m.startswith(('pysuto.cases', "
+            "'pysuto.tutorial'))], "
             "'early'\n"
             "pysuto.case.resolve_case('toy')\n"
-            "assert 'pysuto.cases.toy' in sys.modules\n")
+            "assert 'pysuto.tutorial.toy' in sys.modules\n")
     proc = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True,
                           env={**os.environ, "PYTHONPATH": src})
     assert proc.returncode == 0, proc.stderr

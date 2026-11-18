@@ -1,7 +1,7 @@
 """
 test_toy_ext.py
 ===============
-The toy case's extras (#61, :mod:`pysuto.cases.toy_ext`): the three ``break_*``
+The toy case's extras (#61, :mod:`pysuto.tutorial.toy_ext`): the three ``break_*``
 experiments and the three seam examples. One module-scoped base chain (Stages 1-5) in a
 temporary run tree; every experiment runs into that tree under its own registry label.
 The assertions are the qualitative facts the notebooks teach, not the numbers of one run.
@@ -16,7 +16,7 @@ import textwrap
 import numpy as np
 import pytest
 
-from pysuto.cases import toy, toy_ext
+from pysuto.tutorial import toy, toy_ext
 from pysuto.impute.ledger import run_imputer
 from pysuto.registry import (ConstraintRunRegistry, DataFeedRegistry,
                              OptimRunRegistry)

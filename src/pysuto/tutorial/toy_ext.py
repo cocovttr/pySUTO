@@ -2,7 +2,7 @@
 toy_ext.py
 ==========
 The toy case's **extras** (#61): the code behind the notebooks ``08_break_it`` and
-``09_bridge``. Nothing here belongs to the core toy chain; :mod:`pysuto.cases.toy` is
+``09_bridge``. Nothing here belongs to the core toy chain; :mod:`pysuto.tutorial.toy` is
 imported, never edited.
 
 Break it
@@ -43,7 +43,7 @@ import pandas as pd
 import scipy.sparse as sp
 
 from pysuto._conditioning import condition_prior
-from pysuto.cases import toy
+from pysuto.tutorial import toy
 from pysuto.clarabel_backend import ClarabelBackend
 from pysuto.constraints import (BaseConstraintBuilder, ConstraintBlock, FlowBoundsBuilder,
                                 anchors)
