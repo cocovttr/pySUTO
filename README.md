@@ -184,13 +184,13 @@ modules:  Registry=registry/ (BaseOutputRegistry · _sidecar · make_run_id)
 LAYERED MODULE STACK   (imports flow downward only — never upward)
 
 ┌────────────────────────────────────────────────────────────────┐
-│  cases · tutorial (top, beside the stage drivers) — tutorial/  │
+│  tutorial (top, beside the stage drivers) — tutorial/          │
 │  toy: a case declared in code, acc spec, synthetic feeds,      │
 │  params, the six stages wired into a run tree; imported by     │
 │  nothing in pysuto                                             │
 │  pipeline.py  ·  Pipeline · Sweep — calls pysuto.stages for    │
 │  Stages 2–6, each step in a child process that resolves the    │
-│  case reference; never imports scripts/ or the cases           │
+│  case reference; never imports scripts/ or the tutorial        │
 │  scripts/                                                      │
 └──────┬─────────────────────────────────────────────────────────┘
        │
@@ -807,7 +807,7 @@ Without it, the full-G path falls back to `scipy.sparse.linalg.splu` — same an
 
 #### Caveats
 
-The full-G (legacy) path is **bound-blind**: it has no active set, so every hard inequality row enters as an equality (the block path linearises at the active set, #27). Per the spec (`docs/rep/plans/stage3_posterior_uncertainty_approach_A.md` §6), the closed form is also the **Laplace approximation** of the true posterior — acceptable for tightly-distributed flows but increasingly approximate for wide log-normal pedigree tails.
+The full-G (legacy) path is **bound-blind**: it has no active set, so every hard inequality row enters as an equality (the block path linearises at the active set, #27). The closed form is also the **Laplace approximation** of the true posterior — acceptable for tightly-distributed flows but increasingly approximate for wide log-normal pedigree tails.
 
 ### Stage 6 — PSUT/PIOT builder
 
@@ -843,7 +843,7 @@ Run Stage 6 on the toy case in [tutorial/06_psut_piot.ipynb](src/pysuto/tutorial
 | [registry/](src/pysuto/registry/) | `BaseOutputRegistry`, `DataFeedRegistry`, `ImputationRunRegistry`, `ConstraintRunRegistry`, `OptimRunRegistry`, `UncPropRunRegistry`, `PsutRunRegistry`, `SweepRunRegistry`, `_RegistryEntry`, `make_run_id`, `build_sidecar`, `stage_lock`, `LockHeld` | Harmonized output registries (Stages 1–6); shared run-id pattern + sidecar schema; the advisory stage lock on `data/proc` (#101). **Subpackage layout:** `base.py`, `feed.py`, `imputation.py`, `constraint.py`, `optim.py`, `uncprop.py`, `psut.py`, `sweep.py`, `lock.py`, `_sidecar.py`. |
 | [input_registry.py](src/pysuto/input_registry.py) | `InputRegistry`, `InputRegistries`, `pins_from_inputs`, `input_pins` | Per-kind versioned snapshot store for `feed`, `acc`, `params`, `mask` inputs; hardlink dedup; auto-bump on content-hash change; pins that replay a sidecar's input versions (#53). Imports nothing from `acc`; the spec-comparing checks of acc versions live in `acc.py` (#119). |
 | [knobs.py](src/pysuto/knobs.py) | `parse_overrides`, `apply_overrides`, `add_knob_args`, `overrides_from_cli`, `write_run_id` | The driver knob protocol: `--set KNOB=VALUE` against a driver's `KNOBS`, and `--run-id-file` (#100). |
-| [case.py](src/pysuto/case.py) | `CaseSpec`, `Section`, `ImpSection`, `ConstSection`, `FillEntry`, `CascadeStep`, `Cascade`, `CaseContext` | A case as a typed declaration (#120): its acc id, one frozen section per stage and the `driver_knobs` it sets on the Stage 4–6 drivers (#124), whose UPPER_CASE fields are the stage's knobs and whose entries and functions (the Stage 2 `cascade` of `FillEntry` data and `terminal`, the Stage 3 `builders`, selectors) build over a `CaseContext`; `with_knobs` applies `--set`, `describe` serialises a section into a run's `stage_config["case"]`. |
+| [case.py](src/pysuto/case.py) | `CaseSpec`, `Section`, `ImpSection`, `ConstSection`, `FillEntry`, `CascadeStep`, `Cascade`, `CaseContext`, `resolve_case`, `ALIASES`, `add_case_arg`, `case_from_args` | A case as a typed declaration (#120), the `--case` resolver (#187) and the drivers' `--case` option (`add_case_arg` / `case_from_args`, which end a driver through `parser.error`): its acc id, one frozen section per stage and the `driver_knobs` it sets on the Stage 4–6 drivers (#124), whose UPPER_CASE fields are the stage's knobs and whose entries and functions (the Stage 2 `cascade` of `FillEntry` data and `terminal`, the Stage 3 `builders`, selectors) build over a `CaseContext`; `with_knobs` applies `--set`, `describe` serialises a section into a run's `stage_config["case"]`. |
 | [scripts/copper.py](scripts/copper.py) | `copper.CASE`, `CopperImp`, `CopperConst`, `CASCADE`, `terminal`, `builders`, `pre_impute`, `post_impute`, `damp_leg_sigma`, `screen_outlier_trade_legs`, `screen_contradicted_nodes`, `time_interp_scope`, `scale_total_resolver` (over `constraints.anchors`, #145) | The copper case, which lives in the repository and not in the package (ADR 0047): a module beside the drivers, outside the import direction, that imports the library. It holds the copper Stage 2 and 3 model: every knob at its shipped value, the declared imputer cascade, the constraint builders and the σ algorithms (#121); the Stage 2–6 drivers take `--case <reference>` (the `scripts/` drivers default to `scripts/copper.py`, resolved by path; `copper` imports `copper_feed` one way) and `python -m pysuto run` requires it; `pysuto.case.resolve_case` resolves a bundled alias, a dotted module or a file path to the module's `CASE` and stamps it with `case_source` (`alias:<name>`, `module:<dotted>` or `path:<abs>`) and `case_sha256` (the sha256 of that module's source file), which a run records in `stage_config["case"]` and which stay out of `CaseSpec` equality; `with_knobs` keeps them, while a case built in Python, or changed structurally with `dataclasses.replace` on a module's own `CASE`, carries neither (clear both on a resolved case before changing it; #187); the drivers parse arguments, take the stage lock and run the stage. |
 | [feedprep/](src/pysuto/feedprep/) | `trade_shares.compute_trade_share_weights`, `trade_shares.build_edges_frame`, `reexport.net_reexports`, `reexport.waterfill`, `ore_grade.compute_insitu_grades`, `OreGradeLabels` | The feed-side algorithms of a case, labels as parameters (#147): the BACI-trade-share weights of ICSG's producer fan (ADR 0002, 0024), the re-export netting (ADR 0027) and the ore-grade triangle (ADR 0015, 0023). `scripts/build_{trade_shares,baci_reexport,ore_grade}.py` parse arguments and call them; `scripts/copper_feed.py` holds copper's three `FeedSpec`s and their loaders, binds copper's labels, reads the registered ICSG inputs and holds the complete ICSG `FeedSpec`, `ICSG_SPEC` (trade-share weights, #53's refusal of stale ones, observed zeros). |
 | [stages.py](src/pysuto/stages.py) | `run_imp`, `run_const`, `run_opt`, `run_uncprop`, `run_psut`, `OPT_KNOBS`, `PSUT_KNOBS` | The bodies of the Stage 2–6 drivers as library functions over a `CaseSpec`, a data dir and the upstream run id (#124, #186); the toy's `run_stage2` / `run_stage3` call the first two, and `python -m pysuto run` all five. The Stage 4–6 tuning constants (solver tolerances, `N_WORKERS`, `QP_VARIABLES`, `ALPHA`, `PRIMARY`) sit in its `# USER CONFIGURATION` block. `pysuto.case.check_case` refuses a run made by another case. |
@@ -1342,7 +1342,6 @@ pysuto/
 │                          tidy table · block views · realized_conc · aggregate     │
 ├── piot.py                PIOT · market_share_network · market_shares       │
 │                                                                            │
-├── cases/                 case modules: copper only (top layer)             │
 ├── tutorial/              toy cases · notebooks (top layer)                 │
 │   └── toy.py              the toy case: ACC_SPEC · truth · make_feeds ·    │
 │                           write_params · run_stage1..6 · scoreboard        │
@@ -1379,13 +1378,13 @@ collector  →  agg  →  impute  →  constraints  →  solver  →  uncprop
 _conditioning  ←  solver, uncprop          (shared σ-conditioning helper)
 knobs          ←  the stage drivers        (the --set / --run-id-file protocol)
 case           ←  the tutorial, the stage drivers (CaseSpec; imports nothing from pysuto); its `resolve_case` reaches a bundled case only by `importlib.import_module` on a name → module string, at call time: the one sanctioned reference from the library to `pysuto.tutorial`, kept by the runtime layering test (`tests/test_case_resolution.py`)
-stages         ←  cases, pipeline, the stage drivers (the Stage 2–6 bodies over a CaseSpec; driver-level code like the scripts, not the data layer, so it imports diag; never imports cases)
-cases, tutorial ──── top, beside the drivers and `python -m pysuto` (`__main__`): case instances and the toy cases (`pysuto.tutorial`, #188); never imported by the library
-pipeline       ←  stages, registry, logging (runs each step as a child of pysuto._step; never imports scripts/, the cases or the tutorial)
+stages         ←  case, pipeline, the stage drivers (the Stage 2–6 bodies over a CaseSpec; driver-level code like the scripts, not the data layer, so it imports diag; never imports the tutorial)
+tutorial ──── top, beside the drivers and `python -m pysuto` (`__main__`): the toy cases (`pysuto.tutorial`, #188); never imported by the library
+pipeline       ←  stages, registry, logging (runs each step as a child of pysuto._step; never imports scripts/ or the tutorial)
 psut           ←  acc, registry            (Stage 6 — reads a persisted opt run)
 piot           ←  psut                     (Stage 6 — a derived view of a PSUT)
 diag           ──── consumer; never imported into the data layer
-cases, tutorial ──── top: import the library (diag included) like a stage driver;
+tutorial ──── top: imports the library (diag included) like a stage driver;
                     nothing in pysuto but `__main__` imports them
 scripts/copper.py ──── the copper case, outside the package (ADR 0047): imports the library;
                     `scripts/` drivers import it, `--case scripts/copper.py` resolves it
@@ -1446,7 +1445,7 @@ indistinguishable from real data once it reaches the model:
 The two tables above cover the core layers and the parse stage; `tests/` holds further modules for
 diagnostics, params and helpers not itemised here.
 
-Run with `pytest tests/ -v` — **1,159 passing, 1 skipped** as of 2026-10-12 (in a git worktree, prefix with `PYTHONPATH=src`: the conda env's editable install points at the main checkout).
+Run with `pytest tests/ -v` (in a git worktree, prefix with `PYTHONPATH=src`: the conda env's editable install points at the main checkout).
 
 ---
 

@@ -20,7 +20,9 @@ TUTORIAL = Path(pysuto.tutorial.__file__).resolve().parent
 NOTEBOOKS = sorted(TUTORIAL.glob("[0-9][0-9]_*.ipynb"))
 MAX_BODY = 5                                       # lines of a function body
 ANSWER_HOOKS = ("truth", "reveal")                 # the answer key, from chapter 07 on
-HOME_OR_TEMP = re.compile(r"/home/|/Users/|/tmp/|/var/folders/|[A-Za-z]:\\\\Users")
+# No shipped cell source or output holds "/tmp/" (checked on 2026-11-18), so it cannot
+# false-positive on prose; ``scripts/refresh_tutorial.py`` rewrites temp paths.
+HOME_OR_TEMP = re.compile(r"/home/|/Users/|/tmp/|/var/folders/|[A-Za-z]:\\+Users")
 EXERCISE = re.compile(r"\*\*Exercise \d+\.\d+\*\*")
 
 
@@ -137,3 +139,52 @@ def test_a_long_function_and_a_scripts_import_fail(tmp_path):
     assert any("body" in v for v in violations(path))
     assert any("scripts/" in v for v in violations(
         _planted(tmp_path, "00_world.ipynb", "from scripts import acc")))
+
+
+@pytest.mark.parametrize("text", ["/home/ann/x", "/Users/ann/x", "/tmp/run1",
+                                  "C:\\Users\\ann\\x", "C:\\\\Users\\\\ann"])
+def test_every_machine_path_form_is_found(text):
+    assert HOME_OR_TEMP.search(text)
+
+
+def _edited(tmp_path, chapter_file: str, edit):
+    nb = json.loads((TUTORIAL / chapter_file).read_text(encoding="utf-8"))
+    edit(nb)
+    out = tmp_path / "00_edited.ipynb"
+    out.write_text(json.dumps(nb), encoding="utf-8")
+    return out
+
+
+def test_an_error_output_a_hook_marker_or_another_kernel_fails(tmp_path):
+    def error(nb):
+        cell = next(c for c in nb["cells"] if c["cell_type"] == "code")
+        cell["outputs"] = [{"output_type": "error", "ename": "KeyError", "evalue": "x",
+                            "traceback": []}]
+
+    def hook(nb):
+        nb["cells"].append({"cell_type": "code", "metadata": {}, "execution_count": None,
+                            "outputs": [], "source": "# HOOK NEEDED: f() -> x"})
+
+    def kernel(nb):
+        nb["metadata"]["kernelspec"]["name"] = "pysuto"
+
+    for edit, word in ((error, "error output"), (hook, "HOOK NEEDED"),
+                       (kernel, "kernelspec")):
+        found = violations(_edited(tmp_path, "00_world.ipynb", edit))
+        assert any(word in v for v in found), (word, found)
+
+
+def test_an_exercise_that_ends_in_no_check_call_fails(tmp_path):
+    def edit(nb):
+        i = next(i for i, c in enumerate(nb["cells"])
+                 if c["cell_type"] == "markdown" and EXERCISE.search(_source(c)))
+        j = next(j for j in range(i + 1, len(nb["cells"]))
+                 if nb["cells"][j]["cell_type"] == "code")
+        nb["cells"][j]["source"] = "answer = 1"
+        for k in range(j + 1, len(nb["cells"])):
+            if nb["cells"][k]["cell_type"] != "code":
+                break
+            nb["cells"][k]["source"] = "answer = 1"
+
+    found = violations(_edited(tmp_path, "03_constraints.ipynb", edit))
+    assert any("no check_*" in v for v in found)

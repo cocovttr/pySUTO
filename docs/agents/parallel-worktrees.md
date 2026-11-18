@@ -10,11 +10,12 @@ worktree's absolute path, `<main>` the main checkout's.
   suite) and notebook-kernel start an absolute `PYTHONPATH=<wt>/src`. The env's editable install
   points at `<main>`: without the prefix you import and test main's code. A relative path breaks
   as soon as the cwd changes.
-- Never `pip install` into `pysuto`. Install and build tests go in a throwaway venv in the
-  scratchpad, deleted afterwards.
+- Install and build tests in a throwaway venv in the scratchpad, deleted afterwards; the
+  `pysuto` env stays as the maintainer left it.
 - A worktree has no `data/proc`. A suite run there leaves gitignored files in the worktree's own
   `data/`: remove them before the next full run.
-- Never edit, check out, merge or reset in `<main>` or in another worktree, and never push or tag.
+- Work only inside your worktree: `<main>` and the other worktrees are read-only to you, and the
+  branch stays local (no push, no tag).
 
 ## Pipeline runs
 
@@ -33,11 +34,14 @@ worktree's absolute path, `<main>` the main checkout's.
 
 ## Git
 
-- Stage files by explicit path; never `git add -A`, never `data/`, `logs/`, `leg/`.
-- Commit messages use no issue-closing keyword (the hook refuses them); write the message to a file
-  and run `git commit -F <file>`.
-- Merging a branch that untracks files deletes them from the receiving working tree: after such a
-  merge, restore them from the parent commit (`git checkout <parent> -- <paths>`).
+- Stage files by explicit path, so `data/`, `logs/` and `leg/` stay out.
+- Describe the issue as `(#NN)` in the commit message; the hook refuses issue-closing keywords. Write
+  the message to a file and run `git commit -F <file>`.
+- Merging a branch that untracks files deletes them from the receiving working tree. Restore them
+  from the pre-merge commit `<sha>`: list the names with `git ls-tree -r -z --name-only <sha> --
+  <paths>` (`-z`, because non-ASCII names come back quoted otherwise), write each with
+  `git cat-file -p <sha>:<path> > <path>`, and compare `git hash-object <path>` with the blob id
+  from `git ls-tree <sha> -- <path>`.
 
 ## Report
 

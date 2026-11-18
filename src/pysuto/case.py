@@ -19,7 +19,9 @@ the import direction, beside the drivers. :func:`resolve_case` finds a case from
 string ``--case`` carries (#187) and imports a bundled alias's module only at call time,
 through :data:`ALIASES`, a name-to-module table, so the pipeline, the drivers and a
 step's child share one resolver without the library importing a case.
-:func:`add_case_arg` and :func:`case_from_args` are the drivers' ``--case`` option.
+The module also hosts the drivers' ``--case`` argparse helpers, :func:`add_case_arg` and
+:func:`case_from_args`; the latter ends a driver through ``parser.error`` on an unknown
+reference.
 """
 
 from __future__ import annotations
