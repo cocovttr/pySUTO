@@ -104,7 +104,7 @@ def test_a_case_file_outside_src_runs_the_chain_bit_identical_to_the_alias(
             elif isinstance(a[key], pd.DataFrame):
                 assert a[key].equals(b[key]), (stage, key)
             else:
-                nan = a[key].dtype.kind in "fc"     # NaN is "not covered", equal to itself
+                nan = a[key].dtype.kind in "fc"     # NaN: "not covered", equal to itself
                 assert np.array_equal(a[key], b[key], equal_nan=nan), (stage, key)
         ca = reg(str(chain["root"] / "proc" / stage)).load_sidecar(
             a_id)["stage_config"]["case"]
@@ -130,8 +130,10 @@ def test_the_command_leaves_six_stages_linked_through_their_sidecars(chain):
     for stage in regs:
         assert (proc / stage / ids[stage]).is_dir()
     for run_id in ids["feed"].values():
-        assert run_id.startswith("feed_") and (proc / "feed" / "registry" / run_id).is_dir()
-    assert side["imp"]["parents"]["upstream"]["feed_run_ids"] == list(ids["feed"].values())
+        assert run_id.startswith("feed_")
+        assert (proc / "feed" / "registry" / run_id).is_dir()
+    feed_ids = side["imp"]["parents"]["upstream"]["feed_run_ids"]
+    assert feed_ids == list(ids["feed"].values())
     assert side["const"]["parents"]["upstream"]["imp_run_id"] == ids["imp"]
     assert side["opt"]["parents"]["upstream"]["const_run_id"] == ids["const"]
     assert side["uncprop"]["parents"]["upstream"]["opt_run_id"] == ids["opt"]
@@ -157,7 +159,8 @@ def test_a_feed_step_needs_the_case_s_stage_1_hook(tmp_path, monkeypatch):
 
 
 def test_a_start_past_the_feed_step_needs_a_base_and_a_feed_start_refuses_one(tmp_path):
-    no_base = _run(tmp_path, "--case", "toy", "--from", "imp", "--data-dir", str(tmp_path))
+    no_base = _run(tmp_path, "--case", "toy", "--from", "imp",
+                   "--data-dir", str(tmp_path))
     assert no_base.returncode == 2 and "--base" in no_base.stderr
     both = _run(tmp_path, "--case", "toy", "--from", "feed", "--base", "opt_x",
                 "--data-dir", str(tmp_path))

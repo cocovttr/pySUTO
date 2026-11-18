@@ -19,8 +19,7 @@ import pandas as pd
 import pytest
 
 from copper_case import copper
-from pysuto.case import CaseSpec, check_case
-from pysuto.cases import case_ids, load_case
+from pysuto.case import ALIASES, CaseSpec, check_case, resolve_case
 from pysuto.tutorial import toy
 from pysuto.registry import (ConstraintRunRegistry, ImputationRunRegistry,
                              OptimRunRegistry, PsutRunRegistry, UncPropRunRegistry)
@@ -124,7 +123,7 @@ def test_the_library_stages_4_to_6_reproduce_the_driver_chain_bit_for_bit(chain)
     on the driver chain's const run write the arrays the drivers wrote."""
     from pysuto import stages
     root, ids = chain["root"], chain["ids"]
-    toy_case = load_case("toy")         # the drivers' case carries its provenance (#187)
+    toy_case = resolve_case("toy")         # the drivers' case carries its provenance (#187)
     opt = stages.run_opt(toy_case, ids["const"], "toy", data_dir=str(root))
     unc = stages.run_uncprop(toy_case, opt, "toy", data_dir=str(root))
     psut = stages.run_psut(toy_case, opt, "toy", data_dir=str(root))
@@ -156,9 +155,9 @@ def test_the_psut_primary_defaults_to_the_acc_s_content_valuation(chain):
 
 def test_an_unknown_case_raises_listing_the_known_ones():
     with pytest.raises(ValueError, match="'nope'.*toy"):
-        load_case("nope")
-    assert {"toy", "toy_coproduct"} <= set(case_ids()) and "copper" not in case_ids()
-    assert isinstance(load_case("toy"), CaseSpec) and load_case(copper.__file__).id == "copper"
+        resolve_case("nope")
+    assert {"toy", "toy_coproduct"} <= set(ALIASES) and "copper" not in ALIASES
+    assert isinstance(resolve_case("toy"), CaseSpec) and resolve_case(copper.__file__).id == "copper"
 
 
 def test_a_driver_refuses_an_unknown_case_with_a_usage_error(tmp_path):

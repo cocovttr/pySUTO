@@ -455,17 +455,16 @@ def test_the_exercise_checks_accept_the_reference_and_reject_a_wrong_answer(chai
 
 
 def test_imports_flow_one_way_tutorial_on_top_and_truth_diag_a_leaf():
-    """The library imports no ``pysuto.cases`` or ``pysuto.tutorial`` (``__main__.py``,
-    the ``python -m pysuto``
-    driver, and ``_step.py``, its step child, are drivers and do); ``diag/truth.py``
+    """The library imports no ``pysuto.tutorial`` (``__main__.py``, the
+    ``python -m pysuto`` driver, and ``_step.py``, its step child, are drivers and do); ``diag/truth.py``
     imports neither the cases nor ``scripts/``."""
     src = Path(toy.__file__).resolve().parents[1]
     imports_cases   = re.compile(
-        r"^\s*(from|import)\s+(pysuto\.(cases|tutorial)|\.+(cases|tutorial))\b",
+        r"^\s*(from|import)\s+(pysuto\.tutorial|\.+tutorial)\b",
         re.MULTILINE)
     imports_scripts = re.compile(r"^\s*(from|import)\s+scripts\b", re.MULTILINE)
     importers = [str(p.relative_to(src)) for p in src.rglob("*.py")
-                 if p.parent.name not in ("cases", "tutorial")
+                 if p.parent.name != "tutorial"
                  and p.name not in ("__main__.py", "_step.py")
                  and imports_cases.search(p.read_text(encoding="utf-8"))]
     assert importers == []

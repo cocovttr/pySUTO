@@ -2,8 +2,8 @@
 case.py
 =======
 A **case** as a typed declaration (GLOSSARY.md "Case", #26 §3, #120): the
-:class:`CaseSpec` a case module ``pysuto.cases.<id>`` instantiates and the Stage 2
-and Stage 3 drivers build from.
+:class:`CaseSpec` a case module instantiates (``CASE``) and the Stage 2 and Stage 3
+drivers build from.
 
 A case declares one section per stage. A section is a frozen dataclass whose
 UPPER_CASE fields are the stage's **knobs** (GLOSSARY.md "Knob") at the case's
@@ -14,11 +14,12 @@ fields; the library names none of them. ``--set KNOB=VALUE`` replaces a knob fie
 (:meth:`Section.with_knobs`), and a run records its section in its sidecar
 (:meth:`CaseSpec.describe`).
 
-The library never imports ``pysuto.cases`` or ``pysuto.tutorial`` by name: a case module
-sits at the top of the import direction, beside the drivers. :func:`resolve_case` finds a
-case from the string ``--case`` carries (#187) and imports a bundled alias's module only
-at call time, through :data:`ALIASES`, a name-to-module table, so the pipeline, the drivers and a step's child
-share one resolver without the library importing a case.
+The library never imports ``pysuto.tutorial`` by name: a case module sits at the top of
+the import direction, beside the drivers. :func:`resolve_case` finds a case from the
+string ``--case`` carries (#187) and imports a bundled alias's module only at call time,
+through :data:`ALIASES`, a name-to-module table, so the pipeline, the drivers and a
+step's child share one resolver without the library importing a case.
+:func:`add_case_arg` and :func:`case_from_args` are the drivers' ``--case`` option.
 """
 
 from __future__ import annotations
@@ -376,6 +377,29 @@ def resolve_case(reference: str) -> CaseSpec:
         raise ValueError(f"case {reference!r}: module {module.__name__} has no "
                          f"source file")
     return replace(case, case_source=source, case_sha256=_sha256(module.__file__))
+
+
+def add_case_arg(parser, default: Optional[str] = None) -> None:
+    """Add ``--case <reference>`` to a driver's parser: ``default`` is the case it runs
+    without the option; ``None`` makes the option required, which
+    :func:`case_from_args` enforces (exit 2, listing the aliases)."""
+    parser.add_argument("--case", default=default, metavar="CASE",
+                        help="Case: a bundled alias (" + ", ".join(sorted(ALIASES))
+                             + "), a dotted module or a file path"
+                             + (" (required)." if default is None
+                                else f" (default {default})."))
+
+
+def case_from_args(parser, args) -> CaseSpec:
+    """The case ``--case`` names; an unknown reference ends the driver through
+    ``parser.error`` (exit 2, naming what was tried)."""
+    if args.case is None:
+        parser.error("--case is required: a bundled alias (" + ", ".join(sorted(ALIASES))
+                     + "), a dotted module or a file path")
+    try:
+        return resolve_case(args.case)
+    except ValueError as exc:
+        parser.error(str(exc))
 
 
 @dataclass(frozen=True)
