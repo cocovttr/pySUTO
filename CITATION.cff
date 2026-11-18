@@ -1,0 +1,23 @@
+cff-version: 1.2.0
+message: "If you use pySUTO, please cite it as below."
+type: software
+title: "pySUTO: Python-based Supply-Use Table Optimiser"
+abstract: >-
+  pySUTO reconciles supply-use tables from conflicting sources: a sigma-weighted
+  quadratic programme, solved with Clarabel, returns the flows that agree with the
+  accounting constraints at the smallest weighted distance from the data, and the
+  posterior uncertainty of every flow.
+authors:
+  - given-names: Florian
+    family-names: Huber
+    email: florian.huber1@wu.ac.at
+    affiliation: "Vienna University of Economics and Business (WU)"
+    orcid: "https://orcid.org/0009-0000-4927-3104"
+license: MIT
+repository-code: "https://github.com/florihu/pySUTO"
+keywords:
+  - material flow analysis
+  - supply-use tables
+  - data reconciliation
+  - uncertainty
+  - copper

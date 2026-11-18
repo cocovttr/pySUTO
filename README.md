@@ -1473,6 +1473,8 @@ python -m pytest tests/
 
 **Core dependencies (from `pyproject.toml`):** `numpy`, `pandas`, `scipy`, `pyarrow`, `clarabel`, `pyyaml`, `matplotlib` (the last is used only by [diag/](src/pysuto/diag/) for plotting).
 
+**Licence and citation.** The code is licensed under the MIT License ([LICENSE](LICENSE)). The hand-authored tables `data/input/acc/`, `data/input/params/{conc,eff}/` and `data/input/mask/` are licensed under CC BY 4.0 ([LICENSE-DATA](LICENSE-DATA)). The other tracked tables (the feed concordances and metadata, and the derived parameter tables such as `scrap_share`, `stock_bounds` and `ore_grade`) carry no licence until their licence check is recorded; the original source data are not in the repository and stay under their owners' terms. To cite pySUTO, use [CITATION.cff](CITATION.cff). The optional `uncprop` extra pulls in `scikit-sparse`, whose CHOLMOD backend is LGPL/GPL; pySUTO does not need it.
+
 ---
 
 ## Glossary

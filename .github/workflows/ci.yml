@@ -92,6 +92,14 @@ jobs:
           stray = [n for n in wheel if "/runs/" in n or ".ipynb_checkpoints" in n]
           if stray:
               raise SystemExit(f"wheel holds tutorial run output: {stray[:10]}")
+          whl = zipfile.ZipFile(glob.glob("dist/*.whl")[0])
+          meta = whl.read(next(n for n in wheel if n.endswith(".dist-info/METADATA"))).decode()
+          for line in ("License-Expression: MIT", "License-File: LICENSE"):
+              if line not in meta.splitlines():
+                  raise SystemExit(f"wheel METADATA lacks {line!r}")
+          if not any(l.startswith("Author-email:") and "florian.huber1@wu.ac.at" in l
+                     for l in meta.splitlines()):
+              raise SystemExit("wheel METADATA lacks the author e-mail")
           print(f"wheel {len(wheel)} files, sdist {len(sdist)} files: clean")
           PY
       - uses: actions/upload-artifact@v7.0.2
