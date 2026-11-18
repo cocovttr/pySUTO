@@ -46,6 +46,12 @@ _STATUS = {"good": "#0ca30c", "warning": "#fab219", "critical": "#d03b3b"}
 _INK    = {"primary": "#0b0b0b", "muted": "#898781"}
 
 
+def _bins(x, n: int = 60) -> int:
+    """``n`` histogram bins, or one when ``x`` is constant to rounding: numpy 2 raises on
+    60 bins of a range of 1e-16, as a case whose covered edges share one CV has (#197)."""
+    return n if np.ptp(x) > 1e-9 else 1
+
+
 def _seq_cmap():
     """The default colormap for every continuous colour scale: viridis."""
     import matplotlib.pyplot as plt

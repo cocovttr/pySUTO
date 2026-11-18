@@ -347,6 +347,19 @@ def test_imp_diag_filenames_have_no_prefix(acc, tmp_path):
         assert bn.startswith("imputation_")
 
 
+def test_imp_diag_plots_fills_that_share_one_cv(acc, tmp_path):
+    """The CV panel of a one-feed case (#197): every filled edge has CV 0.1 to rounding
+    (not exactly: numpy 2 raises only on a range of 1e-17, not of 0)."""
+    from pysuto.diag import ImpDiagnostic
+
+    fills = [{"edge_id": i, "step": 1, "method": "time_linear", "f_after": f,
+              "sigma_after": 0.1 * f} for i, f in enumerate((10.0, 3.0, 7.0))]
+    acc.time_range  = ["2020", "2021", "2022"]
+    acc.decode_node = lambda nid: ("Mining", "Process", "A")
+    diag = ImpDiagnostic(_agg_with_log(acc, fills), acc_struct=acc, label="mycase")
+    assert diag.plot(odir=str(tmp_path), show=False)
+
+
 # ---------------------------------------------------------------------------
 # 7. Year focus + sector/region |f| boxplots
 # ---------------------------------------------------------------------------
@@ -595,3 +608,16 @@ def test_cross_valuation_check_clean_and_uncovered_ignored(acc):
 
     out = ImpDiagnostic(agg, acc_struct=acc, label="t").cross_valuation_check()
     assert out.empty
+
+
+def test_agg_diag_plots_edges_that_share_one_cv(acc, tmp_path):
+    """A one-feed case (#197): every covered edge has the same CV to rounding, and
+    numpy 2 refuses 60 bins of a range of 1e-16."""
+    from pysuto.diag import AggDiagnostic
+
+    f = np.linspace(1.0, 10.0, acc.n_edges)
+    agg = _agg_result(f, 0.1 * f)
+
+    paths = AggDiagnostic(agg, label="mycase").plot(odir=str(tmp_path), show=False)
+    assert [os.path.basename(p) for p in paths] == ["agg_distributions.png"]
+    assert os.path.getsize(paths[0]) > 0
