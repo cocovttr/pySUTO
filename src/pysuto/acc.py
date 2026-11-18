@@ -39,7 +39,9 @@ never the labels. The entity kinds ``Process | Flow | SB`` are reserved framewor
 not roles; a ``secondary`` node is an input on a use edge and a residual output on a
 supply edge, so edge direction tells Scrap from Slag. Build and load raise unless
 sector → entity is 1:1, every SB sector and no other carries a known boundary role, and
-there is exactly one ``content`` and one ``gross`` valuation.
+there is exactly one ``content`` and one ``gross`` valuation, or a single valuation, which
+then carries both roles (one quantity balanced per structure, e.g. a case that solves its
+valuations in separate runs; ADR 0034 amendment).
 
 Root loading
 ------------
@@ -170,7 +172,8 @@ BALANCE_ENTITIES = frozenset({"Flow", "Process"})
 
 @dataclass(frozen=True)
 class ValuationRoles:
-    """The valuation labels a case binds to the two valuation roles."""
+    """The valuation labels a case binds to the two valuation roles; a single-valuation
+    structure binds both to its one label."""
     content: str
     gross:   str
 
@@ -207,8 +210,9 @@ def _bind_roles(sectors: list, valuations: list) -> tuple:
     ValueError
         A sector declared twice (sector → entity is 1:1), an ``SB`` sector without a
         boundary role, a role on a ``Process`` or ``Flow`` sector, an unknown role name,
-        a valuation without a role, or not exactly one ``content`` and one ``gross``
-        valuation.
+        a valuation without a role, or (with more than one valuation) not exactly one
+        ``content`` and one ``gross`` valuation. A single valuation, of either declared
+        role, is bound to both roles.
     """
     entities: dict = {}
     for s in sectors:
@@ -245,10 +249,13 @@ def _bind_roles(sectors: list, valuations: list) -> tuple:
             what = "no role" if role is None else f"unknown role {role!r}"
             raise ValueError(f"acc spec: valuation {v['name']!r} has {what}; expected "
                              f"one of {[r.value for r in ValuationRole]}") from None
+    if len(valuations) == 1:
+        name = valuations[0]["name"]
+        return roles, ValuationRoles(content=name, gross=name)
     wrong = {r.value: names for r, names in by_role.items() if len(names) != 1}
     if wrong:
-        raise ValueError(f"acc spec: exactly one content and one gross valuation are "
-                         f"required; got {wrong}")
+        raise ValueError(f"acc spec: exactly one content and one gross valuation, or a "
+                         f"single valuation, are required; got {wrong}")
     return roles, ValuationRoles(content=by_role[ValuationRole.CONTENT][0],
                              gross=by_role[ValuationRole.GROSS][0])
 

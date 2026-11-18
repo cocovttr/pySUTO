@@ -29,3 +29,16 @@ metal case nothing. Validation runs on build **and** on load (sector→entity 1:
 - **Splitting `secondary` into `secondary_input` / `residual_output`.** Contradicts the single
   `SEM` category the glossary defines (which also carries `PSC`) and forces every case to assign a
   fourth role that edge direction already determines.
+
+> **Amendment (2026-11-18, branch `feat/single-valuation`).** A structure may also declare a
+> **single valuation**, which is then bound to both roles (`content` and `gross` name the same
+> label). A case that balances each quantity in its own run (CarIO: Mass first, then fossil and
+> biogenic carbon from the solved Mass) needs this; with two or more valuations the rule stays
+> exactly one `content` and one `gross`, so three valuations still raise. Nothing in the library
+> needed to change beyond `_bind_roles`: every role read either filters edges by one valuation
+> or pairs a content edge with its gross twin through `conc` params, which match no edge in a
+> one-valuation structure (ratio rows naming the absent valuation are skipped with the existing
+> warning). The saved role map is keyed by label and keeps one role for the label; `load()`
+> binds it to both again. Evidence: the toy case with only `Gross` runs all six stages, every
+> year solved, hard rows closed to 1e-10, the `Gross` PSUT balances per node
+> (`tests/test_toy_single_valuation.py`).

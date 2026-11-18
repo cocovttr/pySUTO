@@ -1295,7 +1295,8 @@ whitelisted for mixed-valuation rows. _Avoid_: reading a ratio's two valuations 
 role** of an `SB` node, `nature | secondary | final_demand` (the three system-boundary categories
 above; a `secondary` node is an input when reached by a use edge and a residual output when reached
 by a supply edge), and the **valuation role**, `content | gross` (contained-metal mass vs gross
-product mass). The entity kinds `Process | Flow | SB` are reserved framework words, not roles.
+product mass). A structure with a single valuation binds both valuation roles to it. The
+entity kinds `Process | Flow | SB` are reserved framework words, not roles.
 A case binds its labels to roles in its acc spec
 ([ADR 0034](docs/adr/0034-roles-are-the-frameworks-labels-are-the-cases.md)).
 _Avoid_: reading a label (`SEM`, `CC`) as the concept — labels are the case's, roles are the
