@@ -42,7 +42,9 @@ def chain(tmp_path_factory):
     ids["const"]   = toy.run_stage3(root, ids["imp"])
     ids["opt"]     = toy.run_stage4(root, ids["const"])
     ids["uncprop"] = toy.run_stage5(root, ids["opt"])
-    ids["psut"]    = toy.run_stage6(root, ids["opt"])
+    # no PNG: Kaleido needs Chrome, which the suite does not (the two PNG tests below
+    # fake the figure; the tutorial job draws the real one)
+    ids["psut"]    = toy.run_stage6(root, ids["opt"], png=False)
     return {"root": root, "ids": ids, "seconds": time.perf_counter() - t0,
             "acc": AccountingStructure.load(toy.ACC_ID,
                                             storage_dir=str(root / "proc" / "acc"))}

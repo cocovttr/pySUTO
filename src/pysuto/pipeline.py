@@ -282,13 +282,7 @@ class Pipeline:
         worktree or test parent never runs another checkout's code); return the run id
         the child wrote. Its stdout and stderr go to ``spec.log_path``. A child that
         exits non-zero, or exits 0 without a run id, raises :class:`StepFailed`."""
-        src = str(Path(pysuto.__file__).resolve().parents[1])
-        env = dict(os.environ)
-        # a site-packages directory (an installed wheel) is on the child's path anyway,
-        # and ahead of the stdlib on PYTHONPATH it would shadow it
-        if src not in (*site.getsitepackages(), site.getusersitepackages()):
-            env["PYTHONPATH"] = os.pathsep.join(
-                [src] + ([env["PYTHONPATH"]] if env.get("PYTHONPATH") else []))
+        env = _child_env()
         with tempfile.TemporaryDirectory() as tmp:
             spec = replace(spec, run_id_file=os.path.join(tmp, "run_id"))
             spec_path = os.path.join(tmp, "spec.json")
@@ -309,6 +303,21 @@ class Pipeline:
                 raise StepFailed(step, rc, "the child exited 0 and wrote no run id\n"
                                  + _tail(spec.log_path), spec.log_path)
             return run_id
+
+
+def _child_env() -> dict:
+    """This process's environment for a step child, with the directory of this ``pysuto``
+    first on ``PYTHONPATH`` so a worktree or test parent never runs another checkout's
+    code. A site-packages directory (an installed wheel) is left off: the child finds it
+    anyway, and ahead of the stdlib on ``PYTHONPATH`` it would shadow it. Both sides are
+    compared resolved, since site-packages is often reached through a symlink."""
+    src = Path(pysuto.__file__).resolve().parents[1]
+    sites = {Path(p).resolve() for p in (*site.getsitepackages(), site.getusersitepackages())}
+    env = dict(os.environ)
+    if src not in sites:
+        env["PYTHONPATH"] = os.pathsep.join(
+            [str(src)] + ([env["PYTHONPATH"]] if env.get("PYTHONPATH") else []))
+    return env
 
 
 def _after(steps: tuple) -> tuple:
