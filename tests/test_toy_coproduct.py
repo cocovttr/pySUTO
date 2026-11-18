@@ -22,7 +22,8 @@ import pandas as pd
 import pytest
 
 from pysuto.acc import AccountingStructure
-from pysuto.cases import load_case, toy, toy_coproduct
+from pysuto.cases import load_case
+from pysuto.tutorial import toy, toy_coproduct
 from pysuto.registry import ConstraintRunRegistry, OptimRunRegistry
 
 REPO = Path(__file__).resolve().parents[1]

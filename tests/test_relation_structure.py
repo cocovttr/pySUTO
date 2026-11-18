@@ -16,7 +16,7 @@ from pathlib import Path
 import pytest
 
 from pysuto.acc import AccountingStructure
-from pysuto.cases.toy import ACC_SPEC
+from pysuto.tutorial.toy import ACC_SPEC
 from pysuto.impute import NetworkImputer
 from pysuto.relation.structure import node_balances, process_recipes
 

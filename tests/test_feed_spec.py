@@ -17,7 +17,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from pysuto.cases import toy
+from pysuto.tutorial import toy
 from pysuto.cases.copper import BACI_FEED, CRUDE_ORE_FEED, ICSG_FEED, icsg_sector_key
 from pysuto.feedpipe import FeedSpec, run_feed
 

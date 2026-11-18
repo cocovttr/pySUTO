@@ -132,7 +132,7 @@ from pysuto.solver import Solver
 from pysuto.stages import run_const, run_imp
 from pysuto.uncprop import KalmanUncProp
 
-_log = get_logger("pysuto.cases.toy")
+_log = get_logger("pysuto.tutorial.toy")
 
 PathLike = Union[str, os.PathLike]
 
@@ -481,8 +481,8 @@ def _metadata(feed_id: str) -> DataFeedMetadata:
         geographical_correlation = geo,
         other_correlation        = oth,
         version                  = 0,
-        person                   = "pysuto.cases.toy",
-        dataset_link             = "synthetic (pysuto.cases.toy.make_feeds)",
+        person                   = "pysuto.tutorial.toy",
+        dataset_link             = "synthetic (pysuto.tutorial.toy.make_feeds)",
     )
 
 
@@ -667,7 +667,7 @@ _PARAM_COLUMNS = [
     "pedigree_geographical_correlation", "pedigree_other_correlation",
     "epsilon", "source", "comment",
 ]
-_SOURCE = "pysuto.cases.toy: a synthetic case; its ground truth uses this nominal value"
+_SOURCE = "pysuto.tutorial.toy: a synthetic case; its ground truth uses this nominal value"
 
 # A concentration row ties an edge's content to its gross mass: "into" rows cover the
 # edges into the sector, "out" rows the edges out of it (the template's use and supply).
@@ -1036,7 +1036,7 @@ def run_stage1(run_root: PathLike, seed: int = SEED,
     """Stage 1: lay out the inputs (:func:`write_inputs`), build the accounting
     structure from the registered acc, then register the three synthetic feeds, each
     run's sidecar recording ``seed``. ``coproduct`` is the variant of
-    :mod:`pysuto.cases.toy_coproduct` (#130).
+    :mod:`pysuto.tutorial.toy_coproduct` (#130).
 
     Returns
     -------

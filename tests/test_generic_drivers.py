@@ -19,7 +19,8 @@ import pandas as pd
 import pytest
 
 from pysuto.case import CaseSpec, check_case
-from pysuto.cases import case_ids, load_case, toy
+from pysuto.cases import case_ids, load_case
+from pysuto.tutorial import toy
 from pysuto.registry import (ConstraintRunRegistry, ImputationRunRegistry,
                              OptimRunRegistry, PsutRunRegistry, UncPropRunRegistry)
 

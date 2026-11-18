@@ -24,7 +24,7 @@ import pytest
 
 import test_toy_case as toy_checks
 from pysuto.acc import AccountingStructure
-from pysuto.cases import toy
+from pysuto.tutorial import toy
 from pysuto.pipeline import ALL_STEPS, Chain, Pipeline
 from pysuto.registry import (ConstraintRunRegistry, ImputationRunRegistry,
                              OptimRunRegistry, PsutRunRegistry, UncPropRunRegistry)
@@ -57,7 +57,7 @@ def file_chain(tmp_path_factory):
     """The same chain through ``--case <file>``, the file re-exporting the toy's CASE."""
     root, cwd = tmp_path_factory.mktemp("toy_file_data"), tmp_path_factory.mktemp("cwd2")
     case_file = cwd / "zinc_case.py"
-    case_file.write_text("from pysuto.cases.toy import CASE\n")
+    case_file.write_text("from pysuto.tutorial.toy import CASE\n")
     proc = _run(cwd, "--case", "./zinc_case.py", "--from", "feed", "--to", "psut",
                 "--data-dir", str(root))
     assert proc.returncode == 0, f"{proc.stdout[-1500:]}\n{proc.stderr[-3000:]}"
